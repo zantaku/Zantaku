@@ -237,8 +237,16 @@ const VideoControls = ({
               <Ionicons name="layers-outline" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.iconButton} onPress={onSubtitlePress}>
-              <Ionicons name="text" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
+            <TouchableOpacity 
+              style={[
+                styles.iconButton,
+                preferences?.subtitlesEnabled && styles.activeIconButton
+              ]} 
+              onPress={onSubtitlePress}
+              accessibilityLabel="Toggle subtitles"
+              accessibilityHint="Press 'c' key to toggle subtitles from keyboard"
+            >
+              <Ionicons name="text" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={preferences?.subtitlesEnabled ? '#FF6B00' : PLAYER_COLORS.TEXT_LIGHT} />
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.iconButton} onPress={onToggleFullscreen}>
@@ -372,6 +380,10 @@ const styles = StyleSheet.create({
     color: PLAYER_COLORS.TEXT_LIGHT,
     marginRight: 4,
     fontWeight: 'bold',
+  },
+  activeIconButton: {
+    backgroundColor: 'rgba(255, 107, 0, 0.3)',
+    borderRadius: 20,
   },
 });
 

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Animated, PanResponder, Dimensions, Pressable, Platform, BackHandler, ScrollView, useColorScheme, TouchableWithoutFeedback, GestureResponderEvent, StyleProp, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, ActivityIndicator, Animated, PanResponder, Dimensions, Pressable, Platform, BackHandler, ScrollView, useColorScheme, TouchableWithoutFeedback, GestureResponderEvent, StyleProp, ViewStyle, Keyboard } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -458,17 +458,26 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '15%',
     alignSelf: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     borderRadius: 10,
-    padding: 10,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    zIndex: 1500,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 0, 0.7)',
   },
   captionFeedbackText: {
     color: '#FFFFFF',
     marginLeft: 10,
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'Avenir' : 'Roboto',
+    fontWeight: '600',
   },
   timestampError: {
     position: 'absolute',
@@ -959,15 +968,27 @@ const PlayerScreen = () => {
   // Function to show temporary caption feedback
   const showCaptionToggleFeedback = (enabled: boolean) => {
     setCaptionFeedbackText(enabled ? 'Captions Enabled' : 'Captions Disabled');
-    setShowCaptionFeedback(true);
     
-    // Hide after 1.5 seconds
+    // If already showing, reset first to restart animation
+    if (showCaptionFeedback) {
+      setShowCaptionFeedback(false);
+      setTimeout(() => {
+        setShowCaptionFeedback(true);
+      }, 50);
+    } else {
+      setShowCaptionFeedback(true);
+    }
+    
+    // Show for slightly longer time (2 seconds)
     setTimeout(() => {
       setShowCaptionFeedback(false);
-    }, 1500);
+    }, 2000);
+    
+    // Log action for debugging
+    console.log(`[CAPTION_TOGGLE] ${enabled ? '✅ Enabled' : '❌ Disabled'} captions`);
   };
   
-  // Update the preferences handler to show feedback
+  // Update the preferences handler to show feedback with AsyncStorage persistence
   const toggleSubtitles = () => {
     const newState = !preferences.subtitlesEnabled;
     console.log(`[SUBTITLE DEBUG] ${newState ? '✅ Enabling' : '❌ Disabling'} subtitles`);
@@ -977,6 +998,15 @@ const PlayerScreen = () => {
       ...prev,
       subtitlesEnabled: newState
     }));
+    
+    // Save preference to AsyncStorage for persistence
+    AsyncStorage.setItem('subtitles_enabled', JSON.stringify(newState))
+      .then(() => {
+        console.log(`[SUBTITLE DEBUG] Saved subtitle preference to storage: ${newState}`);
+      })
+      .catch(err => {
+        console.error(`[SUBTITLE DEBUG] Failed to save subtitle preference: ${err}`);
+      });
     
     // Show feedback to the user
     showCaptionToggleFeedback(newState);
@@ -996,6 +1026,49 @@ const PlayerScreen = () => {
       }
     }
   };
+
+  // Add a keyboard event listener for the 'c' key to toggle captions
+  useEffect(() => {
+    // For web platforms
+    if (Platform.OS === 'web') {
+      const handleKeyDown = (e: any) => {
+        if (e.key && e.key.toLowerCase() === 'c') {
+          toggleSubtitles();
+        }
+      };
+      
+      document.addEventListener('keydown', handleKeyDown);
+      
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, []);
+
+  // Load saved subtitle preference on component mount
+  useEffect(() => {
+    const loadSubtitlePreference = async () => {
+      try {
+        const savedPreference = await AsyncStorage.getItem('subtitles_enabled');
+        if (savedPreference !== null) {
+          const isEnabled = JSON.parse(savedPreference);
+          console.log(`[SUBTITLE DEBUG] Loaded subtitle preference from storage: ${isEnabled}`);
+          
+          // Only update if different from current setting
+          if (isEnabled !== preferences.subtitlesEnabled) {
+            setPreferences(prev => ({
+              ...prev,
+              subtitlesEnabled: isEnabled
+            }));
+          }
+        }
+      } catch (error) {
+        console.error(`[SUBTITLE DEBUG] Error loading subtitle preference: ${error}`);
+      }
+    };
+    
+    loadSubtitlePreference();
+  }, []);
 
   // Improve the handleVideoTap function to detect double taps and respect subtitle dragging
   const handleVideoTap = useCallback((evt: any) => {
@@ -1558,14 +1631,19 @@ const PlayerScreen = () => {
   // Remove offset - set to 0
   const [subtitleOffset, setSubtitleOffset] = useState(0); 
 
-  // Update subtitle display based on current time
+  // Add a new useEffect that depends on subtitles enabled preference
   useEffect(() => {
-    // Don't process if no cues available
-    if (subtitleCues.length === 0) {
-      if (currentSubtitle) {
-        setCurrentSubtitle('');
-      }
-      console.log('[SUBTITLE DEBUG] ℹ️ Subtitles not shown: no cues available');
+    // If subtitles are disabled, clear any displayed subtitle
+    if (!preferences.subtitlesEnabled && currentSubtitle) {
+      setCurrentSubtitle('');
+      console.log('[SUBTITLE DEBUG] ❌ Subtitles disabled, clearing displayed subtitle');
+    }
+  }, [preferences.subtitlesEnabled, currentSubtitle]);
+
+  // Update the useEffect that handles current subtitle display
+  useEffect(() => {
+    // Skip subtitle processing completely if subtitles are disabled or when scrubbing/seeking
+    if (!preferences.subtitlesEnabled || subtitleCues.length === 0 || isScrubbing) {
       return;
     }
 
@@ -1594,7 +1672,7 @@ const PlayerScreen = () => {
         console.log('[SUBTITLE DEBUG] ⏹️ Cleared subtitle at', formatTime(currentTime));
       }
     }
-  }, [currentTime, subtitleCues, currentSubtitle]);
+  }, [currentTime, subtitleCues, currentSubtitle, preferences.subtitlesEnabled, isScrubbing]);
 
   // Add the improved useEffect for language selection
   useEffect(() => {
@@ -3088,6 +3166,34 @@ const PlayerScreen = () => {
   // Add a ref to track previous play state to avoid render loops
   const wasPlayingRef = useRef(false);
 
+  // Add render function for caption feedback indicator
+  const renderCaptionFeedback = () => {
+    if (!showCaptionFeedback) return null;
+    
+    return (
+      <Animated.View 
+        style={[
+          styles.captionFeedback,
+          { 
+            opacity: 1,
+            transform: [{ scale: 1 }]
+          }
+        ]}
+      >
+        <BlurView intensity={70} tint="dark" style={{ borderRadius: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 2 }}>
+            <Ionicons 
+              name={preferences.subtitlesEnabled ? "text" : "text-outline"} 
+              size={24} 
+              color={preferences.subtitlesEnabled ? "#FF6B00" : "#FFFFFF"} 
+            />
+            <Text style={styles.captionFeedbackText}>{captionFeedbackText}</Text>
+          </View>
+        </BlurView>
+      </Animated.View>
+    );
+  };
+
   // Enhanced video component with modern UI
   return (
     <View style={[
@@ -3466,16 +3572,7 @@ const PlayerScreen = () => {
       </Pressable>
       
       {/* Caption toggle feedback */}
-      {showCaptionFeedback && (
-        <View style={styles.captionFeedback}>
-          <ControlButton
-            onPress={toggleSubtitles}
-            icon={preferences.subtitlesEnabled ? "text" : "text-outline"}
-            style={styles.iconButton}
-          />
-          <Text style={styles.captionFeedbackText}>{captionFeedbackText}</Text>
-        </View>
-      )}
+      {renderCaptionFeedback()}
       
       {/* Timestamp error message */}
       {showTimestampError && (
@@ -3493,7 +3590,7 @@ const PlayerScreen = () => {
       )}
       
       {/* Subtitle Display - Improved positioning and styling */}
-      {currentSubtitle && (
+      {preferences.subtitlesEnabled && currentSubtitle && (
         <Animated.View 
           style={[
             styles.subtitleOuterContainer,
