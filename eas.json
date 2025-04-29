@@ -1,0 +1,44 @@
+{
+  "cli": {
+    "version": ">= 7.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "withoutCredentials": true
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64",
+        "env": {
+          "ENABLE_PROGUARD": "true",
+          "ENABLE_HERMES": "true",
+          "ENABLE_SHRINK_RESOURCES": "true"
+        }
+      },
+      "env": {
+        "ANILIST_CLIENT_ID": "23396",
+        "ANILIST_CLIENT_SECRET": "L3EkY2146Yyny15zqLLoyohGQqvjJHVUcEwn1DfK",
+        "ANILIST_REDIRECT_URI": "zantaku://auth/callback",
+        "SUPABASE_URL": "https://kamidb.online/",
+        "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ey AgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

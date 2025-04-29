@@ -1,0 +1,53 @@
+# React Native Project Best Practices Configuration
+
+projectType: reactNative
+documentationPaths: 
+  - README.md
+  - android-build-guide.md
+
+understanding:
+  framework: React Native with Expo
+  language: TypeScript
+  buildSystem: Expo
+
+rules:
+  - name: naming-conventions
+    description: Ensure consistent naming conventions in the project
+    action: Use PascalCase for components, camelCase for functions and variables, and kebab-case for directory names.
+
+  - name: functional-components
+    description: Encourage the use of modern React syntax
+    action: Prefer functional components with hooks (useState, useEffect) over class components.
+
+  - name: state-management
+    description: Optimize global and local state handling
+    action: Use Context and useReducer for global state. For complex state management, consider Zustand or Redux Toolkit.
+
+  - name: styling
+    description: Standardize styling practices
+    action: Utilize StyleSheet.create or styled-components for styling and ensure responsive design using Flexbox.
+
+  - name: secure-storage
+    description: Handle sensitive data securely
+    action: Use react-native-encrypted-storage for secure data storage.
+
+  - name: navigation
+    description: Implement efficient routing strategies
+    action: Use react-navigation and adhere to best practices for configuration, stack, tab, and drawer navigator setups.
+
+  - name: testing
+    description: Encourage thorough testing practices
+    action: Implement unit and integration testing using Jest and Detox. Use snapshot testing for UI consistency.
+
+  - name: error-handling
+    description: Handle errors systematically
+    action: Use global error boundaries and proper logging mechanisms like Sentry.
+
+  - name: performance-optimization
+    description: Ensure optimized app performance
+    action: Use memoization techniques like React.memo(), useCallback, and useMemo to optimize render performance.
+
+behaviours:
+  beforeMakingChanges: Familiarize with the file structure and components for informed modifications.
+  afterMakingChanges: Run `npx expo start` and verify functionality in Expo Go mode.
+  whenTroubleshooting: First attempt to resolve issues by cleaning the build cache and restarting the Expo server.
