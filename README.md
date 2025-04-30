@@ -2,7 +2,7 @@
 
 Your personal companion for anime watching and manga reading. Built with React native for the next generation of Otakus.
 
-![Connect Watch Enjoy](https://media.discordapp.net/attachments/1334433714863603784/1361288259497496596/Connect._Watch._Enjoy..png?ex=6810aafc&is=680f597c&hm=4628a357f57b0ec27d095a9d4bc24a36beaed75ebded68ff1a8291794ed49f59&=&format=webp&quality=lossless&width=1310&height=873)
+![Connect Watch Enjoy]()https://media.discordapp.net/attachments/1334433714863603784/1358334273781891234/SPOILER_ZanTaku_MockUps_Promo.png?ex=68131adf&is=6811c95f&hm=7097a3ac785d170209dc3e695ad88531a7e26db0e2a87c7837437aff8c47a442&=&format=webp&quality=lossless&width=657&height=873
 
 ## ✨ Why Zantaku?
 
@@ -16,8 +16,6 @@ Here's what makes us different:
 - 🔖 Smart progress tracking that remembers where you left off
 - 🌐 Multiple source support for your favorite content
 
-![Latest Top 50](https://media.discordapp.net/attachments/1334433714863603784/1361288255139483748/Latest_Top_50.png?ex=6810aafb&is=680f597b&hm=d9ff581ac573d17d50eaea538fe21326562ae3c2f0f8e19e9c3d1e653d7c9b7a&=&format=webp&quality=lossless&width=1310&height=873)
-
 ## 🎯 Key Features
 
 - 📖 **Universal Reader**
@@ -25,9 +23,7 @@ Here's what makes us different:
   - Light novels with customizable reading experience
   - Web novels with progress tracking
   
-- 📺 **Univerisal 
-
-![Dark Theme](https://media.discordapp.net/attachments/1334433714863603784/1361288260218781796/Change_Theme_-_Dark.png?ex=6810aafc&is=680f597c&hm=14a4bf8235c01fd0a1825516592703376f73725389616d637816bee717f65ada&=&format=webp&quality=lossless&width=1310&height=873)
+- 📺 **Univerisal anime player**
 
 ## 🚀 Quick Start
 
