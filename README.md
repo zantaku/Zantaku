@@ -1,8 +1,6 @@
-# Zantaku 📚
+# Zantaku ![Zantakulogo](https://media.discordapp.net/attachments/1334433005158268958/1367066959505784882/zantakulogoV2.png?ex=68133bd2&is=6811ea52&hm=d7123b06569991629a33660eaea4b6ed2eeadc6e331874d8c594bd47d7025890&=&format=webp&quality=lossless&width=30&height=30)
 
 Your personal companion for anime watching and manga reading. Built with React native for the next generation of Otakus.
-
-![Connect Watch Enjoy]()https://media.discordapp.net/attachments/1334433714863603784/1358334273781891234/SPOILER_ZanTaku_MockUps_Promo.png?ex=68131adf&is=6811c95f&hm=7097a3ac785d170209dc3e695ad88531a7e26db0e2a87c7837437aff8c47a442&=&format=webp&quality=lossless&width=657&height=873
 
 ## ✨ Why Zantaku?
 
@@ -24,6 +22,19 @@ Here's what makes us different:
   - Web novels with progress tracking
   
 - 📺 **Univerisal anime player**
+
+  *More being added*
+
+# 🛠️ For Developers
+
+Built with modern tech for the best experience:
+- **Framework**: React Native + Expo
+- **Language**: TypeScript
+- **UI**: Native Base components
+- **Performance**: FlashList + AsyncStorage optimizations
+
+[View full technical details](docs/technical-overview.md)
+
 
 ## 🚀 Quick Start
 
@@ -51,16 +62,6 @@ Detailed guides available in our `/docs` directory:
 - [Achievements System](docs/README-achievements.md)
 - [And more...](docs/)
 
-## 🛠️ For Developers
-
-Built with modern tech for the best experience:
-- **Framework**: React Native + Expo
-- **Language**: TypeScript
-- **UI**: Native Base components
-- **Performance**: FlashList + AsyncStorage optimizations
-
-[View full technical details](docs/technical-overview.md)
-
 ## 🤝 Contributing
 
 We love contributions that make Zantaku better! 
@@ -78,4 +79,15 @@ See [`TRADEMARK.md`](./TRADEMARK.md) for details.
 
 All documentation in `/docs` is proprietary and confidential.
 While our code is open source under MIT License, documentation requires permission for redistribution.
+
+## Screenshots 
+
+![Screenshot1](https://media.discordapp.net/attachments/1334433005158268958/1367066956322050078/screenshot.png?ex=68133bd1&is=6811ea51&hm=8e6b6a5cb7677bec8cbbae8b29eb2127434ab22d698f1c5c1834dc4d0e84e300&=&format=webp&quality=lossless&width=393&height=873)
+
+![Screenshot2](https://media.discordapp.net/attachments/1334433005158268958/1367066957685456988/screenshot3.png?ex=68133bd1&is=6811ea51&hm=c26746b21a54511e39d841bd52ea752aad5c08f9e2558a1b01e30357bef42038&=&format=webp&quality=lossless&width=393&height=873)
+
+![Screenshot3](https://media.discordapp.net/attachments/1334433005158268958/1367066958750683166/screenshot5.png?ex=68133bd1&is=6811ea51&hm=025724f2fd8b48927c83c1757d7ddac100d256b64ae4fdfe64d5308b3dfa09a3&=&format=webp&quality=lossless&width=393&height=873)
+
+
+
 
