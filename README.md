@@ -2,6 +2,8 @@
 
 Your personal companion for anime watching and manga reading. Built with React native for the next generation of Otakus.
 
+*Download link can be found through the Zantaku website*
+
 ## ✨ Why Zantaku?
 
 We understand the struggle. Anime subscriptions are getting more expensive, and finding free alternatives can be risky with dodgy websites and apps that don't deliver the experience you want. Not to mention the hassle of tracking your progress in notepads or spreadsheets.
@@ -50,9 +52,7 @@ Built with modern tech for the best experience:
    npx expo start
    ```
 
-3. **Start Reading**
-   - Scan QR code with Expo Go
-   - Start exploring your favorite manga and novels!
+3. Read the documentation sections
 
 ## 📚 Documentation
 
