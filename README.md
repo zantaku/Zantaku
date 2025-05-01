@@ -78,7 +78,7 @@ See [`TRADEMARK.md`](./TRADEMARK.md) for details.
 ## 📄 Documentation Notice
 
 All documentation in `/docs` is proprietary and confidential.
-While our code is open source under MIT License, documentation requires permission for redistribution.
+While our code is open source under  `/license.md`, documentation requires permission for redistribution.
 
 ## Screenshots 
 
