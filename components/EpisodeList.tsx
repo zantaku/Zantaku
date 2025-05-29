@@ -57,6 +57,7 @@ interface EpisodeListProps {
   malId?: string;
   coverImage?: string;
   renderControlsInParent?: boolean;
+  mangaTitle?: string;
 }
 
 interface Episode {
@@ -162,8 +163,86 @@ interface ZoroAnimeInfo {
   // Add other fields as needed
 }
 
-// Create a MemoizedEpisodeCard component to resolve TypeScript errors
-const EpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage }: {
+// Create a separate GridEpisodeCard component for grid layouts
+const GridEpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage }: {
+  episode: Episode;
+  onPress: (episode: Episode) => void;
+  currentProgress: number;
+  currentTheme: any;
+  isDarkMode: boolean;
+  coverImage?: string;
+}) => {
+  const isWatched = currentProgress >= episode.number;
+  
+  return (
+    <TouchableOpacity
+      style={[
+        styles.gridEpisodeCard,
+        { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)' },
+        isWatched && styles.watchedGridCard
+      ]}
+      onPress={() => onPress(episode)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.gridThumbnailContainer}>
+        <Image
+          source={{ uri: episode.image || coverImage || '' }}
+          placeholder={PLACEHOLDER_BLUR_HASH}
+          style={[
+            styles.gridEpisodeThumbnail,
+            isWatched && styles.watchedGridThumbnail
+          ]}
+          contentFit="cover"
+          transition={200}
+        />
+        {isWatched && (
+          <View style={styles.gridWatchedBadge}>
+            <FontAwesome5 name="check" size={8} color="#FFFFFF" />
+          </View>
+        )}
+        <View style={styles.gridEpisodeNumberBadge}>
+          <Text style={styles.gridEpisodeNumberText}>
+            {episode.number}
+          </Text>
+        </View>
+      </View>
+      
+      <View style={styles.gridEpisodeContent}>
+        <Text style={[styles.gridEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+          {episode.title || `Episode ${episode.number}`}
+        </Text>
+        
+        {episode.aired && (
+          <Text style={[styles.gridEpisodeMeta, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+            {new Date(episode.aired).toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric'
+            })}
+          </Text>
+        )}
+        
+        <TouchableOpacity 
+          style={[
+            styles.gridWatchButton,
+            isWatched && styles.gridRewatchButton
+          ]}
+          onPress={() => onPress(episode)}
+        >
+          <FontAwesome5 
+            name={isWatched ? "redo" : "play"} 
+            size={10} 
+            color="#FFFFFF" 
+          />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const MemoizedGridEpisodeCard = memo(GridEpisodeCard);
+
+// Create a ListEpisodeCard component for single-column list view
+const ListEpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage }: {
   episode: Episode;
   onPress: (episode: Episode) => void;
   currentProgress: number;
@@ -174,71 +253,129 @@ const EpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDarkMo
   const isWatched = currentProgress >= episode.number;
   const progressPercentage = isWatched ? 100 : 0; // Future: could store partial progress
   
+  // Format the aired date nicely
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return null;
+    const date = new Date(dateString);
+    return date.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+  
   return (
     <TouchableOpacity
       style={[
-        styles.episodeCard,
-        { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)' },
+        styles.listEpisodeCard,
+        { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)' },
+        isWatched && styles.watchedListCard
       ]}
       onPress={() => onPress(episode)}
       activeOpacity={0.7}
     >
-      <View style={styles.thumbnailContainer}>
+      {/* Episode thumbnail */}
+      <View style={styles.listThumbnailContainer}>
         <Image
           source={{ uri: episode.image || coverImage || '' }}
           placeholder={PLACEHOLDER_BLUR_HASH}
           style={[
-            styles.episodeThumbnail,
-            isWatched && styles.watchedThumbnail
+            styles.listEpisodeThumbnail,
+            isWatched && styles.watchedListThumbnail
           ]}
           contentFit="cover"
           transition={200}
         />
         {isWatched && (
-          <View style={styles.watchedBadge}>
-            <FontAwesome5 name="check" size={10} color="#FFFFFF" />
+          <View style={styles.listWatchedBadge}>
+            <FontAwesome5 name="check" size={12} color="#FFFFFF" />
           </View>
         )}
-      </View>
-      
-      <View style={styles.episodeContent}>
-        <View>
-          <View style={styles.episodeHeader}>
-            <Text style={[styles.episodeNumber, { color: '#02A9FF' }]}>
-              EP {episode.number}
-            </Text>
-          </View>
-          
-          <Text style={[styles.episodeTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
-            {episode.title || `Episode ${episode.number}`}
-          </Text>
-          
-          <Text style={[styles.episodeMeta, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
-            {episode.aired ? new Date(episode.aired).toLocaleDateString() : ''} 
-            {episode.duration ? ` • ${episode.duration} min` : ''}
+        <View style={styles.listEpisodeNumberBadge}>
+          <Text style={styles.listEpisodeNumberText}>
+            {episode.number}
           </Text>
         </View>
+      </View>
+      
+      {/* Episode content */}
+      <View style={styles.listEpisodeContent}>
+        <View style={styles.listEpisodeHeader}>
+          <View style={styles.listEpisodeTitleContainer}>
+            <Text style={[styles.listEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+              {episode.title || `Episode ${episode.number}`}
+            </Text>
+            {episode.provider && (
+              <Text style={[styles.listEpisodeProvider, { color: currentTheme.colors.textSecondary }]}>
+                {episode.provider}
+              </Text>
+            )}
+          </View>
+          
+          {/* Episode metadata */}
+          <View style={styles.listEpisodeMetaContainer}>
+            {episode.aired && (
+              <View style={styles.listMetaItem}>
+                <FontAwesome5 name="calendar-alt" size={12} color={currentTheme.colors.textSecondary} />
+                <Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>
+                  {formatDate(episode.aired)}
+                </Text>
+              </View>
+            )}
+            
+            {episode.duration && (
+              <View style={styles.listMetaItem}>
+                <FontAwesome5 name="clock" size={12} color={currentTheme.colors.textSecondary} />
+                <Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>
+                  {episode.duration}m
+                </Text>
+              </View>
+            )}
+            
+            {(episode.isFiller || episode.isRecap) && (
+              <View style={[
+                styles.listEpisodeTypeBadge,
+                { backgroundColor: episode.isFiller ? '#F44336' : '#2196F3' }
+              ]}>
+                <Text style={styles.listEpisodeTypeText}>
+                  {episode.isFiller ? 'Filler' : 'Recap'}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
         
-        <View style={styles.cardFooter}>
-          {/* Progress bar */}
-          <View style={styles.progressBarContainer}>
-            <View 
-              style={[
-                styles.progressBarFill, 
-                { width: `${progressPercentage}%` }
-              ]} 
-            />
+        {/* Progress bar and watch button */}
+        <View style={styles.listEpisodeFooter}>
+          <View style={styles.listProgressContainer}>
+            <View style={[styles.listProgressBar, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+              <View 
+                style={[
+                  styles.listProgressFill, 
+                  { width: `${progressPercentage}%` }
+                ]} 
+              />
+            </View>
+            <Text style={[styles.listProgressText, { color: currentTheme.colors.textSecondary }]}>
+              {isWatched ? 'Watched' : 'Not watched'}
+            </Text>
           </View>
           
           <TouchableOpacity 
             style={[
-              styles.watchButton,
-              isWatched && styles.rewatchButton
+              styles.listWatchButton,
+              isWatched && styles.listRewatchButton
             ]}
             onPress={() => onPress(episode)}
           >
-            <Text style={styles.watchButtonText}>
-              {isWatched ? "Rewatch" : "Watch ▶"}
+            <FontAwesome5 
+              name={isWatched ? "redo" : "play"} 
+              size={14} 
+              color="#FFFFFF" 
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.listWatchButtonText}>
+              {isWatched ? "Rewatch" : "Watch"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -247,7 +384,7 @@ const EpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDarkMo
   );
 };
 
-const MemoizedEpisodeCard = memo(EpisodeCard);
+const MemoizedListEpisodeCard = memo(ListEpisodeCard);
 
 const ITEMS_PER_PAGE = 12; // 2x6 grid
 const NUM_COLUMNS = 2;
@@ -284,7 +421,7 @@ const fetchWithRetry = async (url: string, options: any = {}, maxRetries = 3) =>
   throw lastError;
 };
 
-export default function EpisodeList({ episodes: initialEpisodes, loading: initialLoading, animeTitle, anilistId, malId, coverImage, renderControlsInParent = false }: EpisodeListProps) {
+export default function EpisodeList({ episodes: initialEpisodes, loading: initialLoading, animeTitle, anilistId, malId, coverImage, renderControlsInParent = false, mangaTitle }: EpisodeListProps) {
   const { isDarkMode, currentTheme } = useTheme();
   const router = useRouter();
   
@@ -335,6 +472,67 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
   // Add a reference to the FlashList with proper typing
   const flashListRef = useRef<FlashList<Episode>>(null);
 
+  // Add state for user's watch progress
+  const [userProgress, setUserProgress] = useState<{
+    watchedEpisodes: number;
+    lastWatchedDate?: string;
+  } | null>(null);
+
+  // Add function to fetch user's watch progress from AniList
+  const fetchUserProgress = useCallback(async () => {
+    if (!anilistId) return;
+    
+    try {
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      if (!token) return;
+      
+      const query = `
+        query ($mediaId: Int) {
+          Media(id: $mediaId, type: ANIME) {
+            mediaListEntry {
+              progress
+              updatedAt
+              status
+            }
+          }
+        }
+      `;
+      
+      const response = await axios.post(
+        ANILIST_GRAPHQL_ENDPOINT,
+        {
+          query,
+          variables: {
+            mediaId: parseInt(anilistId)
+          }
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+      
+      if (response.data?.data?.Media?.mediaListEntry) {
+        const entry = response.data.data.Media.mediaListEntry;
+        setUserProgress({
+          watchedEpisodes: entry.progress || 0,
+          lastWatchedDate: entry.updatedAt ? new Date(entry.updatedAt * 1000).toISOString() : undefined
+        });
+        setCurrentProgress(entry.progress || 0);
+        console.log(`User progress: ${entry.progress} episodes watched`);
+      }
+    } catch (error) {
+      console.error('Error fetching user progress:', error);
+    }
+  }, [anilistId]);
+
+  // Fetch user progress when component mounts
+  useEffect(() => {
+    fetchUserProgress();
+  }, [fetchUserProgress]);
+
   // Add function to merge episodes from Jikan and Zoro
   const mergeEpisodes = useCallback((jikanEpisodes: Episode[], zoroEpisodes: any[]): Episode[] => {
     // Create a map of all Jikan episodes by episode number
@@ -379,16 +577,44 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     
     console.log(`Merged episode list contains ${mergedEpisodes.length} episodes`);
     
-    // Update the latest episode info
+    // Update the latest episode info with more accurate data
     if (mergedEpisodes.length > 0) {
+      // Find the actual latest episode (highest episode number)
       const latestEp = mergedEpisodes.reduce((latest, current) => 
         current.number > latest.number ? current : latest, mergedEpisodes[0]);
-        
+      
+      // Get the most recent aired episode (prefer episodes with aired dates)
+      const airedEpisodes = mergedEpisodes.filter(ep => ep.aired);
+      let mostRecentAired = latestEp;
+      
+      if (airedEpisodes.length > 0) {
+        mostRecentAired = airedEpisodes.reduce((latest, current) => {
+          if (!latest.aired || !current.aired) return latest;
+          return new Date(current.aired) > new Date(latest.aired) ? current : latest;
+        }, airedEpisodes[0]);
+      }
+      
+      // Prioritize episodes from HiAnime/Zoro as they tend to be more up-to-date
+      const hiAnimeEpisodes = mergedEpisodes.filter(ep => ep.provider === 'Zoro' || ep.provider === 'HiAnime');
+      let newestUploadedEpisode = latestEp;
+      
+      if (hiAnimeEpisodes.length > 0) {
+        // Get the highest numbered episode from HiAnime/Zoro
+        newestUploadedEpisode = hiAnimeEpisodes.reduce((latest, current) => 
+          current.number > latest.number ? current : latest, hiAnimeEpisodes[0]);
+      }
+      
+      // Use the newest uploaded episode if it's higher than the most recent aired
+      const episodeToShow = newestUploadedEpisode.number >= (mostRecentAired?.number || 0) ? 
+        newestUploadedEpisode : mostRecentAired;
+      
       setLatestEpisodeInfo({
-        number: latestEp.number,
-        date: latestEp.aired || new Date().toISOString(),
-        source: latestEp.provider || 'Jikan'
+        number: episodeToShow.number,
+        date: episodeToShow.aired || new Date().toISOString(),
+        source: episodeToShow.provider || 'Jikan'
       });
+      
+      console.log(`Latest uploaded episode: Episode ${episodeToShow.number} from ${episodeToShow.provider || 'Jikan'}`);
     }
     
     return mergedEpisodes;
@@ -396,10 +622,12 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
   // Add function to fetch episodes from HiAnime
   const fetchHiAnimeEpisodes = useCallback(async (): Promise<void> => {
-    if (!animeTitle) return;
+    // Use manga title if available, otherwise fall back to anime title
+    const searchTitle = mangaTitle || animeTitle;
+    if (!searchTitle) return;
     
     try {
-      console.log(`Fetching episodes from HiAnime (Zoro) for anime: ${animeTitle}`);
+      console.log(`Fetching episodes from HiAnime (Zoro) for: ${searchTitle}${mangaTitle ? ' (using manga title)' : ' (using anime title)'}`);
       setIsBackgroundRefreshing(true);
       setLoadingState({
         currentPage: 0,
@@ -409,7 +637,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       });
       
       // Create a URL-safe version of the title for the API request
-      const encodedTitle = encodeURIComponent(animeTitle);
+      const encodedTitle = encodeURIComponent(searchTitle);
       
       // First, search for the anime with retry mechanism
       const searchUrl = `${CONSUMET_API_BASE}/${encodedTitle}?type=1`;
@@ -418,7 +646,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       const results = response.data.results || [];
       
       if (!results.length) {
-        console.log(`No results found on HiAnime (Zoro) for ${animeTitle}`);
+        console.log(`No results found on HiAnime (Zoro) for ${searchTitle}`);
         return;
       }
       
@@ -428,7 +656,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       // 3. Then try contains match
       // 4. Finally fallback to first result
       
-      const normalizedSearchTitle = animeTitle.toLowerCase().trim();
+      const normalizedSearchTitle = searchTitle.toLowerCase().trim();
       
       // Try exact match first (case insensitive)
       let matchedAnime = results.find((anime: any) => 
@@ -436,7 +664,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       );
       
       // For popular anime like "ONE PIECE", prioritize exact matching
-      if (!matchedAnime && (animeTitle === "ONE PIECE" || animeTitle === "One Piece")) {
+      if (!matchedAnime && (searchTitle === "ONE PIECE" || searchTitle === "One Piece")) {
         matchedAnime = results.find((anime: any) => 
           anime.title === "One Piece" || 
           anime.title === "ONE PIECE"
@@ -465,7 +693,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       }
       
       if (!matchedAnime) {
-        console.log(`Could not find a match for ${animeTitle} in Zoro results`);
+        console.log(`Could not find a match for ${searchTitle} in Zoro results`);
         return;
       }
       
@@ -528,7 +756,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     } finally {
       setIsBackgroundRefreshing(false);
     }
-  }, [animeTitle, anilistId, malId, currentEpisodes, coverImage, mergeEpisodes, saveEpisodesToCache]);
+  }, [mangaTitle, animeTitle, anilistId, malId, currentEpisodes, coverImage, mergeEpisodes, saveEpisodesToCache]);
 
   // Add effect to fetch HiAnime episodes after initial load
   useEffect(() => {
@@ -744,6 +972,14 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
       // Update local progress state
       setCurrentProgress(episodeNumber);
+      
+      // Update user progress state to reflect the new progress immediately
+      setUserProgress(prev => ({
+        watchedEpisodes: episodeNumber,
+        lastWatchedDate: new Date().toISOString()
+      }));
+      
+      console.log(`Progress synced: Episode ${episodeNumber}`);
     } catch (error) {
       console.error('Error syncing progress:', error);
     }
@@ -964,6 +1200,77 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     }
   }, [anilistId, animeTitle]);
 
+  // Add function to fetch airing schedule from AniList
+  const fetchAiringSchedule = useCallback(async () => {
+    if (!anilistId) return;
+    
+    try {
+      const query = `
+        query ($id: Int) {
+          Media(id: $id, type: ANIME) {
+            nextAiringEpisode {
+              episode
+              airingAt
+              timeUntilAiring
+            }
+            status
+          }
+        }
+      `;
+      
+      const response = await axios.post(
+        ANILIST_GRAPHQL_ENDPOINT,
+        {
+          query,
+          variables: {
+            mediaId: parseInt(anilistId)
+          }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+      
+      if (response.data?.data?.Media) {
+        const media = response.data.data.Media;
+        if (media.nextAiringEpisode) {
+          setAiringSchedule({
+            nextEpisode: media.nextAiringEpisode.episode,
+            nextAiringAt: media.nextAiringEpisode.airingAt,
+            timeUntilAiring: media.nextAiringEpisode.timeUntilAiring,
+            status: media.status
+          });
+          
+          // Calculate time until airing
+          const timeUntil = media.nextAiringEpisode.timeUntilAiring;
+          if (timeUntil) {
+            const days = Math.floor(timeUntil / (24 * 60 * 60));
+            const hours = Math.floor((timeUntil % (24 * 60 * 60)) / (60 * 60));
+            const minutes = Math.floor((timeUntil % (60 * 60)) / 60);
+            
+            let timeString = '';
+            if (days > 0) timeString += `${days}d `;
+            if (hours > 0) timeString += `${hours}h `;
+            if (minutes > 0 && days === 0) timeString += `${minutes}m`;
+            
+            setTimeUntilAiring(timeString.trim() || 'Soon');
+          }
+        } else {
+          setAiringSchedule({ status: media.status });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching airing schedule:', error);
+    }
+  }, [anilistId]);
+
+  // Fetch airing schedule when component mounts
+  useEffect(() => {
+    fetchAiringSchedule();
+  }, [fetchAiringSchedule]);
+
   // Render the header with airing info and tabs
   const renderHeader = () => (
     <View style={{ backgroundColor: 'transparent' }}>
@@ -1015,9 +1322,9 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 </>
               )}
               
-              {/* Always show next episode info from airing schedule if available */}
+              {/* Show next episode info from airing schedule if available */}
               {airingSchedule?.nextEpisode && airingSchedule.status === 'RELEASING' && (
-                <Text style={[styles.nextEpisodeText, { color: currentTheme.colors.textSecondary }]}>
+                <Text style={[styles.nextEpisodeText, { color: currentTheme.colors.textSecondary, marginTop: 4 }]}>
                   Next: Episode {airingSchedule.nextEpisode} - {timeUntilAiring ? `Airing in ${timeUntilAiring}` : 'Coming soon'}
                 </Text>
               )}
@@ -1205,14 +1512,25 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
           data={displayedEpisodes}
           renderItem={({ item }) => (
             <View style={styles.cardWrapper}>
-              <MemoizedEpisodeCard
-                episode={item}
-                onPress={handleEpisodePress}
-                currentProgress={currentProgress}
-                currentTheme={currentTheme}
-                isDarkMode={isDarkMode}
-                coverImage={coverImage}
-              />
+              {columnCount === 1 ? (
+                <MemoizedListEpisodeCard
+                  episode={item}
+                  onPress={handleEpisodePress}
+                  currentProgress={currentProgress}
+                  currentTheme={currentTheme}
+                  isDarkMode={isDarkMode}
+                  coverImage={coverImage}
+                />
+              ) : (
+                <MemoizedGridEpisodeCard
+                  episode={item}
+                  onPress={handleEpisodePress}
+                  currentProgress={currentProgress}
+                  currentTheme={currentTheme}
+                  isDarkMode={isDarkMode}
+                  coverImage={coverImage}
+                />
+              )}
             </View>
           )}
           numColumns={columnCount}
@@ -1240,14 +1558,25 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
           data={episodeRanges[activeTab]?.length > 0 ? episodeRanges[activeTab] : currentEpisodes}
           renderItem={({ item: episode }) => (
             <View style={styles.cardWrapper}>
-              <MemoizedEpisodeCard
-                episode={episode as Episode}
-                onPress={handleEpisodePress}
-                currentProgress={currentProgress}
-                currentTheme={currentTheme}
-                isDarkMode={isDarkMode}
-                coverImage={coverImage}
-              />
+              {columnCount === 1 ? (
+                <MemoizedListEpisodeCard
+                  episode={episode as Episode}
+                  onPress={handleEpisodePress}
+                  currentProgress={currentProgress}
+                  currentTheme={currentTheme}
+                  isDarkMode={isDarkMode}
+                  coverImage={coverImage}
+                />
+              ) : (
+                <MemoizedGridEpisodeCard
+                  episode={episode as Episode}
+                  onPress={handleEpisodePress}
+                  currentProgress={currentProgress}
+                  currentTheme={currentTheme}
+                  isDarkMode={isDarkMode}
+                  coverImage={coverImage}
+                />
+              )}
             </View>
           )}
           estimatedItemSize={columnCount === 1 ? 120 : columnCount === 2 ? 200 : 260}
@@ -1819,5 +2148,245 @@ const styles = StyleSheet.create({
     color: '#02A9FF',
     fontWeight: '600',
     fontSize: 14,
+  },
+  gridEpisodeCard: {
+    flexDirection: 'column',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 12,
+    marginVertical: 4,
+    marginHorizontal: 4,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+    aspectRatio: 0.75, // Make it more rectangular for grid
+  },
+  gridThumbnailContainer: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: 16/9,
+    marginBottom: 8,
+  },
+  gridEpisodeThumbnail: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  gridWatchedBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#02A9FF',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gridEpisodeContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  gridEpisodeMeta: {
+    fontSize: 11,
+    marginBottom: 6,
+  },
+  gridWatchButton: {
+    backgroundColor: '#02A9FF',
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  gridRewatchButton: {
+    backgroundColor: '#0277B5',
+  },
+  watchedGridCard: {
+    borderWidth: 1,
+    borderColor: '#02A9FF',
+    opacity: 0.8,
+  },
+  watchedGridThumbnail: {
+    opacity: 0.7,
+    borderWidth: 1,
+    borderColor: '#02A9FF',
+  },
+  gridEpisodeNumberBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(2, 169, 255, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  gridEpisodeNumberText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  listEpisodeCard: {
+    flexDirection: 'row',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 10,
+    marginVertical: 6,
+    marginHorizontal: 2,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  listThumbnailContainer: {
+    position: 'relative',
+  },
+  listEpisodeThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  listWatchedThumbnail: {
+    opacity: 0.7,
+    borderWidth: 1,
+    borderColor: '#02A9FF',
+  },
+  listWatchedBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 16,
+    backgroundColor: '#02A9FF',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listEpisodeContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  listEpisodeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  listEpisodeTitleContainer: {
+    flex: 1,
+  },
+  listEpisodeTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  listEpisodeProvider: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  listEpisodeMetaContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  listMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  listMetaText: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  listEpisodeFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  listProgressContainer: {
+    height: 4,
+    flex: 1,
+    backgroundColor: '#444',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  listProgressFill: {
+    height: '100%',
+    backgroundColor: '#02A9FF',
+    borderRadius: 2,
+  },
+  listProgressText: {
+    fontSize: 12,
+    color: '#fff',
+  },
+  listWatchButton: {
+    backgroundColor: '#02A9FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 70,
+  },
+  listRewatchButton: {
+    backgroundColor: '#0277B5',
+  },
+  listWatchButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  watchedListCard: {
+    borderWidth: 1,
+    borderColor: '#02A9FF',
+    opacity: 0.9,
+  },
+  listEpisodeNumberBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(2, 169, 255, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  listEpisodeNumberText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  listEpisodeTypeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  listEpisodeTypeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  listProgressBar: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  watchedListThumbnail: {
+    opacity: 0.7,
+    borderWidth: 1,
+    borderColor: '#02A9FF',
   },
 }); 

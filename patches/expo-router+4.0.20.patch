@@ -1,0 +1,22 @@
+diff --git a/node_modules/expo-router/build/ExpoRoot.js b/node_modules/expo-router/build/ExpoRoot.js
+index c3a25aa..d5b2e7e 100644
+--- a/node_modules/expo-router/build/ExpoRoot.js
++++ b/node_modules/expo-router/build/ExpoRoot.js
+@@ -97,14 +97,14 @@ function ContextNavigator({ context, location: initialLocation = initialUrl, wra
+     });
+     (0, useDomComponentNavigation_1.useDomComponentNavigation)(store);
+     if (store.shouldShowTutorial()) {
+-        SplashScreen.hideAsync();
++        // Always call all hooks before conditional returns
++        const Component = store.rootComponent;
++        SplashScreen.hideAsync();
+         if (process.env.NODE_ENV === 'development') {
+             const Tutorial = require('./onboard/Tutorial').Tutorial;
+             return (<WrapperComponent>
+           <Tutorial />
+         </WrapperComponent>);
+-        }
+-        else {
+             // Ensure tutorial styles are stripped in production.
+             return null;
+         }

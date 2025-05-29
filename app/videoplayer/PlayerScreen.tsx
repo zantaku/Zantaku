@@ -213,6 +213,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
+    // Ensure container takes full available space
+    width: '100%',
+    height: '100%',
   },
   landscapeVideoContainer: {
     // Any landscape-specific container styles for video
@@ -221,6 +224,12 @@ const styles = StyleSheet.create({
     // Any portrait-specific container styles for video
   },
   video: {
+    // Use absolute positioning to ensure video takes full container space
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
     backgroundColor: '#000',
@@ -803,6 +812,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Avenir-Medium' : 'Roboto',
   },
+  toastContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 5,
+    padding: 10,
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  toastContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'Avenir' : 'Roboto',
+    marginLeft: 5,
+  },
 });
 
 // Define interface for control button props
@@ -1069,6 +1098,79 @@ const PlayerScreen = () => {
     
     loadSubtitlePreference();
   }, []);
+
+  // Add useEffect to detect intro/outro sections and handle auto-skip
+  useEffect(() => {
+    if (!introOutroTimestamps || duration === 0) return;
+
+    const { introStart, introEnd, outroStart, outroEnd } = introOutroTimestamps;
+
+    // Check if we're in intro section
+    if (introStart > 0 && introEnd > 0 && currentTime >= introStart && currentTime <= introEnd) {
+      // Show intro toast notification
+      if (!showIntroToast) {
+        setShowIntroToast(true);
+        console.log(`[INTRO_DETECTION] 🎬 Intro detected at ${formatTime(currentTime)} (${formatTime(introStart)}-${formatTime(introEnd)})`);
+        
+        // Hide toast after 3 seconds
+        setTimeout(() => setShowIntroToast(false), 3000);
+      }
+
+      // Auto-skip intro if enabled
+      if (preferences.markerSettings?.autoSkipIntro && videoRef.current) {
+        console.log(`[AUTO_SKIP] ⏩ Auto-skipping intro to ${formatTime(introEnd)}`);
+        videoRef.current.setPositionAsync(introEnd * 1000);
+        setShowIntroToast(false);
+        return;
+      }
+
+      // Show skip button if not auto-skipping
+      if (!showSkipIntroButton && preferences.markerSettings?.showMarkers) {
+        setShowSkipIntroButton(true);
+      }
+    } else {
+      // Hide intro button and toast when not in intro section
+      if (showSkipIntroButton) {
+        setShowSkipIntroButton(false);
+      }
+      if (showIntroToast) {
+        setShowIntroToast(false);
+      }
+    }
+
+    // Check if we're in outro section
+    if (outroStart > 0 && outroEnd > 0 && currentTime >= outroStart && currentTime <= outroEnd) {
+      // Show outro toast notification
+      if (!showOutroToast) {
+        setShowOutroToast(true);
+        console.log(`[OUTRO_DETECTION] 🎬 Outro detected at ${formatTime(currentTime)} (${formatTime(outroStart)}-${formatTime(outroEnd)})`);
+        
+        // Hide toast after 3 seconds
+        setTimeout(() => setShowOutroToast(false), 3000);
+      }
+
+      // Auto-skip outro if enabled
+      if (preferences.markerSettings?.autoSkipOutro && videoRef.current) {
+        console.log(`[AUTO_SKIP] ⏩ Auto-skipping outro, starting next episode countdown`);
+        handleVideoEnd();
+        setShowOutroToast(false);
+        return;
+      }
+
+      // Show skip button if not auto-skipping
+      if (!showSkipOutroButton && preferences.markerSettings?.showMarkers) {
+        setShowSkipOutroButton(true);
+      }
+    } else {
+      // Hide outro button and toast when not in outro section
+      if (showSkipOutroButton) {
+        setShowSkipOutroButton(false);
+      }
+      if (showOutroToast) {
+        setShowOutroToast(false);
+      }
+    }
+  }, [currentTime, introOutroTimestamps, preferences.markerSettings, showSkipIntroButton, showSkipOutroButton, showIntroToast, showOutroToast, duration, videoRef, handleVideoEnd, formatTime]);
 
   // Improve the handleVideoTap function to detect double taps and respect subtitle dragging
   const handleVideoTap = useCallback((evt: any) => {
@@ -2113,6 +2215,13 @@ const PlayerScreen = () => {
           const position = JSON.parse(savedPosition);
           subtitlePositionRef.current = position;
           setSubtitlePosition(position);
+          
+          // Set the animated values to the saved position
+          subtitleAnimX.setOffset(position.x);
+          subtitleAnimY.setOffset(position.y);
+          subtitleAnimX.setValue(0);
+          subtitleAnimY.setValue(0);
+          
           console.log('[SUBTITLE DEBUG] ✅ Loaded saved subtitle position:', position);
         }
       } catch (error) {
@@ -2129,7 +2238,9 @@ const PlayerScreen = () => {
     subtitlePositionRef.current = resetPosition;
     setSubtitlePosition(resetPosition);
     
-    // Reset animated values
+    // Reset animated values and clear any offsets
+    subtitleAnimX.setOffset(0);
+    subtitleAnimY.setOffset(0);
     subtitleAnimX.setValue(0);
     subtitleAnimY.setValue(0);
     
@@ -2665,6 +2776,57 @@ const PlayerScreen = () => {
       console.error(`[PLAYBACK_ERROR] ❌ ${status.error?.toString() || 'Unknown playback error'}`);
       handleError(status.error?.toString() || 'Unknown playback error');
     }
+
+    // Add intro/outro detection logic
+    if (status.isLoaded && introOutroTimestamps && duration > 0) {
+      const currentTimeSeconds = status.positionMillis / 1000;
+      const { introStart, introEnd, outroStart, outroEnd } = introOutroTimestamps;
+
+      // Check if we're in intro section
+      if (introStart > 0 && introEnd > 0 && currentTimeSeconds >= introStart && currentTimeSeconds <= introEnd) {
+        // Auto-skip intro if enabled
+        if (preferences.markerSettings?.autoSkipIntro && videoRef.current) {
+          console.log(`[AUTO_SKIP] ⏩ Auto-skipping intro to ${formatTime(introEnd)}`);
+          videoRef.current.setPositionAsync(introEnd * 1000);
+          return;
+        }
+
+        // Show skip button if not auto-skipping
+        if (!showSkipIntroButton && preferences.markerSettings?.showMarkers) {
+          setShowSkipIntroButton(true);
+        }
+      } else {
+        // Hide intro button when not in intro section
+        if (showSkipIntroButton) {
+          setShowSkipIntroButton(false);
+        }
+      }
+
+      // Check if we're in outro section
+      if (outroStart > 0 && outroEnd > 0 && currentTimeSeconds >= outroStart && currentTimeSeconds <= outroEnd) {
+        // Auto-skip outro if enabled
+        if (preferences.markerSettings?.autoSkipOutro && videoRef.current) {
+          console.log(`[AUTO_SKIP] ⏩ Auto-skipping outro, starting next episode countdown`);
+          startNextEpisodeCountdown();
+          return;
+        }
+
+        // Show skip button if not auto-skipping
+        if (!showSkipOutroButton && preferences.markerSettings?.showMarkers) {
+          setShowSkipOutroButton(true);
+        }
+      } else {
+        // Hide outro button when not in outro section
+        if (showSkipOutroButton) {
+          setShowSkipOutroButton(false);
+        }
+      }
+
+      // Start next episode countdown when video is near the end (last 30 seconds)
+      if (status.durationMillis && currentTimeSeconds >= (status.durationMillis / 1000) - 30 && !showNextEpisodeCountdown) {
+        startNextEpisodeCountdown();
+      }
+    }
   };
 
   // Add a function to start the next episode countdown
@@ -2867,44 +3029,57 @@ const PlayerScreen = () => {
   const subtitlePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt, gestureState) => {
         setIsDraggingSubtitle(true);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const { dx, dy } = gestureState;
         
-        // Update subtitle position based on drag
-        subtitleAnimX.setValue(dx);
-        subtitleAnimY.setValue(dy);
-        
-        // Schedule position update
-        if (!subtitlePositionRef.current.updateScheduled) {
-          requestAnimationFrame(() => {
-            const newPosition = {
-              x: subtitlePositionRef.current.x + dx,
-              y: subtitlePositionRef.current.y + dy,
-              updateScheduled: false
-            };
-            
-            subtitlePositionRef.current = newPosition;
-            setSubtitlePosition(newPosition);
-            
-            // Reset animated values
-            subtitleAnimX.setValue(0);
-            subtitleAnimY.setValue(0);
-          });
-          
-          subtitlePositionRef.current.updateScheduled = true;
-        }
+        // Store the initial position when drag starts by setting offset
+        subtitleAnimX.setOffset(subtitlePositionRef.current.x);
+        subtitleAnimY.setOffset(subtitlePositionRef.current.y);
+        subtitleAnimX.setValue(0);
+        subtitleAnimY.setValue(0);
       },
-      onPanResponderRelease: () => {
+      onPanResponderMove: (evt, gestureState) => {
+        // Smoothly update the animated values to follow finger movement
+        subtitleAnimX.setValue(gestureState.dx);
+        subtitleAnimY.setValue(gestureState.dy);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
         setIsDraggingSubtitle(false);
+        
+        // Calculate final position by combining offset and gesture
+        const finalX = subtitlePositionRef.current.x + gestureState.dx;
+        const finalY = subtitlePositionRef.current.y + gestureState.dy;
+        
+        // Update the position reference
+        subtitlePositionRef.current = {
+          x: finalX,
+          y: finalY,
+          updateScheduled: false
+        };
+        
+        // Update the state for UI (like showing reset button)
+        setSubtitlePosition({ x: finalX, y: finalY });
+        
+        // Flatten the offset into the value and reset offset
+        subtitleAnimX.flattenOffset();
+        subtitleAnimY.flattenOffset();
         
         // Save subtitle position to AsyncStorage
         AsyncStorage.setItem('subtitlePosition', JSON.stringify({
-          x: subtitlePositionRef.current.x,
-          y: subtitlePositionRef.current.y
-        }));
+          x: finalX,
+          y: finalY
+        })).catch(error => {
+          console.error('Error saving subtitle position:', error);
+        });
+      },
+      onPanResponderTerminate: (evt, gestureState) => {
+        // Handle gesture termination (e.g., by another gesture)
+        setIsDraggingSubtitle(false);
+        
+        // Flatten offset to maintain current position
+        subtitleAnimX.flattenOffset();
+        subtitleAnimY.flattenOffset();
       }
     })
   ).current;
@@ -3194,6 +3369,27 @@ const PlayerScreen = () => {
     );
   };
 
+  // Update screen dimensions when device rotates or screen changes
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      console.log(`[SCREEN_CHANGE] 📱 Screen dimensions updated: ${window.width}x${window.height}`);
+      setScreenDimensions({
+        width: window.width,
+        height: window.height
+      });
+    });
+
+    return () => {
+      if (subscription?.remove) {
+        subscription.remove();
+      }
+    };
+  }, []);
+
+  // Add state for intro/outro toast notifications
+  const [showIntroToast, setShowIntroToast] = useState(false);
+  const [showOutroToast, setShowOutroToast] = useState(false);
+
   // Enhanced video component with modern UI
   return (
     <View style={[
@@ -3235,7 +3431,11 @@ const PlayerScreen = () => {
               handleError(`Video error: ${error}`);
             }}
             onLoadStart={() => console.log(`[VIDEO_LIFECYCLE] 🔄 Load started`)}
-            onLoad={(status) => console.log(`[VIDEO_LIFECYCLE] ✅ Load complete: ${JSON.stringify(status)}`)}
+            onLoad={(status) => {
+              console.log(`[VIDEO_LIFECYCLE] ✅ Load complete`);
+              console.log(`[VIDEO_SCALING] 📱 Screen resolution: ${screenWidth}x${screenHeight}`);
+              console.log(`[VIDEO_SCALING] 🔧 Current scaling mode: ${scalingMode}`);
+            }}
             onReadyForDisplay={() => console.log(`[VIDEO_LIFECYCLE] 🎬 Ready for display`)}
             rate={playbackSpeed}
             volume={volume}
@@ -3589,8 +3789,52 @@ const PlayerScreen = () => {
         </TouchableOpacity>
       )}
       
-      {/* Subtitle Display - Improved positioning and styling */}
+      {/* Subtitle Display - Modern and clean design */}
       {preferences.subtitlesEnabled && currentSubtitle && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 100, // Positioned above controls
+            left: 0,
+            right: 0,
+            zIndex: 50000,
+            elevation: 50000,
+            alignItems: 'center',
+            paddingHorizontal: 20, // Add side padding
+          }}
+        >
+          <BlurView
+            intensity={60}
+            tint="dark"
+            style={{
+              borderRadius: 12, // Rounded corners
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              maxWidth: '90%', // Not full width
+              alignItems: 'center',
+              // Add subtle border
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+            }}
+          >
+            <Text style={{
+              color: '#FFFFFF',
+              fontSize: 16,
+              fontWeight: '500',
+              textAlign: 'center',
+              lineHeight: 22,
+              textShadowColor: 'rgba(0, 0, 0, 0.8)',
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 2,
+            }}>
+              {currentSubtitle}
+            </Text>
+          </BlurView>
+        </View>
+      )}
+
+      {/* Original animated subtitle (keeping for future drag functionality) */}
+      {/* {preferences.subtitlesEnabled && currentSubtitle && (
         <Animated.View 
           style={[
             styles.subtitleOuterContainer,
@@ -3603,9 +3847,11 @@ const PlayerScreen = () => {
                 { translateX: subtitleAnimX }, // Use animated value instead of state
                 { translateY: subtitleAnimY }  // Use animated value instead of state
               ],
-              zIndex: 9999,
+              zIndex: 10000, // Increased z-index to ensure visibility above video
               // Add hardware acceleration hints
               backfaceVisibility: 'hidden',
+              // Ensure subtitle is always visible above video content
+              elevation: 10000, // For Android
             }
           ]}
           {...subtitlePanResponder.panHandlers}
@@ -3613,7 +3859,7 @@ const PlayerScreen = () => {
           onResponderGrant={(evt) => evt.stopPropagation()}
         >
           <BlurView 
-            intensity={40 * preferences.subtitleStyle.backgroundOpacity} 
+            intensity={40} // Fixed: removed dependency on potentially undefined backgroundOpacity
             tint="dark" 
             style={[
               styles.subtitleContainer,
@@ -3624,9 +3870,9 @@ const PlayerScreen = () => {
               <Text style={[
                 styles.subtitleText, 
                 { 
-                  fontSize: preferences.subtitleStyle.fontSize,
-                  color: preferences.subtitleStyle.textColor,
-                  fontWeight: preferences.subtitleStyle.boldText ? 'bold' : 'normal'
+                  fontSize: preferences.subtitleStyle?.fontSize || 16, // Added safe fallback
+                  color: preferences.subtitleStyle?.textColor || '#FFFFFF', // Added safe fallback
+                  fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal'
                 }
               ]}>
               {currentSubtitle}
@@ -3645,7 +3891,7 @@ const PlayerScreen = () => {
             </View>
           </BlurView>
         </Animated.View>
-      )}
+      )} */}
 
       {/* Subtitle Error Message */}
       {subtitleError && preferences.subtitlesEnabled && (
@@ -3663,6 +3909,36 @@ const PlayerScreen = () => {
           <BlurView intensity={80} tint="dark" style={styles.subtitleErrorContent}>
             <FontAwesome5 name="exclamation-triangle" size={14} color="#FFCC00" />
             <Text style={styles.subtitleErrorText}>{subtitleError}</Text>
+          </BlurView>
+        </Animated.View>
+      )}
+
+      {/* Intro Detection Toast */}
+      {showIntroToast && (
+        <Animated.View 
+          style={[
+            styles.toastContainer,
+            { top: 100 }
+          ]}
+        >
+          <BlurView intensity={60} tint="dark" style={styles.toastContent}>
+            <FontAwesome5 name="fast-forward" size={16} color="#4CAF50" />
+            <Text style={styles.toastText}>Intro detected</Text>
+          </BlurView>
+        </Animated.View>
+      )}
+
+      {/* Outro Detection Toast */}
+      {showOutroToast && (
+        <Animated.View 
+          style={[
+            styles.toastContainer,
+            { top: 100 }
+          ]}
+        >
+          <BlurView intensity={60} tint="dark" style={styles.toastContent}>
+            <FontAwesome5 name="step-forward" size={16} color="#FF9800" />
+            <Text style={styles.toastText}>Outro detected</Text>
           </BlurView>
         </Animated.View>
       )}
@@ -3853,6 +4129,53 @@ const PlayerScreen = () => {
         isSavingProgress={isSavingProgress}
         anilistUser={anilistUser || undefined}
       />
+
+      {/* Debug info for subtitle rendering - only show when debug is enabled */}
+      {showDebug && (
+        <View style={{
+          position: 'absolute',
+          top: 200,
+          left: 10,
+          backgroundColor: 'rgba(0, 0, 0, 0.9)',
+          padding: 10,
+          borderRadius: 5,
+          zIndex: 20000,
+          maxWidth: 300
+        }}>
+          <Text style={{ color: '#FFFF00', fontSize: 12, fontWeight: 'bold' }}>
+            SUBTITLE DEBUG:
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Enabled: {preferences.subtitlesEnabled ? 'YES' : 'NO'}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Current: "{currentSubtitle || 'NONE'}"
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Cues loaded: {subtitleCues.length}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Available subtitles: {subtitles.length}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Selected language: {selectedLanguage}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Time: {formatTime(currentTime)}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Position: x={subtitlePosition.x}, y={subtitlePosition.y}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 10 }}>
+            Loading subtitles: {isLoadingSubtitles ? 'YES' : 'NO'}
+          </Text>
+          {subtitleError && (
+            <Text style={{ color: '#FF6666', fontSize: 10 }}>
+              Error: {subtitleError}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 };

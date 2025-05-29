@@ -1,17 +1,25 @@
-// This file has been moved to the videoplayer folder
-// Import from the new location to maintain compatibility
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
-// Using dynamic import to avoid TypeScript issues
-const VideoPlayer = require('./videoplayer/PlayerScreen').default;
+import VideoPlayer from './videoplayer/PlayerScreen';
+import { useTheme } from '../hooks/useTheme';
 
 // Player component that forces landscape orientation
 export default function Player() {
+  const { isDarkMode } = useTheme();
+  const isLocked = useRef(false);
+  const lockTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
   // Force landscape mode immediately and maintain it
   useEffect(() => {
+    let isMounted = true;
+    let subscription: ScreenOrientation.Subscription | null = null;
+
     const lockToLandscape = async () => {
+      if (!isMounted || isLocked.current) return;
+      
       try {
         console.log('[PLAYER] 🔒 Preparing to switch to landscape mode...');
         
@@ -21,31 +29,76 @@ export default function Player() {
         // Use a smoother transition by directly going to LANDSCAPE instead of LANDSCAPE_RIGHT first
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
         
-        console.log('[PLAYER] ✅ Locked to landscape mode');
+        if (isMounted) {
+          isLocked.current = true;
+          setIsReady(true);
+          console.log('[PLAYER] ✅ Locked to landscape mode');
+        }
       } catch (error) {
         console.error('[PLAYER] ❌ Failed to lock orientation:', error);
+        if (isMounted) {
+          setIsReady(true); // Still show the player even if orientation lock fails
+        }
       }
     };
 
     // Execute immediately
     lockToLandscape();
 
-    // Prevent auto-rotation by adding an orientation change listener that forces landscape
-    const subscription = ScreenOrientation.addOrientationChangeListener(async (event) => {
-      const currentOrientation = event.orientationInfo.orientation;
+    // Debounced orientation change handler to prevent infinite loops
+    const handleOrientationChange = async (event: ScreenOrientation.OrientationChangeEvent) => {
+      if (!isMounted || !isLocked.current) return;
       
-      // If device somehow rotates to portrait, force it back to landscape
-      if (currentOrientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
-          currentOrientation === ScreenOrientation.Orientation.PORTRAIT_DOWN) {
-        console.log('[PLAYER] 🔄 Detected portrait orientation, forcing back to landscape');
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      // Clear any existing timeout
+      if (lockTimeout.current) {
+        clearTimeout(lockTimeout.current);
       }
-    });
+
+      // Debounce the orientation change to prevent rapid successive calls
+      lockTimeout.current = setTimeout(async () => {
+        if (!isMounted) return;
+        
+        const currentOrientation = event.orientationInfo.orientation;
+        
+        // Only force landscape if currently in portrait and we're still mounted
+        if (currentOrientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
+            currentOrientation === ScreenOrientation.Orientation.PORTRAIT_DOWN) {
+          console.log('[PLAYER] 🔄 Detected portrait orientation, forcing back to landscape');
+          
+          try {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+          } catch (error) {
+            console.error('[PLAYER] ❌ Failed to re-lock orientation:', error);
+          }
+        }
+      }, 100); // 100ms debounce
+    };
+
+    // Add orientation change listener only after initial lock
+    const addListener = () => {
+      if (isMounted) {
+        subscription = ScreenOrientation.addOrientationChangeListener(handleOrientationChange);
+      }
+    };
+
+    // Add listener after a short delay to ensure initial lock is complete
+    setTimeout(addListener, 200);
 
     // Cleanup: unlock and return to portrait when unmounting
     return () => {
+      isMounted = false;
+      isLocked.current = false;
+      
+      // Clear any pending timeout
+      if (lockTimeout.current) {
+        clearTimeout(lockTimeout.current);
+        lockTimeout.current = null;
+      }
+
       // Remove the orientation change listener
-      ScreenOrientation.removeOrientationChangeListener(subscription);
+      if (subscription) {
+        ScreenOrientation.removeOrientationChangeListener(subscription);
+      }
       
       const unlockAndRotate = async () => {
         try {
@@ -58,30 +111,45 @@ export default function Player() {
           setTimeout(() => {
             StatusBar.setHidden(false, 'fade');
             // Then unlock completely if the app needs to allow rotation elsewhere
-            setTimeout(() => {
-              ScreenOrientation.unlockAsync()
-                .then(() => console.log('[PLAYER] 🔄 Restored orientation'))
-                .catch(err => console.error('[PLAYER] ❌ Error unlocking orientation:', err));
+            setTimeout(async () => {
+              try {
+                await ScreenOrientation.unlockAsync();
+                console.log('[PLAYER] 🔄 Restored orientation');
+              } catch (err) {
+                console.error('[PLAYER] ❌ Error unlocking orientation:', err);
+              }
             }, 100); // Small delay to ensure the portrait lock has taken effect
           }, 400); // Slightly longer delay for smoother transition
         } catch (error) {
           console.error('[PLAYER] ❌ Failed to restore orientation:', error);
           // Fallback attempt if the first try fails
-          setTimeout(() => {
-            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-              .then(() => StatusBar.setHidden(false, 'fade'))
-              .then(() => ScreenOrientation.unlockAsync())
-              .then(() => console.log('[PLAYER] ✅ Fallback orientation restore successful'))
-              .catch(err => console.error('[PLAYER] ❌ Critical orientation error:', err));
+          setTimeout(async () => {
+            try {
+              await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+              StatusBar.setHidden(false, 'fade');
+              await ScreenOrientation.unlockAsync();
+              console.log('[PLAYER] ✅ Fallback orientation restore successful');
+            } catch (err) {
+              console.error('[PLAYER] ❌ Critical orientation error:', err);
+            }
           }, 500);
         }
       };
       unlockAndRotate();
     };
-  }, []);
+  }, []); // Empty dependency array to prevent re-running
+
+  // Don't render the player until orientation is ready
+  if (!isReady) {
+    return (
+      <View style={[styles.container, styles.loading, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
+        <StatusBar hidden={true} />
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
       <StatusBar hidden={true} />
       <PlayerProvider>
         <VideoPlayer />
@@ -93,7 +161,9 @@ export default function Player() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+  },
+  loading: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
-

@@ -20,14 +20,53 @@ interface WatchTabProps {
   anilistId?: string;
   malId?: string;
   coverImage?: string;
+  relations?: {
+    edges: {
+      relationType: string;
+      node: {
+        id: number;
+        type: string;
+        title: {
+          userPreferred: string;
+        };
+        format: string;
+      };
+    }[];
+  };
 }
 
-export default function WatchTab({ episodes, loading, animeTitle, anilistId, malId, coverImage }: WatchTabProps) {
+export default function WatchTab({ episodes, loading, animeTitle, anilistId, malId, coverImage, relations }: WatchTabProps) {
   const { isDarkMode, currentTheme } = useTheme();
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [currentEpisodes, setCurrentEpisodes] = useState(episodes);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Function to extract manga title from anime relations
+  const getMangaTitle = () => {
+    if (!relations?.edges) return undefined;
+    
+    // Look for manga relations, prioritizing "SOURCE" relation type
+    const mangaRelations = relations.edges.filter(edge => 
+      edge.node.type === 'MANGA' && 
+      (edge.relationType === 'SOURCE' || edge.relationType === 'ADAPTATION')
+    );
+    
+    // Prefer SOURCE relation (original manga), then ADAPTATION
+    const sourceRelation = mangaRelations.find(edge => edge.relationType === 'SOURCE');
+    const adaptationRelation = mangaRelations.find(edge => edge.relationType === 'ADAPTATION');
+    
+    const selectedRelation = sourceRelation || adaptationRelation || mangaRelations[0];
+    
+    if (selectedRelation) {
+      console.log(`Found manga relation: ${selectedRelation.node.title.userPreferred} (${selectedRelation.relationType})`);
+      return selectedRelation.node.title.userPreferred;
+    }
+    
+    return undefined;
+  };
+
+  const mangaTitle = getMangaTitle();
 
   const handleSearchPress = () => {
     setSearchModalVisible(true);
@@ -262,6 +301,7 @@ export default function WatchTab({ episodes, loading, animeTitle, anilistId, mal
             anilistId={anilistId}
             malId={malId}
             coverImage={coverImage}
+            mangaTitle={mangaTitle}
           />
         </View>
       </View>

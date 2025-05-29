@@ -573,52 +573,54 @@ export default function AnimeDetailsScreen() {
         axios.get(`${JIKAN_API_ENDPOINT}/anime/${details.idMal}/videos/episodes`)
       ]);
       
-      if (episodesResponse.data?.data) {
-        const jikanEpisodes = episodesResponse.data.data;
-        const pagination = episodesResponse.data.pagination;
-        const episodeVideos = videosResponse.data?.data || [];
-        console.log('Found episodes on page 1:', jikanEpisodes.length);
-        console.log('Found episode videos:', episodeVideos.length);
-        console.log('Pagination info:', pagination);
+      const jikanEpisodes = episodesResponse.data?.data || [];
+      const pagination = episodesResponse.data?.pagination;
+      const episodeVideos = videosResponse.data?.data || [];
+      console.log('Found episodes on page 1:', jikanEpisodes.length);
+      console.log('Found episode videos:', episodeVideos.length);
+      console.log('Pagination info:', pagination);
 
-        let allEpisodes = [...jikanEpisodes];
+      let allEpisodes = [...jikanEpisodes];
 
-        // Fetch remaining pages if any
-        if (pagination.has_next_page) {
-          const totalPages = pagination.last_visible_page;
-          console.log('Fetching remaining pages, total pages:', totalPages);
+      // Fetch remaining pages if any
+      if (pagination?.has_next_page) {
+        const totalPages = pagination.last_visible_page;
+        console.log('Fetching remaining pages, total pages:', totalPages);
 
-          const remainingPages = [];
-          for (let page = 2; page <= totalPages; page++) {
-            remainingPages.push(
-              axios.get(`${JIKAN_API_ENDPOINT}/anime/${details.idMal}/episodes`, {
-                params: { page }
-              })
-            );
-          }
-
-          const remainingResponses = await Promise.all(remainingPages);
-          for (const pageResponse of remainingResponses) {
-            if (pageResponse.data?.data) {
-              allEpisodes = [...allEpisodes, ...pageResponse.data.data];
-            }
-          }
-          console.log('Total episodes after fetching all pages:', allEpisodes.length);
+        const remainingPages = [];
+        for (let page = 2; page <= totalPages; page++) {
+          remainingPages.push(
+            axios.get(`${JIKAN_API_ENDPOINT}/anime/${details.idMal}/episodes`, {
+              params: { page }
+            })
+          );
         }
 
-        // Create a map of episode videos by episode number
-        const videoMap = new Map<number, JikanEpisodeVideo>();
-        episodeVideos.forEach((video: JikanEpisodeVideo) => {
-          console.log('Processing video:', video);
-          // Extract just the number from "Episode X"
-          const episodeNumber = parseInt(video.episode.replace('Episode ', ''));
-          if (!isNaN(episodeNumber)) {
-            videoMap.set(episodeNumber, video);
+        const remainingResponses = await Promise.all(remainingPages);
+        for (const pageResponse of remainingResponses) {
+          if (pageResponse.data?.data) {
+            allEpisodes = [...allEpisodes, ...pageResponse.data.data];
           }
-        });
+        }
+        console.log('Total episodes after fetching all pages:', allEpisodes.length);
+      }
 
-        // Format episodes with video thumbnails
-        const formattedEpisodes = allEpisodes
+      // Create a map of episode videos by episode number
+      const videoMap = new Map<number, JikanEpisodeVideo>();
+      episodeVideos.forEach((video: JikanEpisodeVideo) => {
+        console.log('Processing video:', video);
+        // Extract just the number from "Episode X"
+        const episodeNumber = parseInt(video.episode.replace('Episode ', ''));
+        if (!isNaN(episodeNumber)) {
+          videoMap.set(episodeNumber, video);
+        }
+      });
+
+      let formattedEpisodes: any[] = [];
+
+      if (allEpisodes.length > 0) {
+        // Normal case: we have episode data
+        formattedEpisodes = allEpisodes
           .filter((ep): ep is JikanEpisode => ep !== null)
           .map((ep: JikanEpisode, index: number) => {
             // Use index + 1 to match episode numbers since they start from 1
@@ -638,28 +640,70 @@ export default function AnimeDetailsScreen() {
               aired: ep.aired
             };
           });
-        
-        console.log('Final formatted episodes:', formattedEpisodes.map(ep => ({
-          number: ep.number,
-          image: ep.image
-        })));
-        
-        setEpisodes(formattedEpisodes);
-      } else {
-        console.log('No episodes found in Jikan response');
-        setEpisodes([]);
+      } else if (episodeVideos.length > 0) {
+        // Movie case: no episodes but we have videos
+        console.log('No episodes found but videos exist - treating as movie');
+        formattedEpisodes = episodeVideos.map((video: JikanEpisodeVideo, index: number) => {
+          const episodeNumber = parseInt(video.episode.replace('Episode ', '')) || (index + 1);
+          console.log(`Creating movie episode ${episodeNumber} from video:`, video);
+          
+          return {
+            id: `${details.idMal}-${episodeNumber}`,
+            number: episodeNumber,
+            title: video.title || details.title.userPreferred || `Episode ${episodeNumber}`,
+            description: details.description || 'Movie',
+            image: video.images?.jpg?.image_url || details.coverImage.large,
+            duration: details.duration || 120, // Default movie duration
+            isFiller: false,
+            aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined
+          };
+        });
+      } else if (details.format === 'MOVIE' || details.episodes === 1) {
+        // Fallback for movies with no video data
+        console.log('Creating fallback movie episode');
+        formattedEpisodes = [{
+          id: `${details.idMal}-1`,
+          number: 1,
+          title: details.title.userPreferred || 'Movie',
+          description: details.description || 'Movie',
+          image: details.coverImage.large,
+          duration: details.duration || 120,
+          isFiller: false,
+          aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined
+        }];
       }
+      
+      console.log('Final formatted episodes:', formattedEpisodes.map(ep => ({
+        number: ep.number,
+        title: ep.title,
+        image: ep.image
+      })));
+      
+      setEpisodes(formattedEpisodes);
     } catch (error) {
       console.error('Error fetching episodes from Jikan:', error);
-      setEpisodes([{
-        id: 'error',
-        number: 0,
-        title: 'Error Loading Episodes',
-        description: 'Unable to load episodes. Please try again later.',
-        image: details.coverImage.large,
-        duration: 0,
-        isFiller: false
-      }]);
+      // Create a fallback episode for movies even on error
+      if (details.format === 'MOVIE' || details.episodes === 1) {
+        setEpisodes([{
+          id: `${details.idMal}-1`,
+          number: 1,
+          title: details.title.userPreferred || 'Movie',
+          description: details.description || 'Movie',
+          image: details.coverImage.large,
+          duration: details.duration || 120,
+          isFiller: false
+        }]);
+      } else {
+        setEpisodes([{
+          id: 'error',
+          number: 0,
+          title: 'Error Loading Episodes',
+          description: 'Unable to load episodes. Please try again later.',
+          image: details.coverImage.large,
+          duration: 0,
+          isFiller: false
+        }]);
+      }
     } finally {
       setEpisodesLoading(false);
     }
@@ -1226,6 +1270,7 @@ export default function AnimeDetailsScreen() {
         anilistId={details?.id?.toString()}
         malId={details?.idMal?.toString()}
         coverImage={details?.coverImage?.large}
+        relations={details?.relations}
       />
     </View>
   );

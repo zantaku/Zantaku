@@ -186,123 +186,102 @@ export default function AnimeSettingsPage() {
           </View>
         </View>
 
-        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
-          <Text style={[styles.settingGroupLabel, { color: '#2196F3' }]}>Subtitle Appearance</Text>
-          
-          <View style={styles.subtitlePreviewContainer}>
-            <BlurView intensity={40 * (preferences.subtitleStyle?.backgroundOpacity || 0.7)} tint="dark" style={styles.subtitlePreviewBox}>
-              <Text style={[
-                styles.subtitlePreviewText,
-                { 
-                  fontSize: preferences.subtitleStyle?.fontSize || 18,
-                  color: preferences.subtitleStyle?.textColor || '#FFFFFF',
-                  fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal'
-                }
-              ]}>
-                {previewText}
-              </Text>
-            </BlurView>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <FontAwesome5 name="forward" size={20} color="#4CAF50" />
+            <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Intro/Outro Settings</Text>
           </View>
-          
-          <View style={styles.settingRow}>
-            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Font Size</Text>
-            <View style={styles.sliderContainer}>
-              <Slider
-                style={{ width: '100%', height: 40 }}
-                minimumValue={12}
-                maximumValue={30}
-                step={1}
-                value={preferences.subtitleStyle?.fontSize || 18}
-                onValueChange={(value) => {
-                  savePlayerPreferences({
-                    ...preferences,
-                    subtitleStyle: {
-                      ...preferences.subtitleStyle,
-                      fontSize: value
-                    }
-                  });
-                }}
-                minimumTrackTintColor="#2196F3"
-                maximumTrackTintColor="#777777"
-                thumbTintColor="#2196F3"
-              />
-              <Text style={[styles.sliderValue, { color: currentTheme.colors.text }]}>
-                {preferences.subtitleStyle?.fontSize || 18}px
-              </Text>
-            </View>
-          </View>
-          
-          <View style={styles.settingRow}>
-            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Background Opacity</Text>
-            <View style={styles.sliderContainer}>
-              <Slider
-                style={{ width: '100%', height: 40 }}
-                minimumValue={0}
-                maximumValue={1}
-                step={0.1}
-                value={preferences.subtitleStyle?.backgroundOpacity || 0.7}
-                onValueChange={(value) => {
-                  savePlayerPreferences({
-                    ...preferences,
-                    subtitleStyle: {
-                      ...preferences.subtitleStyle,
-                      backgroundOpacity: value
-                    }
-                  });
-                }}
-                minimumTrackTintColor="#2196F3"
-                maximumTrackTintColor="#777777"
-                thumbTintColor="#2196F3"
-              />
-              <Text style={[styles.sliderValue, { color: currentTheme.colors.text }]}>
-                {Math.round((preferences.subtitleStyle?.backgroundOpacity || 0.7) * 100)}%
-              </Text>
-            </View>
-          </View>
-          
-          <View style={styles.settingRow}>
-            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Text Color</Text>
-            <View style={styles.colorOptions}>
-              {['#FFFFFF', '#FFFF00', '#00FFFF', '#FF9900', '#66FF66'].map(color => (
-                <TouchableOpacity
-                  key={`color-${color}`}
-                  style={[
-                    styles.colorOption,
-                    { backgroundColor: color },
-                    (preferences.subtitleStyle?.textColor || '#FFFFFF') === color && styles.colorOptionSelected
-                  ]}
-                  onPress={() => {
-                    savePlayerPreferences({
-                      ...preferences,
-                      subtitleStyle: {
-                        ...preferences.subtitleStyle,
-                        textColor: color
-                      }
-                    });
-                  }}
-                />
-              ))}
-            </View>
-          </View>
-          
-          <View style={styles.settingRow}>
+
+          <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Bold Text</Text>
+              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Show Intro/Outro Markers</Text>
               <Switch
-                value={preferences.subtitleStyle?.boldText || false}
+                value={preferences.markerSettings?.showMarkers || false}
                 onValueChange={(value) => {
                   savePlayerPreferences({
                     ...preferences,
-                    subtitleStyle: {
-                      ...preferences.subtitleStyle,
-                      boldText: value
+                    markerSettings: {
+                      ...preferences.markerSettings,
+                      showMarkers: value
                     }
                   });
                 }}
-                trackColor={{ false: '#767577', true: '#2196F3' }}
-                thumbColor={preferences.subtitleStyle?.boldText ? '#fff' : '#f4f3f4'}
+                trackColor={{ false: '#767577', true: '#4CAF50' }}
+                thumbColor={preferences.markerSettings?.showMarkers ? '#fff' : '#f4f3f4'}
               />
             </View>
+            <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
+              Show visual markers on the progress bar for intro and outro sections
+            </Text>
+          </View>
+
+          <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Skip Intro</Text>
+              <Switch
+                value={preferences.markerSettings?.autoSkipIntro || false}
+                onValueChange={(value) => {
+                  savePlayerPreferences({
+                    ...preferences,
+                    markerSettings: {
+                      ...preferences.markerSettings,
+                      autoSkipIntro: value
+                    }
+                  });
+                }}
+                trackColor={{ false: '#767577', true: '#4CAF50' }}
+                thumbColor={preferences.markerSettings?.autoSkipIntro ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
+              Automatically skip intro sequences when detected
+            </Text>
+          </View>
+
+          <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Skip Outro</Text>
+              <Switch
+                value={preferences.markerSettings?.autoSkipOutro || false}
+                onValueChange={(value) => {
+                  savePlayerPreferences({
+                    ...preferences,
+                    markerSettings: {
+                      ...preferences.markerSettings,
+                      autoSkipOutro: value
+                    }
+                  });
+                }}
+                trackColor={{ false: '#767577', true: '#4CAF50' }}
+                thumbColor={preferences.markerSettings?.autoSkipOutro ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
+              Automatically skip outro sequences and start next episode countdown
+            </Text>
+          </View>
+
+          <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Play Next Episode</Text>
+              <Switch
+                value={preferences.markerSettings?.autoPlayNextEpisode || false}
+                onValueChange={(value) => {
+                  savePlayerPreferences({
+                    ...preferences,
+                    markerSettings: {
+                      ...preferences.markerSettings,
+                      autoPlayNextEpisode: value
+                    }
+                  });
+                }}
+                trackColor={{ false: '#767577', true: '#4CAF50' }}
+                thumbColor={preferences.markerSettings?.autoPlayNextEpisode ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
+              Automatically continue to the next episode after countdown
+            </Text>
           </View>
         </View>
       </View>
@@ -852,5 +831,10 @@ const styles = StyleSheet.create({
   tabButtonText: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  settingDescription: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 4,
   },
 }); 
