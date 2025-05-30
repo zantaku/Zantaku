@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Animated, View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Dimensions, Platform, TextInput } from 'react-native';
+import { Animated, View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Dimensions, Platform, TextInput, ScrollView } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useTheme } from '../hooks/useTheme';
 import { Image as ExpoImage } from 'expo-image';
@@ -19,6 +19,7 @@ import {
   Provider,
   languageFlags
 } from '../api/proxy/providers/manga';
+import MangaFireProvider from '../api/proxy/providers/manga/mangafire';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { useIncognito } from '../hooks/useIncognito';
@@ -53,7 +54,7 @@ interface ChapterListProps {
 }
 
 interface ProviderPreferences {
-  defaultProvider: 'katana' | 'mangadex';
+  defaultProvider: 'katana' | 'mangadex' | 'mangafire';
   autoSelectSource: boolean;
   preferredChapterLanguage: string;
   preferredScanlationGroup: string;
@@ -68,7 +69,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 10,
-    marginTop: 56,
+    marginTop: 80,
   },
   headerContainer: {
     flexDirection: 'row',
@@ -134,30 +135,31 @@ const styles = StyleSheet.create({
   // Modern card layout
   chapterCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14, // Increased padding
-    paddingHorizontal: 16, // Increased padding
+    alignItems: 'flex-start', // Changed from 'center' to 'flex-start'
+    paddingVertical: 12, // Slightly reduced
+    paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: '#121212', // Darker card background for AMOLED screens
+    backgroundColor: '#121212',
     borderWidth: 1,
     borderColor: '#1E1E1E',
-    marginBottom: 10, // Added spacing between cards
-    borderBottomWidth: 1, // Subtle divider
-    borderBottomColor: '#2c2c2c', // Subtle divider color
+    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2c2c2c',
+    minHeight: 80, // Ensure consistent height
   },
-  latestChapterCard: { // Style for the latest chapter card
-    borderColor: '#02A9FF', // Highlight border
-    backgroundColor: '#151A28', // Slightly different background
+  latestChapterCard: {
+    borderColor: '#02A9FF',
+    backgroundColor: '#151A28',
   },
   readChapterCard: {
-    backgroundColor: '#121A26', // Slightly different shade for read chapters
+    backgroundColor: '#121A26',
     borderLeftWidth: 3,
     borderLeftColor: '#02A9FF',
   },
   unreadChapterCard: {
     borderLeftWidth: 3,
-    borderLeftColor: '#FF5722', // Orange highlight for unread chapters
-    backgroundColor: '#1A1511', // Slightly different background for unread
+    borderLeftColor: '#FF5722',
+    backgroundColor: '#1A1511',
   },
   newestChapterCard: {
     borderWidth: 2,
@@ -165,32 +167,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#151A28',
   },
   chapterThumbnail: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
-    marginRight: 14,
+    width: 56, // Slightly smaller
+    height: 72, // Taller aspect ratio
+    borderRadius: 8,
+    marginRight: 12,
   },
   chapterContent: {
     flex: 1,
-    marginRight: 10, // Adjusted spacing
+    marginRight: 10,
+    justifyContent: 'space-between', // Better spacing
+    minHeight: 64, // Ensure content fills properly
   },
   chapterHeader: { // Combined Chapter/Volume header style
-    fontSize: 18, // Larger font size
-    fontWeight: 'bold', // Bold text
+    fontSize: 16, // Reduced from 18 for better fit
+    fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 8, // Increased spacing below header
+    marginBottom: 4, // Reduced spacing
+    flexShrink: 1, // Allow text to shrink if needed
+    flexWrap: 'wrap', // Allow text to wrap
+  },
+  chapterTitle: {
+    fontSize: 14,
+    color: '#CCCCCC',
+    marginBottom: 6,
+    flexShrink: 1,
   },
   chapterMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16, // Increased gap for better spacing
+    flexWrap: 'wrap', // Allow meta items to wrap
+    gap: 12, // Consistent spacing
   },
   metaText: {
-    fontSize: 13, // Slightly increased size
-    color: '#AAAAAA', // Adjusted color
-    flexDirection: 'row', // Align icon and text
-    alignItems: 'center', // Align icon and text
-    gap: 5, // Space between icon and text
+    fontSize: 12, // Slightly smaller
+    color: '#AAAAAA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4, // Reduced gap
+    flexShrink: 1, // Allow to shrink
   },
   readText: {
     color: '#02A9FF',
@@ -344,6 +358,30 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#02A9FF',
     borderRadius: 2,
+  },
+  volumeRangeContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    marginTop: 12,
+    marginHorizontal: -10,
+  },
+  volumeRangeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    marginHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  activeVolumeRangeButton: {
+    backgroundColor: '#02A9FF',
+    borderColor: '#02A9FF',
+  },
+  volumeRangeButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+    fontSize: 14,
   },
 });
 
@@ -627,6 +665,11 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [internalMangaId, setInternalMangaId] = useState<string | null>(mangaId || null);
   
+  // Add volume range state variables similar to EpisodeList
+  const [volumeRanges, setVolumeRanges] = useState<Chapter[][]>([]);
+  const [activeVolumeTab, setActiveVolumeTab] = useState(0);
+  const [isNewestFirst, setIsNewestFirst] = useState(true);
+  
   // Add these constants inside the component
   const CHAPTERS_PER_PAGE = 20;
   const INITIAL_LOAD_COUNT = 40;
@@ -777,6 +820,87 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
     };
   }, [anilistId, fetchAniListProgress]);
 
+  // Add volume range creation effect similar to EpisodeList
+  useEffect(() => {
+    if (chapters && chapters.length > 0) {
+      console.log('[ChapterList] Creating volume ranges from', chapters.length, 'chapters');
+      
+      // Sort chapters based on the current sort order
+      const sortedChapters = [...chapters].sort((a, b) => {
+        const numA = parseFloat(a.number) || 0;
+        const numB = parseFloat(b.number) || 0;
+        return isNewestFirst ? numB - numA : numA - numB;
+      });
+      
+      // Group chapters by volume
+      const volumeGroups = new Map<string, Chapter[]>();
+      const noVolumeChapters: Chapter[] = [];
+      
+      sortedChapters.forEach(chapter => {
+        if (chapter.volume && chapter.volume.trim() !== '') {
+          const volumeKey = chapter.volume.trim();
+          if (!volumeGroups.has(volumeKey)) {
+            volumeGroups.set(volumeKey, []);
+          }
+          volumeGroups.get(volumeKey)!.push(chapter);
+        } else {
+          noVolumeChapters.push(chapter);
+        }
+      });
+      
+      // Convert to ranges array
+      const ranges: Chapter[][] = [];
+      
+      // Sort volume keys numerically
+      const sortedVolumeKeys = Array.from(volumeGroups.keys()).sort((a, b) => {
+        const numA = parseFloat(a) || 0;
+        const numB = parseFloat(b) || 0;
+        return isNewestFirst ? numB - numA : numA - numB;
+      });
+      
+      // Add volume groups to ranges
+      sortedVolumeKeys.forEach(volumeKey => {
+        const volumeChapters = volumeGroups.get(volumeKey)!;
+        // Sort chapters within the volume
+        volumeChapters.sort((a, b) => {
+          const numA = parseFloat(a.number) || 0;
+          const numB = parseFloat(b.number) || 0;
+          return isNewestFirst ? numB - numA : numA - numB;
+        });
+        ranges.push(volumeChapters);
+      });
+      
+      // Add chapters without volume info as a separate range if any exist
+      if (noVolumeChapters.length > 0) {
+        noVolumeChapters.sort((a, b) => {
+          const numA = parseFloat(a.number) || 0;
+          const numB = parseFloat(b.number) || 0;
+          return isNewestFirst ? numB - numA : numA - numB;
+        });
+        ranges.push(noVolumeChapters);
+      }
+      
+      // If no volume information is available, create ranges based on chapter count (24 chapters per range)
+      if (ranges.length === 0 || (ranges.length === 1 && ranges[0] === noVolumeChapters && noVolumeChapters.length === sortedChapters.length)) {
+        console.log('[ChapterList] No volume info found, creating chapter-based ranges');
+        const chapterRanges: Chapter[][] = [];
+        const rangeSize = 24;
+        
+        for (let i = 0; i < sortedChapters.length; i += rangeSize) {
+          chapterRanges.push(sortedChapters.slice(i, i + rangeSize));
+        }
+        
+        setVolumeRanges(chapterRanges);
+      } else {
+        setVolumeRanges(ranges);
+      }
+      
+      console.log('[ChapterList] Created', ranges.length, 'volume ranges');
+    } else {
+      setVolumeRanges([]);
+    }
+  }, [chapters, isNewestFirst]);
+
   // Load provider preferences
   useEffect(() => {
     const loadProviderPreferences = async () => {
@@ -918,6 +1042,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
       
       let mangadexId = null;
       let katanaResult = null;
+      let mangafireResult = null;
       
       // Try each title variation
       for (let i = 0; i < titleVariations.length; i++) {
@@ -926,7 +1051,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
         
         // Decide which providers to search based on auto-select setting
         if (providerPreferences.autoSelectSource) {
-          console.log('[API] Auto-select is ON, will try Katana first, then MangaDex');
+          console.log('[API] Auto-select is ON, will try Katana first, then MangaDex, then MangaFire');
           
           // Try Katana first when auto-select is on
           try {
@@ -1019,13 +1144,31 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
                 
                 if (results && results.length > 0) {
                   mangadexId = results[0].id;
-                  console.log('[API] Found manga on MangaDex:', results[0].title);
-                  console.log('[API] MangaDex ID:', mangadexId);
+                  console.log('[API] Found manga on MangaDx:', results[0].title);
+                  console.log('[API] MangaDx ID:', mangadexId);
                   break;
                 }
               }
             } catch (error) {
-              console.error('[API] MangaDex search error:', error);
+              console.error('[API] MangaDx search error:', error);
+            }
+          }
+          
+          // If both Katana and MangaDex fail, try MangaFire
+          if (!katanaResult && !mangadexId) {
+            try {
+              console.log('[API] Search URL (MangaFire): ', `https://magaapinovel.xyz/api/search/${encodeURIComponent(currentTitle)}`);
+              
+              const mangafireResults = await MangaFireProvider.search(currentTitle);
+              
+              if (mangafireResults && mangafireResults.length > 0) {
+                mangafireResult = mangafireResults[0];
+                console.log('[API] Found manga on MangaFire:', mangafireResult.title);
+                console.log('[API] MangaFire ID:', mangafireResult.id);
+                break;
+              }
+            } catch (error) {
+              console.error('[API] MangaFire search error:', error);
             }
           }
         } else {
@@ -1036,7 +1179,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           if (selectedProvider === 'mangadex') {
             try {
               const mangadexSearchUrl = MangaDexProvider.getSearchUrl(currentTitle);
-              console.log('[API] Search URL (Mangadex only):', mangadexSearchUrl);
+              console.log('[API] Search URL (MangaDex only):', mangadexSearchUrl);
               
               const mangadexResponse = await fetch(mangadexSearchUrl, {
                 headers: MangaDexProvider.getHeaders()
@@ -1078,6 +1221,21 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
             } catch (error) {
               console.error('[API] Katana search error:', error);
             }
+          } else if (selectedProvider === 'mangafire') {
+            try {
+              console.log('[API] Search URL (MangaFire only): ', `https://magaapinovel.xyz/api/search/${encodeURIComponent(currentTitle)}`);
+              
+              const mangafireResults = await MangaFireProvider.search(currentTitle);
+              
+              if (mangafireResults && mangafireResults.length > 0) {
+                mangafireResult = mangafireResults[0];
+                console.log('[API] Found manga on MangaFire:', mangafireResult.title);
+                console.log('[API] MangaFire ID:', mangafireResult.id);
+                break;
+              }
+            } catch (error) {
+              console.error('[API] MangaFire search error:', error);
+            }
           }
         }
       }
@@ -1086,7 +1244,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
       let mangaInfo = null;
       
       if (providerPreferences.autoSelectSource) {
-        // Auto-select is ON, prefer Katana, fallback to MangaDex
+        // Auto-select is ON, prefer Katana, fallback to MangaDex, then MangaFire
         if (katanaResult) {
           console.log('[API] Auto-select is ON: Using Katana ID:', katanaResult.slugId);
           mangaInfo = {
@@ -1098,6 +1256,12 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           mangaInfo = {
             id: mangadexId,
             provider: 'mangadex'
+          };
+        } else if (mangafireResult) {
+          console.log('[API] Auto-select is ON: Falling back to MangaFire ID:', mangafireResult.id);
+          mangaInfo = {
+            id: mangafireResult.id,
+            provider: 'mangafire'
           };
         }
       } else {
@@ -1116,6 +1280,12 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
             id: katanaResult.slugId,
             provider: 'katana'
           };
+        } else if (selectedProvider === 'mangafire' && mangafireResult) {
+          console.log('[API] Using selected provider (mangafire):', { id: mangafireResult.id });
+          mangaInfo = {
+            id: mangafireResult.id,
+            provider: 'mangafire'
+          };
         }
       }
       
@@ -1130,7 +1300,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
       
       // Update state with the selected manga ID
       setInternalMangaId(mangaInfo.id);
-      setProvider(mangaInfo.provider as 'katana' | 'mangadex');
+      setProvider(mangaInfo.provider as 'katana' | 'mangadex' | 'mangafire');
       
       // Verify the ID was set properly
       console.log('[API] ID to be used for fetching:', mangaInfo.id);
@@ -1182,8 +1352,10 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
         // Variables to store chapters from each provider
         let katanaChapters: Chapter[] = [];
         let mangadexChapters: Chapter[] = [];
+        let mangafireChapters: Chapter[] = [];
         let katanaSlugId = mangaIdToUse;
         let mangaDexId = null;
+        let mangaFireId = null;
         
         // Step 1: Fetch from Katana first
         try {
@@ -1356,15 +1528,128 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           console.error('[ChapterList] Error in MangaDex provider:', mdProviderError.message);
         }
         
-        // Step 3: Compare results and use the one with more chapters
-        console.log(`[ChapterList] Provider comparison - Katana: ${katanaChapters.length} chapters, MangaDex: ${mangadexChapters.length} chapters`);
+        // Step 3: Fetch from MangaFire
+        try {
+          console.log('[ChapterList] Attempting to fetch from MangaFire');
+          
+          // If we need to search for MangaFire ID
+          if (!mangaFireId && mangaTitle) {
+            try {
+              // Create a list of titles to try
+              const titlesToSearch = [];
+              
+              // Add primary titles
+              if (mangaTitle.userPreferred) titlesToSearch.push(mangaTitle.userPreferred);
+              if (mangaTitle.english && mangaTitle.english !== mangaTitle.userPreferred) {
+                titlesToSearch.push(mangaTitle.english);
+              }
+              
+              // Add romaji and native titles
+              if (mangaTitle.romaji && 
+                  mangaTitle.romaji !== mangaTitle.userPreferred && 
+                  mangaTitle.romaji !== mangaTitle.english) {
+                titlesToSearch.push(mangaTitle.romaji);
+              }
+              
+              if (mangaTitle.native && 
+                  mangaTitle.native !== mangaTitle.userPreferred && 
+                  mangaTitle.native !== mangaTitle.english && 
+                  mangaTitle.native !== mangaTitle.romaji) {
+                titlesToSearch.push(mangaTitle.native);
+              }
+              
+              // If no titles available, use a fallback
+              if (titlesToSearch.length === 0) {
+                titlesToSearch.push(mangaTitle.userPreferred || mangaTitle.english || '');
+              }
+              
+              console.log(`[ChapterList] Title variations to search on MangaFire: ${JSON.stringify(titlesToSearch)}`);
+              
+              // Try each title until we find a match
+              for (const titleToSearch of titlesToSearch) {
+                if (mangaFireId || !titleToSearch) continue;
+                
+                console.log(`[ChapterList] Searching MangaFire for: "${titleToSearch}"`);
+                
+                try {
+                  const mangafireResults = await MangaFireProvider.search(titleToSearch);
+                  
+                  if (mangafireResults && mangafireResults.length > 0) {
+                    mangaFireId = mangafireResults[0].id;
+                    console.log('[ChapterList] Found manga on MangaFire:', mangaFireId);
+                    break;
+                  } else {
+                    console.log(`[ChapterList] No results found for "${titleToSearch}" on MangaFire`);
+                  }
+                } catch (searchErr) {
+                  console.error(`[ChapterList] Error searching MangaFire with title "${titleToSearch}":`, searchErr);
+                }
+              }
+            } catch (searchError: any) {
+              console.error('[ChapterList] Error searching MangaFire:', searchError.message);
+            }
+          }
+          
+          // Now that we have a MangaFire ID, fetch the chapters
+          if (mangaFireId) {
+            console.log('[ChapterList] Fetching chapters from MangaFire for ID:', mangaFireId);
+            
+            try {
+              const chapters = await MangaFireProvider.getChapters(mangaFireId, {
+                offset: 0,
+                limit: 100,
+                includePages: true
+              });
+              
+              if (chapters && chapters.length > 0) {
+                console.log('[ChapterList] Got', chapters.length, 'chapters from MangaFire');
+                
+                // Map to our Chapter format and ensure source is set
+                mangafireChapters = chapters.map((ch: any, index: number) => ({
+                  id: ch.id || '',
+                  number: ch.number || '',
+                  title: ch.title || `Chapter ${ch.number || ''}`,
+                  url: ch.url || ch.id || '',
+                  volume: ch.volume || '',
+                  pages: ch.pages || 0,
+                  translatedLanguage: ch.translatedLanguage || 'en',
+                  updatedAt: ch.updatedAt || '',
+                  thumbnail: coverImage || '',
+                  isLatest: index === 0,
+                  source: 'mangafire',
+                  scanlationGroup: ch.scanlationGroup || ch.scanlator || 'Unknown'
+                }));
+                
+                // Sort chapters by number in descending order (newest first)
+                mangafireChapters.sort((a: Chapter, b: Chapter) => {
+                  const numA = parseFloat(a.number) || 0;
+                  const numB = parseFloat(b.number) || 0;
+                  return numB - numA;
+                });
+              }
+            } catch (fetchError: any) {
+              console.error('[ChapterList] Error fetching chapters from MangaFire:', fetchError.message);
+            }
+          }
+        } catch (mfProviderError: any) {
+          console.error('[ChapterList] Error in MangaFire provider:', mfProviderError.message);
+        }
         
-        if (katanaChapters.length > 0 || mangadexChapters.length > 0) {
+        // Step 4: Compare results and use the one with more chapters
+        console.log(`[ChapterList] Provider comparison - Katana: ${katanaChapters.length} chapters, MangaDex: ${mangadexChapters.length} chapters, MangaFire: ${mangafireChapters.length} chapters`);
+        
+        if (katanaChapters.length > 0 || mangadexChapters.length > 0 || mangafireChapters.length > 0) {
           let selectedChapters: Chapter[] = [];
-          let selectedProvider: 'katana' | 'mangadex' = 'katana';
+          let selectedProvider: 'katana' | 'mangadex' | 'mangafire' = 'katana';
           let selectedMangaId: string = katanaSlugId;
           
-          if (mangadexChapters.length > katanaChapters.length) {
+          // Find the provider with the most chapters
+          if (mangafireChapters.length > katanaChapters.length && mangafireChapters.length > mangadexChapters.length) {
+            console.log('[ChapterList] Auto-select chose MangaFire with more chapters');
+            selectedChapters = mangafireChapters;
+            selectedProvider = 'mangafire';
+            selectedMangaId = mangaFireId || '';
+          } else if (mangadexChapters.length > katanaChapters.length) {
             console.log('[ChapterList] Auto-select chose MangaDex with more chapters');
             selectedChapters = mangadexChapters;
             selectedProvider = 'mangadex';
@@ -1594,6 +1879,127 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           } catch (katanaError: any) {
             console.error('[ChapterList] Error fetching from Katana:', katanaError.message);
           }
+        } else if (provider === 'mangafire') {
+          // Try MangaFire if selected
+          try {
+            let mangaFireId = mangaIdToUse;
+            
+            // If we need to search for MangaFire ID first
+            if ((!mangaFireId || mangaFireId.includes('katana-') || mangaFireId.includes('mangadex-')) && mangaTitle) {
+              try {
+                // Create a list of titles to try
+                const titlesToSearch = [];
+                
+                // Add primary titles
+                if (mangaTitle.userPreferred) titlesToSearch.push(mangaTitle.userPreferred);
+                if (mangaTitle.english && mangaTitle.english !== mangaTitle.userPreferred) {
+                  titlesToSearch.push(mangaTitle.english);
+                }
+                
+                // Add additional titles if available
+                if (mangaTitle.romaji && 
+                    mangaTitle.romaji !== mangaTitle.userPreferred && 
+                    mangaTitle.romaji !== mangaTitle.english) {
+                  titlesToSearch.push(mangaTitle.romaji);
+                }
+                
+                if (mangaTitle.native && 
+                    mangaTitle.native !== mangaTitle.userPreferred && 
+                    mangaTitle.native !== mangaTitle.english && 
+                    mangaTitle.native !== mangaTitle.romaji) {
+                  titlesToSearch.push(mangaTitle.native);
+                }
+                
+                // If no titles available, use a fallback
+                if (titlesToSearch.length === 0) {
+                  titlesToSearch.push(mangaTitle.userPreferred || mangaTitle.english || '');
+                }
+                
+                console.log(`[ChapterList] Title variations to search on MangaFire: ${JSON.stringify(titlesToSearch)}`);
+                
+                // Try each title until we find a match
+                for (const titleToSearch of titlesToSearch) {
+                  if (mangaFireId || !titleToSearch) continue;
+                  
+                  console.log(`[ChapterList] Searching MangaFire for: "${titleToSearch}"`);
+                  
+                  try {
+                    const mangafireResults = await MangaFireProvider.search(titleToSearch);
+                    
+                    if (mangafireResults && mangafireResults.length > 0) {
+                      mangaFireId = mangafireResults[0].id;
+                      console.log('[ChapterList] Found manga on MangaFire:', mangaFireId);
+                      break;
+                    } else {
+                      console.log(`[ChapterList] No results found for "${titleToSearch}" on MangaFire`);
+                    }
+                  } catch (searchErr) {
+                    console.error(`[ChapterList] Error searching MangaFire with title "${titleToSearch}":`, searchErr);
+                  }
+                }
+              } catch (searchError: any) {
+                console.error('[ChapterList] Error searching MangaFire:', searchError.message);
+              }
+            }
+            
+            // Now that we have a MangaFire ID, fetch the chapters
+            if (mangaFireId) {
+              console.log('[ChapterList] Fetching chapters from MangaFire for ID:', mangaFireId);
+              
+              try {
+                const chapters = await MangaFireProvider.getChapters(mangaFireId, {
+                  offset: 0,
+                  limit: 100,
+                  includePages: true
+                });
+                
+                if (chapters && chapters.length > 0) {
+                  console.log('[ChapterList] Got', chapters.length, 'chapters from MangaFire');
+                  
+                  // Map to our Chapter format and ensure source is set
+                  const mappedChapters = chapters.map((ch: any, index: number) => ({
+                    id: ch.id || '',
+                    number: ch.number || '',
+                    title: ch.title || `Chapter ${ch.number || ''}`,
+                    url: ch.url || ch.id || '',
+                    volume: ch.volume || '',
+                    pages: ch.pages || 0,
+                    translatedLanguage: ch.translatedLanguage || 'en',
+                    updatedAt: ch.updatedAt || '',
+                    thumbnail: coverImage || '',
+                    isLatest: index === 0,
+                    source: 'mangafire',
+                    scanlationGroup: ch.scanlationGroup || ch.scanlator || 'Unknown'
+                  }));
+                  
+                  // Sort chapters by number in descending order (newest first)
+                  mappedChapters.sort((a: Chapter, b: Chapter) => {
+                    const numA = parseFloat(a.number) || 0;
+                    const numB = parseFloat(b.number) || 0;
+                    return numB - numA;
+                  });
+                  
+                  // Save state
+                  setInternalMangaId(mangaFireId);
+                  setProvider('mangafire');
+                  
+                  setChapters(mappedChapters);
+                  setCurrentPage(firstPage ? 1 : currentPage + 1);
+                  setIsLoading(false);
+                  setIsLoadingMore(false);
+                  setSelectedChapter(mappedChapters[0]);
+                  setSelectedSource('mangafire');
+                  return;
+                } else {
+                  console.log('[ChapterList] MangaFire found no chapters');
+                }
+              } catch (fetchError: any) {
+                console.error('[ChapterList] Error fetching chapters from MangaFire:', fetchError.message);
+              }
+            }
+          } catch (mangafireError: any) {
+            console.error('[ChapterList] Error fetching from MangaFire:', mangafireError.message);
+          }
         }
       }
     } catch (error: any) {
@@ -1634,7 +2040,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
     
     // Update the state with the new ID
     setInternalMangaId(formattedId);
-    setProvider(source as 'katana' | 'mangadex');
+    setProvider(source as 'katana' | 'mangadex' | 'mangafire');
     
     // Fetch chapters directly with the ID
     console.log(`[ChapterList] Fetching chapters with ID: ${formattedId}, source: ${source}`);
@@ -1733,7 +2139,7 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
   // Update the renderChapterItem function to handle loading state
   const renderChapterItem = ({ item, index }: { item: Chapter, index: number }) => {
     // If the item is not fully loaded yet, show a loading placeholder
-    if (!item || !item.number) {
+    if (!item || !item.number || !item.id) {
       return (
         <View style={styles.chapterItemContainer}>
           <View style={[styles.chapterCard, { opacity: 0.7 }]}>
@@ -1763,7 +2169,6 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           styles.chapterCard,
           isRead && styles.readChapterCard,
           !isRead && styles.unreadChapterCard,
-          isNewest && styles.newestChapterCard,
         ]}>
           <ExpoImage
             source={{ uri: thumbnailUrl }}
@@ -1780,35 +2185,46 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
           />
 
           <View style={styles.chapterContent}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-              {isNewest ? (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4, flex: 1 }}>
+              {isNewest && (
                 <MaterialIcons
                   name="star"
                   size={16}
                   color="#FFD700"
-                  style={{ marginRight: 6 }}
+                  style={{ marginRight: 6, marginTop: 1 }}
                 />
-              ) : null}
-              {isRead ? (
+              )}
+              {isRead && (
                 <MaterialIcons
                   name="check-circle"
                   size={16}
                   color="#02A9FF"
-                  style={{ marginRight: 6 }}
+                  style={{ marginRight: 6, marginTop: 1 }}
                 />
-              ) : null}
-              <Text style={[
-                styles.chapterHeader,
-                isRead && styles.readText
-              ]}>
-                Chapter {item.number}
-                {item.volume ? ` – Vol. ${item.volume}` : ''}
-              </Text>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text 
+                  style={[styles.chapterHeader, isRead && styles.readText]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  Chapter {item.number || 'Unknown'}
+                </Text>
+                {item.volume && item.volume.trim() && (
+                  <Text 
+                    style={[styles.chapterTitle, isRead && styles.readText]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    Volume {item.volume}
+                  </Text>
+                )}
+              </View>
             </View>
 
             <View style={styles.chapterMeta}>
-              {item.pages && item.pages > 0 ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
+              {item.pages && item.pages > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <MaterialIcons
                     name="description"
                     size={12}
@@ -1816,26 +2232,26 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
                     style={{ marginRight: 4 }}
                   />
                   <Text style={[styles.metaText, isRead && styles.readMetaText]}>
-                    {item.pages} pages
+                    {item.pages || 0}p
                   </Text>
                 </View>
-              ) : null}
-              {releaseDate !== 'Unknown' ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
+              )}
+              {releaseDate && releaseDate !== 'Unknown' && (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <MaterialIcons
                     name="calendar-today"
                     size={12}
                     color={isRead ? '#02A9FF' : '#999999'}
                     style={{ marginRight: 4 }}
                   />
-                  <Text style={[styles.metaText, isRead && styles.readMetaText]}>
+                  <Text style={[styles.metaText, isRead && styles.readMetaText]} numberOfLines={1}>
                     {releaseDate}
                   </Text>
                 </View>
-              ) : null}
-              {isNewest ? (
+              )}
+              {isNewest && (
                 <Text style={styles.newBadge}>NEW</Text>
-              ) : null}
+              )}
             </View>
           </View>
 
@@ -1875,6 +2291,42 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
   const handleSearchToggle = () => {
     setSearchVisible(!searchVisible);
   };
+
+  // Add sort toggle handler for volume ranges
+  const handleSortToggle = () => {
+    setIsNewestFirst(prev => !prev);
+  };
+
+  // Add helper function for rendering volume range labels
+  const renderVolumeRangeLabel = useCallback((range: Chapter[]) => {
+    if (!range || range.length === 0) return `Range`;
+    
+    // Check if this range has volume information
+    const hasVolumeInfo = range.some(chapter => chapter.volume && chapter.volume.trim() !== '');
+    
+    if (hasVolumeInfo) {
+      // Get unique volumes in this range
+      const volumes = [...new Set(range.map(ch => ch.volume).filter(vol => vol && vol.trim() !== ''))];
+      volumes.sort((a, b) => {
+        const numA = parseFloat(a!) || 0;
+        const numB = parseFloat(b!) || 0;
+        return isNewestFirst ? numB - numA : numA - numB;
+      });
+      
+      if (volumes.length === 1) {
+        return `Vol. ${volumes[0]}`;
+      } else if (volumes.length > 1) {
+        return `Vol. ${volumes[0]} - ${volumes[volumes.length - 1]}`;
+      }
+    }
+    
+    // Fallback to chapter range
+    const first = range[0]?.number;
+    const last = range[range.length - 1]?.number;
+    
+    if (first === last) return `Ch. ${first}`;
+    return `Ch. ${first} - ${last}`;
+  }, [isNewestFirst]);
 
   // Update the onViewableItemsChanged function to use the new thumbnail loading logic
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
@@ -2001,10 +2453,10 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
         <View style={styles.headerButtons}>
           <TouchableOpacity 
             style={[styles.controlButton, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]} 
-            onPress={toggleSort}
+            onPress={handleSortToggle}
           >
             <MaterialIcons 
-              name={sortAscending ? "sort" : "sort"} 
+              name={isNewestFirst ? "keyboard-arrow-down" : "keyboard-arrow-up"} 
               size={18} 
               color="#FFFFFF" 
             />
@@ -2057,6 +2509,29 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
         </View>
       )}
 
+      {volumeRanges && volumeRanges.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.volumeRangeContainer}
+        >
+          {volumeRanges.map((range, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.volumeRangeButton,
+                activeVolumeTab === index && styles.activeVolumeRangeButton
+              ]}
+              onPress={() => setActiveVolumeTab(index)}
+            >
+              <Text style={styles.volumeRangeButtonText}>
+                {range && range.length > 0 ? renderVolumeRangeLabel(range) : 'Range'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {isLoading ? (
         <LoadingView message="Loading chapters..." />
       ) : error ? (
@@ -2065,15 +2540,21 @@ export default function ChapterList({ mangaTitle, anilistId, countryOfOrigin, co
         <EmptyView message="No chapters found. Try another source." />
       ) : (
         <FlashList
-          data={chapters.filter(Boolean)}
+          data={
+            volumeRanges && volumeRanges.length > 0 && volumeRanges[activeVolumeTab] 
+              ? volumeRanges[activeVolumeTab].filter(Boolean) 
+              : chapters && chapters.length > 0 
+                ? chapters.filter(Boolean) 
+                : []
+          }
           renderItem={renderChapterItem}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item?.id || ''}
           estimatedItemSize={110}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           numColumns={columnCount}
-          key={`chapter-list-${columnCount}`}
+          key={`chapter-list-${columnCount}-${activeVolumeTab}`}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
           onViewableItemsChanged={onViewableItemsChanged}

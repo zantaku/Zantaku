@@ -23,6 +23,7 @@ import { createShimmerPlaceholder } from 'react-native-shimmer-placeholder';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { KATANA_API_URL, KatanaProvider, MANGADEX_API_URL, MangaDexProvider } from '../api/proxy/providers/manga';
+import MangaFireProvider from '../api/proxy/providers/manga/mangafire';
 
 // Add BASE_API_URL constant
 const BASE_API_URL = 'https://takiapi.xyz';
@@ -110,7 +111,7 @@ const pillStyles = StyleSheet.create({
 });
 
 interface ProviderPreferences {
-  defaultProvider: 'katana' | 'mangadex';
+  defaultProvider: 'katana' | 'mangadex' | 'mangafire';
   autoSelectSource: boolean;
   preferredChapterLanguage: string;
   preferredScanlationGroup: string;
@@ -285,21 +286,36 @@ export default function ChapterSourcesModal({
 
             if (response.ok) {
               const responseText = await response.text();
+              
+              // LOG ENTIRE MANGADX API RESPONSE
+              console.log('[ChapterModal] ===== FULL MANGADX API RESPONSE =====');
+              console.log('[ChapterModal] Request URL:', mangadexUrl);
+              console.log('[ChapterModal] Response Status:', response.status);
+              console.log('[ChapterModal] Response Headers:', Object.fromEntries(response.headers.entries()));
+              console.log('[ChapterModal] COMPLETE RESPONSE TEXT:', responseText);
+              console.log('[ChapterModal] ===== END MANGADX API RESPONSE =====');
+              
               try {
                 const responseData = JSON.parse(responseText);
+                
+                // LOG PARSED JSON DATA
+                console.log('[ChapterModal] ===== PARSED MANGADX JSON =====');
+                console.log('[ChapterModal] COMPLETE PARSED DATA:', JSON.stringify(responseData, null, 2));
+                console.log('[ChapterModal] ===== END PARSED MANGADX JSON =====');
+                
                 const images = MangaDexProvider.parseChapterPagesResponse(responseData);
                 if (images.length > 0) {
                   return images;
                 } else {
-                  throw new Error('No images in MangaDex response');
+                  throw new Error('No images in MangaDx response');
                 }
               } catch (parseError) {
                 console.error('[ChapterModal] JSON parse error:', parseError);
                 console.log('[ChapterModal] Response text preview:', responseText.substring(0, 100));
-                throw new Error('Failed to parse MangaDex response');
+                throw new Error('Failed to parse MangaDx response');
               }
             }
-            throw new Error(`Failed to fetch MangaDex chapter: ${response.status}`);
+            throw new Error(`Failed to fetch MangaDx chapter: ${response.status}`);
           } catch (fetchError: any) {
             console.error('[ChapterModal] Fetch error:', fetchError.message);
             throw fetchError;
@@ -346,6 +362,13 @@ export default function ChapterSourcesModal({
               katanaChapterId // chapterId
             );
             
+            // LOG ENTIRE KATANA API RESPONSE
+            console.log('[ChapterModal] ===== FULL KATANA API RESPONSE =====');
+            console.log('[ChapterModal] Request URL:', chapterUrl);
+            console.log('[ChapterModal] Response Success:', chapterResponse.success);
+            console.log('[ChapterModal] COMPLETE RESPONSE DATA:', JSON.stringify(chapterResponse, null, 2));
+            console.log('[ChapterModal] ===== END KATANA API RESPONSE =====');
+            
             if (!chapterResponse.success || !chapterResponse.data) {
               console.log('[ChapterModal] Failed to fetch chapter pages', 
                 chapterResponse ? `Error: ${JSON.stringify(chapterResponse).substring(0, 200)}...` : 'No response data');
@@ -380,6 +403,146 @@ export default function ChapterSourcesModal({
             // The rest of your existing code for searching
             // ...
 
+          }
+        } else if (source === 'mangafire') {
+          console.log('[ChapterModal] Using MangaFire provider to fetch chapter');
+          
+          // Use mangaId directly for MangaFire
+          if (mangaId) {
+            console.log('[ChapterModal] Using provided mangaId directly for MangaFire:', mangaId);
+            
+            // Extract chapter number or use the passed chapter number
+            let mangafireChapterId;
+            
+            // For MangaFire, we need the chapter ID from the chapter object
+            if (selectedChapter.id) {
+              mangafireChapterId = selectedChapter.id;
+            } else if (selectedChapter.number) {
+              // If we only have the chapter number, we might need to construct the ID
+              mangafireChapterId = selectedChapter.number;
+            } else {
+              // Try to extract from the chapterId parameter
+              mangafireChapterId = chapterId;
+            }
+            
+            console.log('[ChapterModal] Using MangaFire chapter ID:', mangafireChapterId);
+            
+            try {
+              // Use MangaFire provider to get chapter pages
+              const chapterResponse = await MangaFireProvider.getChapterPages(mangafireChapterId);
+              
+              // LOG ENTIRE MANGAFIRE API RESPONSE
+              console.log('[ChapterModal] ===== FULL MANGAFIRE API RESPONSE =====');
+              console.log('[ChapterModal] Chapter ID:', mangafireChapterId);
+              console.log('[ChapterModal] COMPLETE RESPONSE DATA:', JSON.stringify(chapterResponse, null, 2));
+              console.log('[ChapterModal] ===== END MANGAFIRE API RESPONSE =====');
+              
+              if (!chapterResponse || !chapterResponse.pages || chapterResponse.pages.length === 0) {
+                console.log('[ChapterModal] Failed to fetch chapter pages from MangaFire');
+                throw new Error('Failed to fetch chapter data from MangaFire');
+              }
+              
+              console.log('[ChapterModal] Raw MangaFire chapter response:', JSON.stringify(chapterResponse).substring(0, 300));
+              
+              // Check if this is the latest chapter
+              const isLatestChapter = chapterResponse.isLatestChapter || false;
+              
+              if (selectedChapter) {
+                selectedChapter.isLatest = isLatestChapter;
+              }
+              
+              // Extract image URLs from the response with proper header handling
+              const images = chapterResponse.pages.map((page: any, index: number) => {
+                const imageUrl = page.url;
+                
+                // For MangaFire images, we need to include the headers information
+                if (imageUrl && imageUrl.includes('mfcdn')) {
+                  // Return an object with both URL and headers for MangaFire images
+                  return {
+                    url: imageUrl,
+                    headers: page.headers || { 'Referer': 'https://mangafire.to' }
+                  };
+                }
+                
+                // For other providers, return just the URL string
+                return imageUrl;
+              }).filter((item: any) => {
+                const url = typeof item === 'string' ? item : item.url;
+                return url && url.trim() !== '';
+              });
+              
+              console.log('[ChapterModal] Processed', images.length, 'images from MangaFire with headers');
+              
+              if (images.length === 0) {
+                console.log('[ChapterModal] No images found in MangaFire response. Full response:', 
+                  JSON.stringify(chapterResponse).substring(0, 500));
+                throw new Error('No images found in MangaFire response');
+              }
+              
+              return images;
+            } catch (mangafireError: any) {
+              console.error('[ChapterModal] Error fetching from MangaFire:', mangafireError.message);
+              throw mangafireError;
+            }
+          }
+          // FALLBACK: If no mangaId is provided, use title search
+          else {
+            console.log('[ChapterModal] No mangaId provided for MangaFire, falling back to title search');
+            
+            // Try to search for the manga first, then get chapters
+            try {
+              const searchResults = await MangaFireProvider.search(userPreferredTitle || englishTitle);
+              
+              if (searchResults && searchResults.length > 0) {
+                const mangaFireId = searchResults[0].id;
+                console.log('[ChapterModal] Found manga on MangaFire via search:', mangaFireId);
+                
+                // Get manga details to find the chapter
+                const mangaDetails = await MangaFireProvider.getMangaDetails(mangaFireId);
+                const chapters = await MangaFireProvider.getChapters(mangaFireId);
+                
+                // Find the matching chapter
+                const matchingChapter = chapters.find((ch: any) => 
+                  ch.number === selectedChapter.number || 
+                  ch.id === selectedChapter.id
+                );
+                
+                if (matchingChapter) {
+                  console.log('[ChapterModal] Found matching chapter on MangaFire:', matchingChapter.id);
+                  
+                  const chapterResponse = await MangaFireProvider.getChapterPages(matchingChapter.id);
+                  
+                  if (chapterResponse && chapterResponse.pages && chapterResponse.pages.length > 0) {
+                    const images = chapterResponse.pages.map((page: any, index: number) => {
+                      const imageUrl = page.url;
+                      
+                      // For MangaFire images, we need to include the headers information
+                      if (imageUrl && imageUrl.includes('mfcdn')) {
+                        // Return an object with both URL and headers for MangaFire images
+                        return {
+                          url: imageUrl,
+                          headers: page.headers || { 'Referer': 'https://mangafire.to' }
+                        };
+                      }
+                      
+                      // For other providers, return just the URL string
+                      return imageUrl;
+                    }).filter((item: any) => {
+                      const url = typeof item === 'string' ? item : item.url;
+                      return url && url.trim() !== '';
+                    });
+                    
+                    console.log('[ChapterModal] Processed', images.length, 'images from MangaFire with headers');
+                    return images;
+                  }
+                }
+              }
+              
+              throw new Error('Could not find chapter on MangaFire via search');
+            } catch (searchError: any) {
+              console.error('[ChapterModal] MangaFire search fallback failed:', searchError.message);
+              throw searchError;
+            }
           }
         } else {
           console.error('[ChapterModal] Unknown source:', source);
@@ -454,7 +617,7 @@ export default function ChapterSourcesModal({
 
     try {
       // Use the correct API name based on the source
-      const apiName = selectedChapter.source === 'mangadex' ? 'MangaDex' : 'Katana';
+      const apiName = selectedChapter.source === 'mangadex' ? 'MangaDex' : selectedChapter.source === 'mangafire' ? 'MangaFire' : 'Katana';
       console.log(`[ChapterModal] Fetching chapter ${selectedChapter.number} pages from ${apiName} API`);
 
       // Determine the correct chapter ID to use
@@ -529,14 +692,29 @@ export default function ChapterSourcesModal({
               
               try {
                 const response = await fetch(katanaUrl);
+                
+                // LOG ENTIRE DIRECT KATANA API RESPONSE
+                console.log('[ChapterModal] ===== DIRECT KATANA API FALLBACK RESPONSE =====');
+                console.log('[ChapterModal] Request URL:', katanaUrl);
+                console.log('[ChapterModal] Response Status:', response.status);
+                console.log('[ChapterModal] Response OK:', response.ok);
+                
                 if (response.ok) {
-                  const data = await response.json();
+                  const responseText = await response.text();
+                  console.log('[ChapterModal] COMPLETE RESPONSE TEXT:', responseText);
+                  
+                  const data = JSON.parse(responseText);
+                  console.log('[ChapterModal] COMPLETE PARSED DATA:', JSON.stringify(data, null, 2));
+                  console.log('[ChapterModal] ===== END DIRECT KATANA API FALLBACK RESPONSE =====');
                   
                   if (data.success && data.data && data.data.imageUrls && Array.isArray(data.data.imageUrls)) {
                     pages = data.data.imageUrls.map((img: { proxyUrl: string }) => `${KATANA_API_URL}${img.proxyUrl}`);
                     console.log(`[ChapterModal] Successfully loaded ${pages.length} pages from direct Katana API`);
                     break;
                   }
+                } else {
+                  console.log('[ChapterModal] Response not OK, status:', response.status);
+                  console.log('[ChapterModal] ===== END DIRECT KATANA API FALLBACK RESPONSE =====');
                 }
               } catch (e) {
                 console.error(`[ChapterModal] Direct Katana fetch failed for ID ${id}:`, e);
@@ -559,14 +737,30 @@ export default function ChapterSourcesModal({
               headers: MangaDexProvider.getHeaders()
             });
             
+            // LOG ENTIRE DIRECT MANGADX FALLBACK RESPONSE
+            console.log('[ChapterModal] ===== DIRECT MANGADX FALLBACK RESPONSE =====');
+            console.log('[ChapterModal] Request URL:', mangadexUrl);
+            console.log('[ChapterModal] Response Status:', response.status);
+            console.log('[ChapterModal] Response OK:', response.ok);
+            console.log('[ChapterModal] Response Headers:', Object.fromEntries(response.headers.entries()));
+            
             if (response.ok) {
-              const responseData = await response.json();
+              const responseText = await response.text();
+              console.log('[ChapterModal] COMPLETE RESPONSE TEXT:', responseText);
+              
+              const responseData = JSON.parse(responseText);
+              console.log('[ChapterModal] COMPLETE PARSED DATA:', JSON.stringify(responseData, null, 2));
+              console.log('[ChapterModal] ===== END DIRECT MANGADX FALLBACK RESPONSE =====');
+              
               const images = MangaDexProvider.parseChapterPagesResponse(responseData);
               
               if (images && images.length > 0) {
-                console.log(`[ChapterModal] Successfully loaded ${images.length} pages directly from MangaDex`);
+                console.log(`[ChapterModal] Successfully loaded ${images.length} pages directly from MangaDx`);
                 pages = images;
               }
+            } else {
+              console.log('[ChapterModal] Response not OK, status:', response.status);
+              console.log('[ChapterModal] ===== END DIRECT MANGADX FALLBACK RESPONSE =====');
             }
           } catch (mangadexError: any) {
             console.error('[ChapterModal] Direct MangaDex fallback failed:', mangadexError.message);
@@ -580,8 +774,21 @@ export default function ChapterSourcesModal({
             const takiapiUrl = `${BASE_API_URL}/manga/mangareader/read/${selectedChapter.id}`;
             
             const response = await fetch(takiapiUrl);
+            
+            // LOG ENTIRE TAKIAPI MANGAREADER FALLBACK RESPONSE
+            console.log('[ChapterModal] ===== TAKIAPI MANGAREADER FALLBACK RESPONSE =====');
+            console.log('[ChapterModal] Request URL:', takiapiUrl);
+            console.log('[ChapterModal] Response Status:', response.status);
+            console.log('[ChapterModal] Response OK:', response.ok);
+            console.log('[ChapterModal] Response Headers:', Object.fromEntries(response.headers.entries()));
+            
             if (response.ok) {
-              const data = await response.json();
+              const responseText = await response.text();
+              console.log('[ChapterModal] COMPLETE RESPONSE TEXT:', responseText);
+              
+              const data = JSON.parse(responseText);
+              console.log('[ChapterModal] COMPLETE PARSED DATA:', JSON.stringify(data, null, 2));
+              console.log('[ChapterModal] ===== END TAKIAPI MANGAREADER FALLBACK RESPONSE =====');
               
               // Check for both result.images (old API) and images (new API) formats
               const images = data?.result?.images || data?.images;
@@ -601,6 +808,9 @@ export default function ChapterSourcesModal({
                 
                 console.log(`[ChapterModal] Successfully loaded ${pages.length} pages from takiapi mangareader`);
               }
+            } else {
+              console.log('[ChapterModal] Response not OK, status:', response.status);
+              console.log('[ChapterModal] ===== END TAKIAPI MANGAREADER FALLBACK RESPONSE =====');
             }
           } catch (takiapiError: any) {
             console.error('[ChapterModal] Takiapi mangareader fallback failed:', takiapiError.message);
@@ -664,9 +874,9 @@ export default function ChapterSourcesModal({
   const [totalImages, setTotalImages] = useState(0);
   const [processedImages, setProcessedImages] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [pages, setPages] = useState<string[]>([]);
+  const [pages, setPages] = useState<(string | { url: string; headers?: any })[]>([]);
   const [loadedPages, setLoadedPages] = useState<number>(0);
-  const [pageUrls, setPageUrls] = useState<string[]>([]);
+  const [pageUrls, setPageUrls] = useState<(string | { url: string; headers?: any })[]>([]);
   const [isClosing, setIsClosing] = useState(false);
   const [pillVisible, setPillVisible] = useState(false);
   const [pillMessage, setPillMessage] = useState('Loading chapter...');
@@ -778,22 +988,50 @@ export default function ChapterSourcesModal({
         mangaId: mangaId || '',
         anilistId: anilistId || '',
         shouldSaveProgress: (!isIncognito).toString(),
-        isLatest: (selectedChapter?.isLatest || false).toString()
+        isLatestChapter: (selectedChapter?.isLatest || false).toString(),
+        isFirstChapter: (() => {
+          // Extract numeric part from chapter number to handle cases like "87:" or "1.0"
+          const chapterNum = selectedChapter?.number || '';
+          const numericPart = chapterNum.replace(/[^\d.]/g, ''); // Remove non-numeric characters except dots
+          const parsedNum = parseFloat(numericPart);
+          
+          console.log('[ChapterModal] Chapter number analysis:', {
+            original: chapterNum,
+            numericPart: numericPart,
+            parsedNum: parsedNum,
+            isFirstChapter: !isNaN(parsedNum) && parsedNum <= 1
+          });
+          
+          return (!isNaN(parsedNum) && parsedNum <= 1).toString();
+        })()
       };
 
       const maxImages = Math.min(pageUrls.length, 50);
       console.log(`Processing ${maxImages} images out of ${pageUrls.length} total images`);
       
-      // Clear any existing image params
+      // Clear any existing image params and header params
       Object.keys(params).forEach(key => {
-        if (key.startsWith('image')) {
+        if (key.startsWith('image') || key.startsWith('header')) {
           delete params[key];
         }
       });
       
-      // Add new image params
+      // Add new image params, handling both simple URLs and objects with headers
       for (let i = 0; i < maxImages; i++) {
-        params[`image${i + 1}`] = pageUrls[i];
+        const imageItem = pageUrls[i];
+        
+        if (typeof imageItem === 'string') {
+          // Simple URL string (for Katana, MangaDex, etc.)
+          params[`image${i + 1}`] = imageItem;
+        } else if (imageItem && typeof imageItem === 'object' && imageItem.url) {
+          // Object with URL and headers (for MangaFire)
+          params[`image${i + 1}`] = imageItem.url;
+          
+          // Add headers as separate parameters if they exist
+          if (imageItem.headers) {
+            params[`header${i + 1}`] = JSON.stringify(imageItem.headers);
+          }
+        }
       }
 
       // Use webnovelreader if current reader is webnovel or if it's a KR/CN manga
@@ -823,14 +1061,24 @@ export default function ChapterSourcesModal({
     navigateToReader();
   }, [navigateToReader]);
 
-  const renderPage = useCallback(({ item, index }: { item: string; index: number }) => {
+  const renderPage = useCallback(({ item, index }: { item: string | { url: string; headers?: any }; index: number }) => {
+    // Extract URL and headers from the item
+    const imageUrl = typeof item === 'string' ? item : item.url;
+    const itemHeaders = typeof item === 'object' && item.headers ? item.headers : imageHeaders;
+    
+    console.log(`[ChapterModal] Rendering page ${index + 1}:`, {
+      url: imageUrl,
+      headers: itemHeaders,
+      itemType: typeof item
+    });
+    
     return (
       <TouchableOpacity style={styles.pageItem} onPress={handlePagePress}>
         <View style={styles.pageImageContainer}>
           <ExpoImage
             source={{ 
-              uri: item,
-              headers: imageHeaders
+              uri: imageUrl,
+              headers: itemHeaders
             }}
             style={styles.pageImage}
             contentFit="cover"
@@ -846,7 +1094,7 @@ export default function ChapterSourcesModal({
     );
   }, [selectedChapter?.id, handlePagePress]);
 
-  const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
+  const keyExtractor = useCallback((item: string | { url: string; headers?: any }, index: number) => `page-${index}`, []);
 
   // Add useEffect for auto-navigation
   useEffect(() => {

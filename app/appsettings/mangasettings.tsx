@@ -29,7 +29,7 @@ interface MangaReaderPreferences {
 
 // Interface for manga provider preferences
 interface ProviderPreferences {
-  defaultProvider: 'katana' | 'mangadex';
+  defaultProvider: 'mangafire' | 'mangadex';
   autoSelectSource: boolean;
   preferredChapterLanguage: string;
   preferredScanlationGroup: string;
@@ -41,11 +41,32 @@ interface ProviderPreferences {
 export default function MangaSettingsPage() {
   const router = useRouter();
   const { isDarkMode, currentTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState('reader'); // 'reader' or 'providers'
+  const [activeTab, setActiveTab] = useState('manga'); // 'manga', 'webtoon', or 'providers'
   
-  // State for manga reader settings
-  const [readerPreferences, setReaderPreferences] = useState<MangaReaderPreferences>({
+  // State for manga reader settings (horizontal reader)
+  const [mangaReaderPreferences, setMangaReaderPreferences] = useState<MangaReaderPreferences>({
     readingDirection: 'rtl',
+    rememberPosition: true,
+    autoNavigateNextChapter: true,
+    keepScreenOn: true,
+    showPageNumber: true,
+    fullscreenByDefault: false,
+    tapToNavigate: true,
+    zoomEnabled: true,
+    doubleTapToZoom: true,
+    preloadPages: 5,
+    debugMode: false,
+    appearance: {
+      backgroundColor: '#000000',
+      pageGap: 8,
+      pageBorderRadius: 0,
+      pageTransitionAnimation: true
+    }
+  });
+
+  // State for webtoon reader settings (vertical reader)
+  const [webtoonReaderPreferences, setWebtoonReaderPreferences] = useState<MangaReaderPreferences>({
+    readingDirection: 'vertical',
     rememberPosition: true,
     autoNavigateNextChapter: true,
     keepScreenOn: true,
@@ -66,7 +87,7 @@ export default function MangaSettingsPage() {
 
   // State for provider settings
   const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>({
-    defaultProvider: 'katana',
+    defaultProvider: 'mangafire',
     autoSelectSource: true,
     preferredChapterLanguage: 'en',
     preferredScanlationGroup: '',
@@ -80,9 +101,15 @@ export default function MangaSettingsPage() {
     const loadSettings = async () => {
       try {
         // Load manga reader settings
-        const readerData = await AsyncStorage.getItem('mangaReaderPreferences');
-        if (readerData) {
-          setReaderPreferences(JSON.parse(readerData));
+        const mangaReaderData = await AsyncStorage.getItem('mangaReaderPreferences');
+        if (mangaReaderData) {
+          setMangaReaderPreferences(JSON.parse(mangaReaderData));
+        }
+
+        // Load webtoon reader settings
+        const webtoonReaderData = await AsyncStorage.getItem('webtoonReaderPreferences');
+        if (webtoonReaderData) {
+          setWebtoonReaderPreferences(JSON.parse(webtoonReaderData));
         }
 
         // Load provider settings
@@ -98,13 +125,23 @@ export default function MangaSettingsPage() {
     loadSettings();
   }, []);
 
-  // Save reader preferences
-  const saveReaderPreferences = async (newPreferences: MangaReaderPreferences) => {
+  // Save manga reader preferences
+  const saveMangaReaderPreferences = async (newPreferences: MangaReaderPreferences) => {
     try {
       await AsyncStorage.setItem('mangaReaderPreferences', JSON.stringify(newPreferences));
-      setReaderPreferences(newPreferences);
+      setMangaReaderPreferences(newPreferences);
     } catch (error) {
       console.error('Failed to save manga reader preferences:', error);
+    }
+  };
+
+  // Save webtoon reader preferences
+  const saveWebtoonReaderPreferences = async (newPreferences: MangaReaderPreferences) => {
+    try {
+      await AsyncStorage.setItem('webtoonReaderPreferences', JSON.stringify(newPreferences));
+      setWebtoonReaderPreferences(newPreferences);
+    } catch (error) {
+      console.error('Failed to save webtoon reader preferences:', error);
     }
   };
 
@@ -148,15 +185,15 @@ export default function MangaSettingsPage() {
   }, [router]);
 
   // Tab rendering functions
-  const renderReaderTab = () => (
+  const renderMangaTab = () => (
     <>
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <FontAwesome5 name="book-open" size={20} color="#42A5F5" />
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Reading Settings</Text>
+          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Manga Reader Settings</Text>
         </View>
 
-        {/* Reading Direction Setting */}
+        {/* Reading Direction Setting - Only RTL/LTR for manga */}
         <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
           <View style={{ marginBottom: 12 }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reading Direction</Text>
@@ -164,18 +201,17 @@ export default function MangaSettingsPage() {
           <View style={styles.directionOptions}>
             {[
               { id: 'rtl', name: 'Right to Left', icon: 'arrow-left' },
-              { id: 'ltr', name: 'Left to Right', icon: 'arrow-right' },
-              { id: 'vertical', name: 'Vertical', icon: 'arrow-down' }
+              { id: 'ltr', name: 'Left to Right', icon: 'arrow-right' }
             ].map(direction => (
               <TouchableOpacity
                 key={`direction-${direction.id}`}
                 style={[
                   styles.directionOption,
-                  readerPreferences.readingDirection === direction.id && styles.directionOptionSelected
+                  mangaReaderPreferences.readingDirection === direction.id && styles.directionOptionSelected
                 ]}
                 onPress={() => {
-                  saveReaderPreferences({
-                    ...readerPreferences,
+                  saveMangaReaderPreferences({
+                    ...mangaReaderPreferences,
                     readingDirection: direction.id as 'ltr' | 'rtl' | 'vertical'
                   });
                 }}
@@ -183,11 +219,11 @@ export default function MangaSettingsPage() {
                 <FontAwesome5 
                   name={direction.icon} 
                   size={14} 
-                  color={readerPreferences.readingDirection === direction.id ? '#fff' : currentTheme.colors.text} 
+                  color={mangaReaderPreferences.readingDirection === direction.id ? '#fff' : currentTheme.colors.text} 
                 />
                 <Text style={[
                   styles.directionOptionText,
-                  { color: readerPreferences.readingDirection === direction.id ? '#fff' : currentTheme.colors.text }
+                  { color: mangaReaderPreferences.readingDirection === direction.id ? '#fff' : currentTheme.colors.text }
                 ]}>
                   {direction.name}
                 </Text>
@@ -201,15 +237,15 @@ export default function MangaSettingsPage() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Remember Reading Position</Text>
             <Switch
-              value={readerPreferences.rememberPosition}
+              value={mangaReaderPreferences.rememberPosition}
               onValueChange={(value) => {
-                saveReaderPreferences({
-                  ...readerPreferences,
+                saveMangaReaderPreferences({
+                  ...mangaReaderPreferences,
                   rememberPosition: value
                 });
               }}
               trackColor={{ false: '#767577', true: '#42A5F5' }}
-              thumbColor={readerPreferences.rememberPosition ? '#fff' : '#f4f3f4'}
+              thumbColor={mangaReaderPreferences.rememberPosition ? '#fff' : '#f4f3f4'}
             />
           </View>
         </View>
@@ -218,15 +254,15 @@ export default function MangaSettingsPage() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Navigate to Next Chapter</Text>
             <Switch
-              value={readerPreferences.autoNavigateNextChapter}
+              value={mangaReaderPreferences.autoNavigateNextChapter}
               onValueChange={(value) => {
-                saveReaderPreferences({
-                  ...readerPreferences,
+                saveMangaReaderPreferences({
+                  ...mangaReaderPreferences,
                   autoNavigateNextChapter: value
                 });
               }}
               trackColor={{ false: '#767577', true: '#42A5F5' }}
-              thumbColor={readerPreferences.autoNavigateNextChapter ? '#fff' : '#f4f3f4'}
+              thumbColor={mangaReaderPreferences.autoNavigateNextChapter ? '#fff' : '#f4f3f4'}
             />
           </View>
         </View>
@@ -235,15 +271,15 @@ export default function MangaSettingsPage() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Keep Screen On While Reading</Text>
             <Switch
-              value={readerPreferences.keepScreenOn}
+              value={mangaReaderPreferences.keepScreenOn}
               onValueChange={(value) => {
-                saveReaderPreferences({
-                  ...readerPreferences,
+                saveMangaReaderPreferences({
+                  ...mangaReaderPreferences,
                   keepScreenOn: value
                 });
               }}
               trackColor={{ false: '#767577', true: '#42A5F5' }}
-              thumbColor={readerPreferences.keepScreenOn ? '#fff' : '#f4f3f4'}
+              thumbColor={mangaReaderPreferences.keepScreenOn ? '#fff' : '#f4f3f4'}
             />
           </View>
         </View>
@@ -252,15 +288,15 @@ export default function MangaSettingsPage() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Show Page Number</Text>
             <Switch
-              value={readerPreferences.showPageNumber}
+              value={mangaReaderPreferences.showPageNumber}
               onValueChange={(value) => {
-                saveReaderPreferences({
-                  ...readerPreferences,
+                saveMangaReaderPreferences({
+                  ...mangaReaderPreferences,
                   showPageNumber: value
                 });
               }}
               trackColor={{ false: '#767577', true: '#42A5F5' }}
-              thumbColor={readerPreferences.showPageNumber ? '#fff' : '#f4f3f4'}
+              thumbColor={mangaReaderPreferences.showPageNumber ? '#fff' : '#f4f3f4'}
             />
           </View>
         </View>
@@ -274,10 +310,10 @@ export default function MangaSettingsPage() {
               minimumValue={1}
               maximumValue={10}
               step={1}
-              value={readerPreferences.preloadPages}
+              value={mangaReaderPreferences.preloadPages}
               onValueChange={(value) => {
-                saveReaderPreferences({
-                  ...readerPreferences,
+                saveMangaReaderPreferences({
+                  ...mangaReaderPreferences,
                   preloadPages: value
                 });
               }}
@@ -286,7 +322,7 @@ export default function MangaSettingsPage() {
               thumbTintColor="#42A5F5"
             />
             <Text style={[styles.sliderValue, { color: currentTheme.colors.text }]}>
-              {readerPreferences.preloadPages}
+              {mangaReaderPreferences.preloadPages}
             </Text>
           </View>
         </View>
@@ -334,11 +370,199 @@ export default function MangaSettingsPage() {
                 pageTransitionAnimation: true
               }
             };
-            saveReaderPreferences(defaultSettings);
-            alert('Reader settings reset to default');
+            saveMangaReaderPreferences(defaultSettings);
+            alert('Manga reader settings reset to default');
           }}
         >
-          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reset Reader Settings</Text>
+          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reset Manga Reader Settings</Text>
+          <FontAwesome5 name="undo" size={20} color="#f44336" />
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const renderWebtoonTab = () => (
+    <>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <FontAwesome5 name="scroll" size={20} color="#4CAF50" />
+          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Webtoon Reader Settings</Text>
+        </View>
+
+        {/* Reading Direction Setting - Only Vertical for webtoon */}
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ marginBottom: 12 }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reading Direction</Text>
+            <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
+              Webtoons are read vertically from top to bottom
+            </Text>
+          </View>
+          <View style={styles.directionOptions}>
+            <TouchableOpacity
+              style={[
+                styles.directionOption,
+                styles.directionOptionSelected
+              ]}
+              disabled={true}
+            >
+              <FontAwesome5 
+                name="arrow-down" 
+                size={14} 
+                color="#fff"
+              />
+              <Text style={[
+                styles.directionOptionText,
+                { color: '#fff' }
+              ]}>
+                Vertical (Top to Bottom)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Toggle Settings */}
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Remember Reading Position</Text>
+            <Switch
+              value={webtoonReaderPreferences.rememberPosition}
+              onValueChange={(value) => {
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  rememberPosition: value
+                });
+              }}
+              trackColor={{ false: '#767577', true: '#4CAF50' }}
+              thumbColor={webtoonReaderPreferences.rememberPosition ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Navigate to Next Chapter</Text>
+            <Switch
+              value={webtoonReaderPreferences.autoNavigateNextChapter}
+              onValueChange={(value) => {
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  autoNavigateNextChapter: value
+                });
+              }}
+              trackColor={{ false: '#767577', true: '#4CAF50' }}
+              thumbColor={webtoonReaderPreferences.autoNavigateNextChapter ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Keep Screen On While Reading</Text>
+            <Switch
+              value={webtoonReaderPreferences.keepScreenOn}
+              onValueChange={(value) => {
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  keepScreenOn: value
+                });
+              }}
+              trackColor={{ false: '#767577', true: '#4CAF50' }}
+              thumbColor={webtoonReaderPreferences.keepScreenOn ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Show Page Number</Text>
+            <Switch
+              value={webtoonReaderPreferences.showPageNumber}
+              onValueChange={(value) => {
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  showPageNumber: value
+                });
+              }}
+              trackColor={{ false: '#767577', true: '#4CAF50' }}
+              thumbColor={webtoonReaderPreferences.showPageNumber ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        {/* Preload Pages */}
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Preload Pages</Text>
+          <View style={styles.sliderContainer}>
+            <Slider
+              style={{ width: '90%', height: 40 }}
+              minimumValue={1}
+              maximumValue={10}
+              step={1}
+              value={webtoonReaderPreferences.preloadPages}
+              onValueChange={(value) => {
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  preloadPages: value
+                });
+              }}
+              minimumTrackTintColor="#4CAF50"
+              maximumTrackTintColor="#777777"
+              thumbTintColor="#4CAF50"
+            />
+            <Text style={[styles.sliderValue, { color: currentTheme.colors.text }]}>
+              {webtoonReaderPreferences.preloadPages}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <FontAwesome5 name="cogs" size={20} color="#9C27B0" />
+          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Advanced</Text>
+        </View>
+
+        <TouchableOpacity 
+          style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}
+          onPress={() => {
+            // Clear cache action
+            AsyncStorage.removeItem('webtoonReadingProgress');
+            AsyncStorage.removeItem('recentlyReadWebtoons');
+            alert('Webtoon reading cache cleared successfully');
+          }}
+        >
+          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Clear Reading Progress Cache</Text>
+          <FontAwesome5 name="trash-alt" size={20} color="#f44336" />
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}
+          onPress={() => {
+            // Reset all webtoon reader settings to default
+            const defaultSettings: MangaReaderPreferences = {
+              readingDirection: 'vertical',
+              rememberPosition: true,
+              autoNavigateNextChapter: true,
+              keepScreenOn: true,
+              showPageNumber: true,
+              fullscreenByDefault: false,
+              tapToNavigate: true,
+              zoomEnabled: true,
+              doubleTapToZoom: true,
+              preloadPages: 5,
+              debugMode: false,
+              appearance: {
+                backgroundColor: '#000000',
+                pageGap: 8,
+                pageBorderRadius: 0,
+                pageTransitionAnimation: true
+              }
+            };
+            saveWebtoonReaderPreferences(defaultSettings);
+            alert('Webtoon reader settings reset to default');
+          }}
+        >
+          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reset Webtoon Reader Settings</Text>
           <FontAwesome5 name="undo" size={20} color="#f44336" />
         </TouchableOpacity>
       </View>
@@ -359,7 +583,7 @@ export default function MangaSettingsPage() {
           </View>
           <View style={styles.providerOptions}>
             {[
-              { id: 'katana', name: 'Katana', color: '#f44336' },
+              { id: 'mangafire', name: 'Mangafire', color: '#f44336' },
               { id: 'mangadex', name: 'MangaDex', color: '#FF6740' }
             ].map(provider => (
               <TouchableOpacity
@@ -374,7 +598,7 @@ export default function MangaSettingsPage() {
                   if (!providerPreferences.autoSelectSource) {
                     saveProviderPreferences({
                       ...providerPreferences,
-                      defaultProvider: provider.id as 'katana' | 'mangadex'
+                      defaultProvider: provider.id as 'mangafire' | 'mangadex'
                     });
                   }
                 }}
@@ -536,22 +760,44 @@ export default function MangaSettingsPage() {
         <TouchableOpacity
           style={[
             styles.tabButton,
-            activeTab === 'reader' && styles.activeTabButton
+            activeTab === 'manga' && styles.activeTabButton
           ]}
-          onPress={() => setActiveTab('reader')}
+          onPress={() => setActiveTab('manga')}
         >
           <FontAwesome5 
             name="book-open" 
             size={18} 
-            color={activeTab === 'reader' ? "#42A5F5" : currentTheme.colors.text} 
+            color={activeTab === 'manga' ? "#42A5F5" : currentTheme.colors.text} 
           />
           <Text 
             style={[
               styles.tabButtonText, 
-              { color: activeTab === 'reader' ? "#42A5F5" : currentTheme.colors.text }
+              { color: activeTab === 'manga' ? "#42A5F5" : currentTheme.colors.text }
             ]}
           >
-            Reader
+            Manga
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeTab === 'webtoon' && styles.activeTabButton
+          ]}
+          onPress={() => setActiveTab('webtoon')}
+        >
+          <FontAwesome5 
+            name="book-open" 
+            size={18} 
+            color={activeTab === 'webtoon' ? "#42A5F5" : currentTheme.colors.text} 
+          />
+          <Text 
+            style={[
+              styles.tabButtonText, 
+              { color: activeTab === 'webtoon' ? "#42A5F5" : currentTheme.colors.text }
+            ]}
+          >
+            Webtoon
           </Text>
         </TouchableOpacity>
         
@@ -580,7 +826,8 @@ export default function MangaSettingsPage() {
 
       {/* Settings Content */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {activeTab === 'reader' && renderReaderTab()}
+        {activeTab === 'manga' && renderMangaTab()}
+        {activeTab === 'webtoon' && renderWebtoonTab()}
         {activeTab === 'providers' && renderProvidersTab()}
         {/* Bottom padding */}
         <View style={{ height: 40 }} />

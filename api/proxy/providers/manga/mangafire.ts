@@ -32,6 +32,7 @@ interface MangaFireChapter {
 interface MangaFirePage {
   url: string;
   number: number;
+  headers?: any;
 }
 
 interface MangaFireChapterResponse {
@@ -222,10 +223,16 @@ export class MangaFireProvider {
     }
     
     return {
-      pages: pages.map((page: any, index: number) => ({
-        url: page.url || '',
-        number: index + 1
-      })),
+      pages: pages.map((page: any, index: number) => {
+        const pageHeaders = page.headers || { 'Referer': 'https://mangafire.to' };
+        console.log(`[MangaFire] Page ${index + 1} headers:`, pageHeaders);
+        
+        return {
+          url: page.url || '',
+          number: index + 1,
+          headers: pageHeaders
+        };
+      }),
       isLatestChapter: isLatestChapter
     };
   }

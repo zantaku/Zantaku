@@ -1080,6 +1080,7 @@ export default function ReaderScreen() {
   }, [params]);
   
   const [images, setImages] = useState<string[]>([]);
+  const [dynamicImageHeaders, setDynamicImageHeaders] = useState<{ [key: number]: any }>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [currentChapterIndex, setCurrentChapterIndex] = useState(-1);
   const [loadingStates, setLoadingStates] = useState<{ [key: number]: boolean }>({});
@@ -1165,12 +1166,26 @@ export default function ReaderScreen() {
       try {
         console.log('Loading images from params:', params);
         const imageUrls: string[] = [];
+        const imageHeadersMap: { [key: number]: any } = {};
         let index = 1;
   
         while (params[`image${index}`]) {
           const imageUrl = params[`image${index}`] as string;
           console.log(`Found image ${index}:`, imageUrl);
           imageUrls.push(imageUrl);
+          
+          // Check if there are custom headers for this image
+          const headerParam = params[`header${index}`];
+          if (headerParam && typeof headerParam === 'string') {
+            try {
+              const headers = JSON.parse(headerParam);
+              imageHeadersMap[index - 1] = headers; // Store with 0-based index
+              console.log(`Found headers for image ${index}:`, headers);
+            } catch (e) {
+              console.warn(`Failed to parse headers for image ${index}:`, e);
+            }
+          }
+          
           index++;
         }
   
@@ -1181,6 +1196,7 @@ export default function ReaderScreen() {
   
         console.log(`Loaded ${imageUrls.length} images`);
         setImages(imageUrls);
+        setDynamicImageHeaders(imageHeadersMap);
   
         // Initialize loading states for ALL images
         const initialLoadingStates = Object.fromEntries(
@@ -1853,7 +1869,7 @@ export default function ReaderScreen() {
           const currentChapterNum = parseFloat(String(params.chapter));
           if (!isNaN(currentChapterNum)) {
             // Use simple next/previous chapter logic
-            setHasNextChapter(params.isLatest !== 'true');
+            setHasNextChapter(params.isLatestChapter !== 'true');
             setHasPreviousChapter(currentChapterNum > 1);
             
             // Generate synthetic chapters list
@@ -1878,7 +1894,7 @@ export default function ReaderScreen() {
             });
             
             // Add next chapter if not latest
-            if (params.isLatest !== 'true') {
+            if (params.isLatestChapter !== 'true') {
               syntheticChapters.push({
                 id: `chapter-${currentChapterNum + 1}`,
                 number: String(currentChapterNum + 1),
@@ -1897,11 +1913,11 @@ export default function ReaderScreen() {
       // Create a minimal fallback
       const currentChapterNum = parseFloat(String(params.chapter));
       if (!isNaN(currentChapterNum)) {
-        setHasNextChapter(params.isLatest !== 'true');
+        setHasNextChapter(params.isLatestChapter !== 'true');
         setHasPreviousChapter(currentChapterNum > 1);
       }
     }
-  }, [params.mangaId, params.chapter, params.isLatest, params.anilistId]);
+  }, [params.mangaId, params.chapter, params.isLatestChapter, params.anilistId]);
 
   // Call fetchChapters when component mounts
   useEffect(() => {
@@ -2027,7 +2043,7 @@ export default function ReaderScreen() {
     
     console.log('No chapter found for', type);
     return null;
-  }, [allChapters, currentChapterIndex, params.chapter, params.isLatest]);
+  }, [allChapters, currentChapterIndex, params.chapter, params.isLatestChapter]);
 
   // Add fetchPagesAndNavigate after getChapterByType
   const fetchPagesAndNavigate = useCallback(async (chapter: Chapter) => {
@@ -2106,6 +2122,13 @@ export default function ReaderScreen() {
 
   // Update navigation functions to use fetchPagesAndNavigate
   const goToNextChapter = useCallback(() => {
+    // Check API flag first
+    if (params.isLatestChapter === 'true') {
+      setNotificationMessage("📖 You're on the latest chapter!");
+      showNotificationWithAnimation();
+      return;
+    }
+    
     const nextChapter = getChapterByType('next');
     
     if (nextChapter) {
@@ -2116,9 +2139,16 @@ export default function ReaderScreen() {
       setNotificationMessage("📖 You're on the latest chapter!");
       showNotificationWithAnimation();
     }
-  }, [getChapterByType, fetchPagesAndNavigate, showNotificationWithAnimation, setNotificationMessage]);
+  }, [params.isLatestChapter, getChapterByType, fetchPagesAndNavigate, showNotificationWithAnimation, setNotificationMessage]);
 
   const goToPreviousChapter = useCallback(() => {
+    // Check API flag first
+    if (params.isFirstChapter === 'true') {
+      setNotificationMessage("📖 You're on the first chapter!");
+      showNotificationWithAnimation();
+      return;
+    }
+    
     const prevChapter = getChapterByType('previous');
     
     if (prevChapter) {
@@ -2128,7 +2158,7 @@ export default function ReaderScreen() {
       setNotificationMessage("📖 You're on the first chapter!");
       showNotificationWithAnimation();
     }
-  }, [getChapterByType, fetchPagesAndNavigate, showNotificationWithAnimation, setNotificationMessage]);
+  }, [params.isFirstChapter, getChapterByType, fetchPagesAndNavigate, showNotificationWithAnimation, setNotificationMessage]);
 
   // Add fetchKatanaChapterAndNavigate before handleChapterNavigation
   const fetchKatanaChapterAndNavigate = useCallback(async (chapterId: string) => {
@@ -2192,19 +2222,14 @@ export default function ReaderScreen() {
 
   // Update handleChapterNavigation to use params.mangaId
   const handleChapterNavigation = useCallback((type: 'next' | 'previous') => {
-    const currentChapterNum = parseFloat(String(params.chapter));
-    
-    // If trying to navigate to next chapter but we're 100% certain this is the latest chapter
-    // A chapter is latest if it's at the end of the array (highest index)
-    if (type === 'next' && params.isLatest === 'true' && 
-        allChapters.length > 10 && currentChapterIndex === allChapters.length - 1) {
+    // Use API flags to determine if navigation should be blocked
+    if (type === 'next' && params.isLatestChapter === 'true') {
       setNotificationMessage("📖 You're on the latest chapter!");
       showNotificationWithAnimation();
       return;
     }
 
-    // If trying to navigate to previous chapter but we're on chapter 1, show notification
-    if (type === 'previous' && Number(params.chapter) <= 1) {
+    if (type === 'previous' && params.isFirstChapter === 'true') {
       setNotificationMessage("📖 You're on the first chapter!");
       showNotificationWithAnimation();
       return;
@@ -2226,7 +2251,8 @@ export default function ReaderScreen() {
       currentChapter: params.chapter,
       targetChapter: targetChapter.number,
       mangaName: params.title,
-      isLatest: params.isLatest
+      isLatestChapter: params.isLatestChapter,
+      isFirstChapter: params.isFirstChapter
     });
     
     setSelectedChapter(targetChapter);
@@ -2261,7 +2287,8 @@ export default function ReaderScreen() {
     params.chapter,
     params.title,
     params.mangaId,
-    params.isLatest,
+    params.isLatestChapter,
+    params.isFirstChapter,
     showNotificationWithAnimation,
     getChapterByType
   ]);
@@ -2300,14 +2327,15 @@ export default function ReaderScreen() {
 
   // Add this new function before handleScroll
   const handleChapterTransition = useCallback(async (direction: 'next' | 'previous') => {
-    // Only block next navigation if we're 100% certain this is the latest chapter
-    const isConfirmedLatest = params.isLatest === 'true' && 
-                             allChapters.length > 10 && 
-                             currentChapterIndex === allChapters.length - 1;
-    
-    // If trying to navigate to next chapter but this is confirmed latest, show notification
-    if (direction === 'next' && isConfirmedLatest) {
+    // Use API flags to determine if navigation should be blocked
+    if (direction === 'next' && params.isLatestChapter === 'true') {
       setNotificationMessage("📖 You're on the latest chapter!");
+      showNotificationWithAnimation();
+      return;
+    }
+    
+    if (direction === 'previous' && params.isFirstChapter === 'true') {
+      setNotificationMessage("📖 You're on the first chapter!");
       showNotificationWithAnimation();
       return;
     }
@@ -2393,7 +2421,8 @@ export default function ReaderScreen() {
     setSelectedChapter,
     setNavigationType,
     setShowChapterModal,
-    params.isLatest
+    params.isLatestChapter,
+    params.isFirstChapter
   ]);
 
   // Add edge swipe action handler
@@ -2659,6 +2688,9 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
   };
 
   const renderItem = useCallback(({ item: imageUrl, index }: { item: string, index: number }) => {
+    // Get the specific headers for this image, or use default headers
+    const specificHeaders = dynamicImageHeaders[index] || imageHeaders;
+    
     return (
       <View style={styles.pageContainer}>
         <TouchableOpacity 
@@ -2670,7 +2702,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
             imageUrl={imageUrl}
             index={index}
             totalImages={images.length}
-            imageHeaders={imageHeaders}
+            imageHeaders={specificHeaders}
             onPress={toggleUI}
             onLoadStart={() => handleImageLoadStart(index)}
             onLoadSuccess={() => handleImageLoadSuccess(index)}
@@ -2685,7 +2717,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     );
   }, [
     images.length,
-    imageHeaders,
+    dynamicImageHeaders,
     toggleUI,
     handleImageLoadStart,
     handleImageLoadSuccess,
@@ -2709,7 +2741,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     
     // Only consider a chapter the latest if we have strong evidence
     // A chapter is latest if it's at the end of the array (highest index)
-    const isConfirmedLatest = params.isLatest === 'true' && 
+    const isConfirmedLatest = params.isLatestChapter === 'true' && 
                             allChapters.length > 10 && 
                             currentChapterIndex === allChapters.length - 1;
     
@@ -2758,7 +2790,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
   }, [
     currentChapterIndex, 
     allChapters, 
-    params.isLatest, 
+    params.isLatestChapter, 
     params.chapter, 
     hasNextChapter, 
     hasPreviousChapter
@@ -3226,7 +3258,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       
       // For special cases, use more reliable number-based navigation
       // instead of making potentially incorrect API calls
-      if (params.isLatest === 'true') {
+      if (params.isLatestChapter === 'true') {
         console.log('[Katana] Using direct navigation for latest chapter');
         setHasNextChapter(false);
         setHasPreviousChapter(Number(params.chapter) > 1);
@@ -3241,22 +3273,23 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       // Always use direct numerical comparison for availability
       const currentChapterNum = parseFloat(String(params.chapter));
       if (!isNaN(currentChapterNum)) {
-        setHasNextChapter(params.isLatest !== 'true');
+        setHasNextChapter(params.isLatestChapter !== 'true');
         setHasPreviousChapter(currentChapterNum > 1);
+        
         
         console.log('[Katana] Set navigation by chapter number:', {
           hasPrevious: currentChapterNum > 1,
-          hasNext: params.isLatest !== 'true'
+          hasNext: params.isLatestChapter !== 'true'
         });
       }
     } catch (error) {
       console.error('[Katana] Error checking chapter navigation:', error);
       // Fallback to basic navigation in case of errors
       setHasPreviousChapter(Number(params.chapter) > 1);
-      setHasNextChapter(params.isLatest !== 'true');
+      setHasNextChapter(params.isLatestChapter !== 'true');
       console.log('[Katana] Using fallback navigation (after error)');
     }
-  }, [params.mangaId, params.chapter, params.isLatest]);
+  }, [params.mangaId, params.chapter, params.isLatestChapter]);
   
   // Call the function when component mounts
   useEffect(() => {
@@ -3265,7 +3298,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       console.log('[Reader] Setting direct navigation for Chainsaw Man');
       // Set navigation availability directly for Chainsaw Man
       setHasPreviousChapter(Number(params.chapter) > 1);
-      setHasNextChapter(params.isLatest !== 'true');
+      setHasNextChapter(params.isLatestChapter !== 'true');
       
       // Also set the manga slug ID for potential future operations
       setMangaSlugId('chainsaw-man.21890');
@@ -3273,7 +3306,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       // For other manga, use the original API-based approach
       checkKatanaChapterNavigation();
     }
-  }, [checkKatanaChapterNavigation, params.mangaId, params.chapter, params.isLatest]);
+  }, [checkKatanaChapterNavigation, params.mangaId, params.chapter, params.isLatestChapter]);
 
   // Add this function after the existing useCallback functions
   const fetchAniListTitle = useCallback(async () => {
@@ -3332,27 +3365,30 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
   const renderChapterNavigationButtons = useCallback(() => {
     if (!showUI) return null;
     
-    const currentChapterNum = parseFloat(String(params.chapter));
+    // Extract numeric part from current chapter for comparison
+    const currentChapterNum = parseFloat(String(params.chapter).replace(/[^\d.]/g, ''));
     
-    // Enhanced logic to determine if we should show the next button
-    const shouldShowNextButton = 
-      // Always show next if there's a chapter after the current index
-      (allChapters.length > 0 && currentChapterIndex < allChapters.length - 1) || 
-      // Or if we know for sure there's a next chapter
-      hasNextChapter || 
-      // Or if not explicitly marked as latest
-      params.isLatest !== 'true' ||
-      // Or for any chapter that has a numeric value (we'll assume N+1 exists)
-      (!isNaN(currentChapterNum) && currentChapterNum > 0);
+    // Check if we're on the latest chapter by comparing with chapter list
+    const isOnLatestByCount = !isNaN(currentChapterNum) && 
+                             allChapters.length > 0 && 
+                             currentChapterNum >= allChapters.length;
     
-    // Enhanced logic to determine if we should show the previous button
-    const shouldShowPreviousButton = 
-      // Show previous if there's a chapter before the current index
-      (allChapters.length > 0 && currentChapterIndex > 0) ||
-      // Or if we know for sure there's a previous chapter
-      hasPreviousChapter ||
-      // Or if current chapter number is > 1
-      (!isNaN(currentChapterNum) && currentChapterNum > 1);
+    // Use API flags if available, otherwise fall back to existing logic
+    const shouldShowNextButton = params.isLatestChapter !== 'true' && !isOnLatestByCount;
+    const shouldShowPreviousButton = params.isFirstChapter !== 'true';
+    
+    // DEBUG: Log the navigation button logic
+    console.log('[Reader] Navigation button logic:', {
+      'params.isLatestChapter': params.isLatestChapter,
+      'params.isFirstChapter': params.isFirstChapter,
+      'currentChapterNum': currentChapterNum,
+      'totalChapters': allChapters.length,
+      'isOnLatestByCount': isOnLatestByCount,
+      'shouldShowNextButton': shouldShowNextButton,
+      'shouldShowPreviousButton': shouldShowPreviousButton,
+      'chapter': params.chapter,
+      'title': params.title
+    });
     
     return (
       <View style={styles.cornerNavContainer}>
@@ -3401,13 +3437,10 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     );
   }, [
     showUI, 
-    hasPreviousChapter, 
-    hasNextChapter, 
-    params.chapter, 
-    params.mangaId,
-    params.isLatest,
+    params.isLatestChapter,
+    params.isFirstChapter,
+    params.chapter,
     allChapters.length,
-    currentChapterIndex,
     handleChapterNavigation,
     readingDirection
   ]);
