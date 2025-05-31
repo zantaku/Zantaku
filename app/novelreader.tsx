@@ -340,9 +340,22 @@ const processChapterContent = (content: string, imageMap?: Map<string, string>) 
 
   // Clean up the content
   processedContent = processedContent
+    // Remove DOCTYPE declarations and XML declarations
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .replace(/<\?xml[^>]*\?>/gi, '')
+    // Remove HTML, HEAD, BODY tags and their content for image pages
+    .replace(/<html[^>]*>/gi, '')
+    .replace(/<\/html>/gi, '')
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<body[^>]*>/gi, '')
+    .replace(/<\/body>/gi, '')
     // Remove style and script tags with their content
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    // Remove meta tags
+    .replace(/<meta[^>]*>/gi, '')
+    .replace(/<link[^>]*>/gi, '')
+    .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, '')
     // Handle common HTML elements
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<p[^>]*>/gi, '')
@@ -384,10 +397,23 @@ const processChapterContent = (content: string, imageMap?: Map<string, string>) 
         /newsletter/i,
         /sign up/i,
         /^[\s\d©]+$/,
+        /^table of contents$/i,
+        /^contents$/i,
+        /^index$/i,
+        /^navigation$/i,
+        /^nav$/i,
+        /^toc$/i,
+        /^page \d+$/i,
+        /^\d+$/,
+        /^chapter \d+$/i,
+        /^volume \d+$/i,
       ];
       
       if (!isTitlePage && skipPatterns.some(pattern => pattern.test(p))) return false;
-      if (/^[\s\d©\-_=+]+$/.test(p)) return false;
+      if (/^[\s\d©\-_=+\.]+$/.test(p)) return false;
+      
+      // Skip very short paragraphs that are likely navigation or metadata
+      if (p.length < 10 && !/[a-zA-Z]{3,}/.test(p)) return false;
       
       return true;
     });
@@ -401,159 +427,7 @@ const processChapterContent = (content: string, imageMap?: Map<string, string>) 
   };
 };
 
-const ChapterContent = memo(({ 
-  chapter, 
-  colors, 
-  fontSize, 
-  lineHeight, 
-  currentFont, 
-  paragraphSpacing, 
-  textAlign, 
-  isTitlePage, 
-  horizontalPadding,
-  onScroll,
-  imageMap
-}: {
-  chapter: Chapter;
-  colors: typeof THEMES[Theme];
-  fontSize: number;
-  lineHeight: number;
-  currentFont: string;
-  paragraphSpacing: number;
-  textAlign: 'left' | 'justify';
-  isTitlePage: boolean;
-  horizontalPadding: number;
-  onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
-  imageMap?: Map<string, string>;
-}) => {
-  const processedContent = processChapterContent(chapter.content, imageMap);
-  if (!processedContent) return null;
 
-  const { title, paragraphs, images, isCoverPage } = processedContent;
-
-  // Log image information
-  if (images.length > 0) {
-    console.log(`📸 Found ${images.length} images in chapter:`, images);
-  }
-
-  const items: ParagraphItem[] = [
-    ...(!isTitlePage && !isCoverPage ? [{ id: 'title', type: 'title' as const, content: title }] : []),
-    ...images.map((img: { src: string; alt: string }, idx: number) => {
-      console.log('🖼️ Image source:', img.src);
-      
-      return {
-        id: `image-${idx}`,
-        type: 'image' as const,
-        content: '',
-        imageUri: img.src,
-        imageAlt: img.alt
-      };
-    }),
-    ...(!isTitlePage && !isCoverPage ? paragraphs.map((p: string, idx: number) => ({
-      id: `p-${idx}`,
-      type: 'text' as const,
-      content: p.trim()
-    })) : [])
-  ];
-
-  const renderItem = ({ item }: { item: ParagraphItem }) => {
-    switch (item.type) {
-      case 'title':
-        return (
-          <Text style={[styles.chapterTitle, { 
-            color: colors.text,
-            fontFamily: currentFont,
-            fontSize: fontSize + 6,
-            lineHeight: (fontSize + 6) * 1.2,
-            marginBottom: 32,
-            textAlign: 'center'
-          }]}>
-            {item.content}
-          </Text>
-        );
-      case 'image':
-        if (!item.imageUri) {
-          console.log('❌ No image URI found for image');
-          return null;
-        }
-        
-        console.log('🖼️ Rendering image:', {
-          uri: item.imageUri,
-          alt: item.imageAlt
-        });
-
-        const isFullScreen = isTitlePage || isCoverPage || (items.length === 1 && item.type === 'image');
-        
-        return (
-          <View style={[
-            styles.imageContainer,
-            isFullScreen && styles.fullScreenImageContainer
-          ]}>
-            <ScrollView 
-              horizontal={true}
-              maximumZoomScale={3.0}
-              minimumZoomScale={1.0}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={isFullScreen ? styles.fullScreenImageScrollContent : undefined}
-            >
-              <Image
-                source={{ uri: item.imageUri }}
-                style={[
-                  styles.chapterImage,
-                  isFullScreen ? styles.fullScreenImage : undefined
-                ]}
-                resizeMode={isFullScreen ? "contain" : "contain"}
-                onError={(error) => {
-                  console.error('❌ Image loading error:', error.nativeEvent);
-                  console.log('Failed image URI:', item.imageUri);
-                }}
-                onLoad={() => console.log('✅ Image loaded successfully:', item.imageUri)}
-              />
-            </ScrollView>
-          </View>
-        );
-      case 'text':
-        return (
-          <Text 
-            style={[
-              styles.paragraph, 
-              { 
-                color: colors.text,
-                fontSize: fontSize,
-                lineHeight: fontSize * lineHeight,
-                fontFamily: currentFont,
-                marginBottom: paragraphSpacing,
-                textAlign: textAlign,
-              }
-            ]}
-          >
-            {item.content}
-          </Text>
-        );
-    }
-  };
-
-  return (
-    <ScrollView
-      style={styles.contentScrollView}
-      onScroll={onScroll}
-      scrollEventThrottle={32}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={[
-        styles.contentContainer,
-        { paddingHorizontal: isTitlePage || isCoverPage ? 0 : horizontalPadding },
-        (isTitlePage || isCoverPage) && styles.titlePageContainer
-      ]}>
-        {items.map((item, index) => (
-          <View key={`${item.type}-${item.id}-${index}`}>
-            {renderItem({ item })}
-          </View>
-        ))}
-      </View>
-    </ScrollView>
-  );
-});
 
 const processEpub = async (
   epubData: string,
@@ -706,11 +580,38 @@ const processEpub = async (
         
         if (!content) continue;
         
-        // Don't skip cover pages anymore, just skip copyright
-        if (
-          href.toLowerCase().includes('copyright') ||
-          content.length < 50  // Only skip very short content
-        ) {
+        // Skip unwanted content by filename
+        const skipFiles = [
+          'copyright',
+          'toc.',
+          'nav.',
+          'navigation',
+          'contents',
+          'index.',
+          'titlepage',
+          'title_page',
+          'frontmatter',
+          'backmatter',
+          'acknowledgments',
+          'acknowledgements',
+          'dedication',
+          'preface',
+          'foreword',
+          'about_author',
+          'about-author',
+          'aboutauthor',
+          'colophon',
+          'imprint',
+          'publisher',
+          'credits'
+        ];
+        
+        const shouldSkipFile = skipFiles.some(skipFile => 
+          href.toLowerCase().includes(skipFile)
+        );
+        
+        if (shouldSkipFile || content.length < 50) {
+          console.log(`Skipping file: ${href} (${shouldSkipFile ? 'unwanted file type' : 'too short'})`);
           continue;
         }
 
@@ -728,6 +629,23 @@ const processEpub = async (
         const tocTitle = tocTitleMap.get(href);
         const processedChapter = processChapterContent(processedContent, imageMap);
         
+        // Check if the processed chapter has meaningful content
+        const hasText = processedChapter.paragraphs && processedChapter.paragraphs.length > 0;
+        const hasImages = processedChapter.images && processedChapter.images.length > 0;
+        const hasTitle = processedChapter.title && processedChapter.title.trim().length > 0;
+        
+        // Skip if no meaningful content (no text, no images, or just whitespace)
+        if (!hasText && !hasImages) {
+          console.log(`Skipping empty chapter: ${href} - ${tocTitle || processedChapter.title}`);
+          continue;
+        }
+        
+        // Skip if only has very short text content (likely navigation or metadata)
+        if (hasText && !hasImages && processedChapter.paragraphs.join('').trim().length < 100) {
+          console.log(`Skipping short chapter: ${href} - ${tocTitle || processedChapter.title}`);
+          continue;
+        }
+        
         chapters.push({
           id: href,
           title: tocTitle || processedChapter.title,
@@ -735,6 +653,8 @@ const processEpub = async (
           href,
           order: order++
         });
+        
+        console.log(`Added chapter: ${tocTitle || processedChapter.title} (${hasText ? 'text' : ''}${hasText && hasImages ? '+' : ''}${hasImages ? 'images' : ''})`);
       } catch (err) {
         console.warn(`Failed to process chapter ${href}:`, err);
       }
@@ -1052,10 +972,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
     marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chapterItemContent: {
+    flex: 1,
   },
   chapterItemTitle: {
     fontSize: 16,
     marginBottom: 4,
+  },
+  bookmarkButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   currentChapter: {
     borderWidth: 2,
@@ -1148,6 +1077,196 @@ const styles = StyleSheet.create({
   },
 });
 
+const ChapterContent = memo(({ 
+  chapter, 
+  colors, 
+  fontSize, 
+  lineHeight, 
+  currentFont, 
+  paragraphSpacing, 
+  textAlign, 
+  isTitlePage, 
+  horizontalPadding,
+  onScroll,
+  imageMap,
+  onTap,
+  onSwipe
+}: {
+  chapter: Chapter;
+  colors: typeof THEMES[Theme];
+  fontSize: number;
+  lineHeight: number;
+  currentFont: string;
+  paragraphSpacing: number;
+  textAlign: 'left' | 'justify';
+  isTitlePage: boolean;
+  horizontalPadding: number;
+  onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  imageMap?: Map<string, string>;
+  onTap?: (x: number) => void;
+  onSwipe?: (direction: 'left' | 'right') => void;
+}) => {
+  const processedContent = processChapterContent(chapter.content, imageMap);
+  if (!processedContent) return null;
+
+  const { title, paragraphs, images, isCoverPage } = processedContent;
+
+  // Log image information
+  if (images.length > 0) {
+    console.log(`📸 Found ${images.length} images in chapter:`, images);
+  }
+
+  // Check if this is primarily an image page
+  const isImagePage = images.length > 0 && paragraphs.length === 0;
+  
+  const items: ParagraphItem[] = [
+    // Only show title if it's not a title page, cover page, or image-only page
+    ...(!isTitlePage && !isCoverPage && !isImagePage ? [{ id: 'title', type: 'title' as const, content: title }] : []),
+    ...images.map((img: { src: string; alt: string }, idx: number) => {
+      console.log('🖼️ Image source:', img.src);
+      
+      return {
+        id: `image-${idx}`,
+        type: 'image' as const,
+        content: '',
+        imageUri: img.src,
+        imageAlt: img.alt
+      };
+    }),
+    ...(!isTitlePage && !isCoverPage ? paragraphs.map((p: string, idx: number) => ({
+      id: `p-${idx}`,
+      type: 'text' as const,
+      content: p.trim()
+    })) : [])
+  ];
+
+  const renderItem = ({ item }: { item: ParagraphItem }) => {
+    switch (item.type) {
+      case 'title':
+        return (
+          <Text style={[styles.chapterTitle, { 
+            color: colors.text,
+            fontFamily: currentFont,
+            fontSize: fontSize + 6,
+            lineHeight: (fontSize + 6) * 1.2,
+            marginBottom: 32,
+            textAlign: 'center'
+          }]}>
+            {item.content}
+          </Text>
+        );
+      case 'image':
+        if (!item.imageUri) {
+          console.log('❌ No image URI found for image');
+          return null;
+        }
+        
+        console.log('🖼️ Rendering image:', {
+          uri: item.imageUri,
+          alt: item.imageAlt
+        });
+
+        // Check if this is an image-only page (no text content or only title)
+        const textItems = items.filter(i => i.type === 'text');
+        const hasOnlyTitle = items.length === 2 && items.some(i => i.type === 'title');
+        const isImageOnlyPage = items.length === 1 || hasOnlyTitle || textItems.length === 0;
+        const isFullScreen = isTitlePage || isCoverPage || isImageOnlyPage;
+        
+        return (
+          <TouchableWithoutFeedback
+            onPress={(evt) => {
+              // Handle tap on image
+              const { locationX } = evt.nativeEvent;
+              onTap?.(locationX);
+            }}
+          >
+            <View style={[
+              styles.imageContainer,
+              isFullScreen && styles.fullScreenImageContainer
+            ]}>
+              <Image
+                source={{ uri: item.imageUri }}
+                style={[
+                  styles.chapterImage,
+                  isFullScreen ? styles.fullScreenImage : undefined
+                ]}
+                resizeMode="contain"
+                onError={(error) => {
+                  console.error('❌ Image loading error:', error.nativeEvent);
+                  console.log('Failed image URI:', item.imageUri);
+                }}
+                onLoad={() => console.log('✅ Image loaded successfully:', item.imageUri)}
+              />
+            </View>
+          </TouchableWithoutFeedback>
+        );
+      case 'text':
+        return (
+          <Text 
+            style={[
+              styles.paragraph, 
+              { 
+                color: colors.text,
+                fontSize: fontSize,
+                lineHeight: fontSize * lineHeight,
+                fontFamily: currentFont,
+                marginBottom: paragraphSpacing,
+                textAlign: textAlign,
+              }
+            ]}
+          >
+            {item.content}
+          </Text>
+        );
+    }
+  };
+
+  const contentPanResponder = RNPanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (evt, gestureState) => {
+      // Only capture clear horizontal swipes
+      const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 2 && Math.abs(gestureState.dx) > 30;
+      return isHorizontalSwipe;
+    },
+    onPanResponderRelease: (evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
+      // Handle swipes
+      if (Math.abs(gestureState.dx) > 50) {
+        if (gestureState.dx > 0) {
+          onSwipe?.('right');
+        } else {
+          onSwipe?.('left');
+        }
+      } else if (Math.abs(gestureState.dx) < 5 && Math.abs(gestureState.dy) < 5) {
+        // Handle taps
+        onTap?.(evt.nativeEvent.locationX);
+      }
+    }
+  });
+
+  return (
+    <View style={{ flex: 1 }} {...contentPanResponder.panHandlers}>
+      <ScrollView
+        style={styles.contentScrollView}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
+        showsVerticalScrollIndicator={false}
+      >
+      <View style={[
+        styles.contentContainer,
+        { paddingHorizontal: isTitlePage || isCoverPage ? 0 : horizontalPadding },
+        (isTitlePage || isCoverPage) && styles.titlePageContainer
+      ]}>
+        {items.map((item, index) => (
+          <View key={`${item.type}-${item.id}-${index}`}>
+            {renderItem({ item })}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+    </View>
+  );
+});
+
 export default function NovelReader() {
   const router = useRouter();
   const { novelId, volumeId, downloadUrl, title, volumeTitle } = useLocalSearchParams<NovelReaderParams>();
@@ -1191,9 +1310,11 @@ export default function NovelReader() {
   const screenHeight = Dimensions.get('window').height;
 
   const panResponder = RNPanResponder.create({
-    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (evt, gestureState) => {
-      return Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+      // Only capture horizontal swipes that are clearly horizontal
+      const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 2 && Math.abs(gestureState.dx) > 20;
+      return isHorizontalSwipe;
     },
     onPanResponderGrant: (evt: GestureResponderEvent) => {
       const now = Date.now();
@@ -1558,7 +1679,7 @@ export default function NovelReader() {
     }
   };
 
-  // Load saved settings
+  // Load saved settings and bookmarks
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -1570,7 +1691,8 @@ export default function NovelReader() {
           savedTextAlign,
           savedParagraphSpacing,
           savedMarginSize,
-          savedDontAskAgain
+          savedDontAskAgain,
+          savedBookmarks
         ] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.FONT_SIZE),
           AsyncStorage.getItem(STORAGE_KEYS.THEME),
@@ -1579,7 +1701,8 @@ export default function NovelReader() {
           AsyncStorage.getItem(STORAGE_KEYS.TEXT_ALIGN),
           AsyncStorage.getItem(STORAGE_KEYS.PARAGRAPH_SPACING),
           AsyncStorage.getItem(STORAGE_KEYS.MARGIN_SIZE),
-          AsyncStorage.getItem(STORAGE_KEYS.DONT_ASK_SAVE)
+          AsyncStorage.getItem(STORAGE_KEYS.DONT_ASK_SAVE),
+          AsyncStorage.getItem(`bookmarks_${novelId}_${volumeId}`)
         ]);
 
         if (savedFontSize) setFontSize(Number(savedFontSize));
@@ -1590,13 +1713,21 @@ export default function NovelReader() {
         if (savedParagraphSpacing) setParagraphSpacing(Number(savedParagraphSpacing));
         if (savedMarginSize) setMarginSize(savedMarginSize as 'compact' | 'normal' | 'wide');
         if (savedDontAskAgain) setDontAskAgain(savedDontAskAgain === 'true');
+        if (savedBookmarks) {
+          try {
+            const parsedBookmarks = JSON.parse(savedBookmarks);
+            setBookmarks(parsedBookmarks);
+          } catch (err) {
+            console.error('Error parsing saved bookmarks:', err);
+          }
+        }
       } catch (error) {
         console.error('Error loading reader settings:', error);
       }
     };
 
     loadSettings();
-  }, []);
+  }, [novelId, volumeId]);
 
   // Save settings when they change
   useEffect(() => {
@@ -1619,6 +1750,21 @@ export default function NovelReader() {
 
     saveSettings();
   }, [fontSize, theme, font, lineHeight, textAlign, paragraphSpacing, marginSize, dontAskAgain]);
+
+  // Save bookmarks when they change
+  useEffect(() => {
+    const saveBookmarks = async () => {
+      try {
+        await AsyncStorage.setItem(`bookmarks_${novelId}_${volumeId}`, JSON.stringify(bookmarks));
+      } catch (error) {
+        console.error('Error saving bookmarks:', error);
+      }
+    };
+
+    if (novelId && volumeId) {
+      saveBookmarks();
+    }
+  }, [bookmarks, novelId, volumeId]);
 
   // Add back handler
   useEffect(() => {
@@ -1723,7 +1869,10 @@ export default function NovelReader() {
                   }}
                 >
                   <Text style={[styles.headerSubtitle, { color: colors.secondary }]}>
-                    Page {currentChapter + 1} of {chapters.length}
+                    {chapters[currentChapter]?.title?.toLowerCase().includes('chapter') 
+                      ? `${currentChapter + 1} of ${chapters.length}`
+                      : `Chapter ${currentChapter + 1} of ${chapters.length}`
+                    }
                   </Text>
                   <FontAwesome5 
                     name="chevron-down" 
@@ -1738,7 +1887,7 @@ export default function NovelReader() {
         </Animated.View>
 
         {/* Content */}
-        <View style={styles.contentWrapper} {...panResponder.panHandlers}>
+        <View style={styles.contentWrapper}>
           {chapters.length > 0 && chapters[currentChapter] && (
             <ChapterContent
               chapter={chapters[currentChapter]}
@@ -1752,6 +1901,16 @@ export default function NovelReader() {
               horizontalPadding={horizontalPadding}
               onScroll={handleScroll}
               imageMap={imageMap}
+              onTap={handleSingleTap}
+              onSwipe={(direction) => {
+                if (direction === 'right' && currentChapter > 0) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setCurrentChapter(prev => prev - 1);
+                } else if (direction === 'left' && currentChapter < chapters.length - 1) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setCurrentChapter(prev => prev + 1);
+                }
+              }}
             />
           )}
         </View>
@@ -1816,37 +1975,7 @@ export default function NovelReader() {
             <FontAwesome5 name="chevron-left" size={16} color="#FFFFFF" />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.quickActionButton,
-              { backgroundColor: colors.tint }
-            ]}
-            onPress={() => setShowBookmarksModal(true)}
-          >
-            <FontAwesome5 
-              name="bookmark" 
-              size={16} 
-              color="#FFFFFF" 
-              solid={bookmarks.some(b => b.chapter === currentChapter)} 
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.quickActionButton,
-              { backgroundColor: colors.tint }
-            ]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setTheme(current => current === 'light' ? 'dark' : 'light');
-            }}
-          >
-            <FontAwesome5 
-              name={theme === 'light' ? 'moon' : 'sun'} 
-              size={16} 
-              color="#FFFFFF" 
-            />
-          </TouchableOpacity>
+        
 
           <TouchableOpacity
             style={[
@@ -2122,34 +2251,78 @@ export default function NovelReader() {
                 <ScrollView
                   showsVerticalScrollIndicator={false}
                 >
-                  {chapters.map((item, index) => (
-                    <TouchableOpacity
-                      key={`${item.id}-${index}`}
-                      style={[
-                        styles.chapterItem,
-                        { backgroundColor: `${colors.tint}10` },
-                        currentChapter === index && [
-                          styles.currentChapter,
-                          { borderColor: colors.tint }
-                        ]
-                      ]}
-                      onPress={() => {
-                        setCurrentChapter(index);
-                        setShowChapterList(false);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      }}
-                    >
-                      <Text 
-                        style={[
-                          styles.chapterItemTitle,
-                          { color: colors.text }
-                        ]}
-                        numberOfLines={2}
-                      >
-                        {item.title}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                  {chapters
+                    .map((item, index) => ({ item, originalIndex: index }))
+                    .filter(({ item }) => {
+                      // Filter out image-only pages with HTML DOCTYPE titles
+                      const processedContent = processChapterContent(item.content, imageMap);
+                      const hasImages = processedContent.images && processedContent.images.length > 0;
+                      const hasText = processedContent.paragraphs && processedContent.paragraphs.length > 0;
+                      const hasHTMLTitle = item.title.includes('DOCTYPE') || 
+                                         item.title.includes('W3C//DTD') || 
+                                         item.title.includes('XHTML') ||
+                                         item.title.includes('<?xml');
+                      
+                      // Hide if it's an image-only page with HTML title or if it has HTML artifacts in title
+                      return !(hasImages && !hasText && hasHTMLTitle) && !hasHTMLTitle;
+                    })
+                    .map(({ item, originalIndex }) => {
+                      const isBookmarked = bookmarks.some(b => b.chapter === originalIndex);
+                      
+                      return (
+                        <View
+                          key={`${item.id}-${originalIndex}`}
+                          style={[
+                            styles.chapterItem,
+                            { backgroundColor: `${colors.tint}10` },
+                            currentChapter === originalIndex && [
+                              styles.currentChapter,
+                              { borderColor: colors.tint }
+                            ]
+                          ]}
+                        >
+                          <TouchableOpacity
+                            style={styles.chapterItemContent}
+                            onPress={() => {
+                              setCurrentChapter(originalIndex);
+                              setShowChapterList(false);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                          >
+                            <Text 
+                              style={[
+                                styles.chapterItemTitle,
+                                { color: colors.text }
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {item.title}
+                            </Text>
+                          </TouchableOpacity>
+                          
+                          <TouchableOpacity
+                            style={styles.bookmarkButton}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isBookmarked) {
+                                // Remove bookmark
+                                setBookmarks(prev => prev.filter(b => b.chapter !== originalIndex));
+                              } else {
+                                // Add bookmark
+                                setBookmarks(prev => [...prev, { chapter: originalIndex, scroll: 0 }]);
+                              }
+                            }}
+                          >
+                            <FontAwesome5 
+                              name="bookmark" 
+                              size={16} 
+                              color={isBookmarked ? colors.tint : colors.secondary}
+                              solid={isBookmarked}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
                 </ScrollView>
               </View>
             </View>
