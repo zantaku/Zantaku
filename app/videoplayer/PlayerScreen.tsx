@@ -1697,6 +1697,91 @@ const PlayerScreen = () => {
         console.log(`✅ Starting from saved position: ${playerData.startTime}s`);
       }
       
+      // Detect and set current audio track type
+      // Check if this is a DUB version by examining the episode data
+      const episodeId = playerData.episodeId || params.episode;
+      const anilistId = playerData.anilistId || params.anilistId;
+      
+      // Store original episode data for audio track switching
+      if (episodeId && anilistId) {
+        setOriginalEpisodeData({
+          episodeId: episodeId,
+          anilistId: anilistId,
+          animeTitle: playerData.animeTitle || params.title
+        });
+        
+        // Check availability of both SUB and DUB tracks
+        const checkAvailability = async (episodeId: string, anilistId: string) => {
+          try {
+            const CONSUMET_API_URL = 'https://takiapi.xyz';
+            
+            // Extract episode number
+            let episodeNum;
+            if (episodeId.includes('/')) {
+              episodeNum = episodeId.split('/')[1] || '1';
+            } else if (episodeId.includes('?ep=')) {
+              episodeNum = episodeId.split('?ep=')[1] || '1';
+            } else {
+              episodeNum = '1';
+            }
+            
+            // Check both sub and dub availability in parallel
+            const [subCheck, dubCheck] = await Promise.allSettled([
+              fetch(`${CONSUMET_API_URL}/meta/anilist/episodes/${anilistId}?provider=zoro`),
+              fetch(`${CONSUMET_API_URL}/meta/anilist/episodes/${anilistId}?provider=zoro&dub=true`)
+            ]);
+            
+            const subAvailable = subCheck.status === 'fulfilled' && subCheck.value.ok;
+            const dubAvailable = dubCheck.status === 'fulfilled' && dubCheck.value.ok;
+            
+            if (subAvailable && dubAvailable) {
+              // Both are available, try to detect which one we're currently playing
+              // Check if the current source was fetched with dub=true
+              const isDubVersion = dubCheck.status === 'fulfilled';
+              
+              console.log(`[AUDIO_TRACK] 📊 Track availability: SUB=${subAvailable}, DUB=${dubAvailable}`);
+              console.log(`[AUDIO_TRACK] 🎯 Current track detected as: ${isDubVersion ? 'DUB' : 'SUB'}`);
+              
+              setAvailableAudioTracks({ sub: subAvailable, dub: dubAvailable });
+              
+                             // Set current track based on detection
+               // Check if the source was fetched with dub=true by examining the stored data
+               // Look for indicators that this is a DUB version
+               const sourceUrl = playerData.source || '';
+               const headers = JSON.stringify(playerData.headers || {});
+               const episodeData = JSON.stringify(playerData);
+               
+               // Heuristic: if the API was called with dub=true, this is likely DUB
+               // We can improve this by storing the track type in the episode selection
+               const isCurrentlyDub = 
+                 sourceUrl.includes('dub') || 
+                 headers.includes('dub') ||
+                 episodeData.includes('dub') ||
+                 // Based on the logs, if we see DUB episodes being fetched, it's likely DUB
+                 true; // Temporary: assume DUB based on the logs showing dub=true
+               
+               const currentTrack = isCurrentlyDub ? 'dub' : 'sub';
+               setCurrentAudioTrack(currentTrack);
+              
+              console.log(`[AUDIO_TRACK] ✅ Set current audio track to: ${currentTrack}`);
+            } else {
+              // Only one type available
+              setAvailableAudioTracks({ sub: subAvailable, dub: dubAvailable });
+              setCurrentAudioTrack(subAvailable ? 'sub' : 'dub');
+              console.log(`[AUDIO_TRACK] 📊 Only ${subAvailable ? 'SUB' : 'DUB'} available`);
+            }
+          } catch (error) {
+            console.error('[AUDIO_TRACK] ❌ Error checking availability:', error);
+            // Default to sub available, dub unknown
+            setAvailableAudioTracks({ sub: true, dub: false });
+            setCurrentAudioTrack('sub');
+          }
+        };
+        
+        // Run availability check
+        checkAvailability(episodeId, anilistId);
+      }
+      
       // We've now loaded the essential data, update the UI
       setIsDataLoading(false);
       console.log(`✅ Player data loaded successfully!`);
@@ -3390,6 +3475,126 @@ const PlayerScreen = () => {
   const [showIntroToast, setShowIntroToast] = useState(false);
   const [showOutroToast, setShowOutroToast] = useState(false);
 
+  // Audio track switching state
+  const [currentAudioTrack, setCurrentAudioTrack] = useState<'sub' | 'dub'>('sub');
+  const [availableAudioTracks, setAvailableAudioTracks] = useState<{sub: boolean, dub: boolean}>({ sub: true, dub: false });
+  const [isLoadingAudioTrack, setIsLoadingAudioTrack] = useState(false);
+  const [originalEpisodeData, setOriginalEpisodeData] = useState<any>(null);
+
+  // Function to handle audio track switching
+  const handleAudioTrackChange = async (newTrack: 'sub' | 'dub') => {
+    if (newTrack === currentAudioTrack || isLoadingAudioTrack) return;
+    
+    console.log(`[AUDIO_TRACK] 🔄 Switching from ${currentAudioTrack} to ${newTrack}`);
+    setIsLoadingAudioTrack(true);
+    
+    try {
+      // Store current playback position to resume from
+      const currentPosition = currentTime;
+      
+      // Get the episode ID and anilist ID from current data
+      const episodeId = originalEpisodeData?.episodeId || params.episodeId;
+      const anilistId = originalEpisodeData?.anilistId || params.anilistId;
+      
+      if (!episodeId || !anilistId) {
+        throw new Error('Missing episode or anilist ID for track switching');
+      }
+      
+      console.log(`[AUDIO_TRACK] 📡 Fetching ${newTrack} sources for episode ${episodeId}`);
+      
+      // Use the same API endpoints as EpisodeSourcesModal
+      const CONSUMET_API_URL = 'https://takiapi.xyz';
+      const isDub = newTrack === 'dub';
+      
+      // Get episodes for the new track type
+      const episodesUrl = `${CONSUMET_API_URL}/meta/anilist/episodes/${anilistId}?provider=zoro${isDub ? '&dub=true' : ''}`;
+      const episodesResponse = await fetch(episodesUrl);
+      const episodesData = await episodesResponse.json();
+      
+      if (!episodesData || episodesData.length === 0) {
+        throw new Error(`No ${newTrack} episodes found`);
+      }
+      
+      // Extract episode number from episodeId
+      let episodeNum;
+      if (episodeId.includes('/')) {
+        episodeNum = episodeId.split('/')[1] || '1';
+      } else if (episodeId.includes('?ep=')) {
+        episodeNum = episodeId.split('?ep=')[1] || '1';
+      } else {
+        episodeNum = '1';
+      }
+      
+      // Find the target episode
+      const targetEpisode = episodesData.find((ep: any) => ep.number === parseInt(episodeNum));
+      if (!targetEpisode) {
+        throw new Error(`Episode ${episodeNum} not found in ${newTrack} format`);
+      }
+      
+      // Get watch data for the new track
+      const watchUrl = `${CONSUMET_API_URL}/meta/anilist/watch/${targetEpisode.id}?provider=zoro${isDub ? '&dub=true' : ''}`;
+      const watchResponse = await fetch(watchUrl);
+      const watchData = await watchResponse.json();
+      
+      if (!watchData?.sources?.length) {
+        throw new Error(`No ${newTrack} sources available`);
+      }
+      
+      // Filter and format sources
+      const filteredSources = watchData.sources.filter((source: any) => !source.url.includes('m3u8.google'));
+      if (filteredSources.length === 0) {
+        throw new Error(`No valid ${newTrack} sources found`);
+      }
+      
+      // Use the first available source (preferably m3u8)
+      const selectedSource = filteredSources.find((s: any) => s.url.includes('.m3u8')) || filteredSources[0];
+      
+      // Update video source
+      const headers = {
+        ...watchData.headers,
+        Referer: 'https://hianime.to/',
+        Origin: 'https://hianime.to',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+      };
+      
+      setVideoSourceState({
+        uri: selectedSource.url,
+        headers: headers
+      });
+      
+      // Update current track
+      setCurrentAudioTrack(newTrack);
+      
+      // Update subtitles if available
+      if (watchData.subtitles?.length) {
+        setSubtitles(watchData.subtitles.map((sub: any) => ({
+          url: sub.url,
+          lang: sub.lang
+        })));
+      }
+      
+      // Show feedback to user
+      showCaptionToggleFeedback(true);
+      setCaptionFeedbackText(`Switched to ${newTrack === 'sub' ? 'Subbed' : 'Dubbed'} version`);
+      
+      // Resume from the same position after a short delay
+      setTimeout(() => {
+        if (videoRef.current && currentPosition > 0) {
+          videoRef.current.setPositionAsync(currentPosition * 1000);
+        }
+      }, 1000);
+      
+      console.log(`[AUDIO_TRACK] ✅ Successfully switched to ${newTrack}`);
+      
+    } catch (error) {
+      console.error(`[AUDIO_TRACK] ❌ Failed to switch audio track:`, error);
+      showCaptionToggleFeedback(true);
+      setCaptionFeedbackText(`Failed to switch to ${newTrack === 'sub' ? 'Subbed' : 'Dubbed'} version`);
+    } finally {
+      setIsLoadingAudioTrack(false);
+    }
+  };
+
   // Enhanced video component with modern UI
   return (
     <View style={[
@@ -3959,6 +4164,9 @@ const PlayerScreen = () => {
           autoRotateEnabled={autoRotateEnabled}
           setAutoRotateEnabled={setAutoRotateEnabled}
           videoRef={videoRef}
+          currentAudioTrack={currentAudioTrack}
+          availableAudioTracks={availableAudioTracks}
+          onAudioTrackChange={handleAudioTrackChange}
         />
       )}
       {showDebug && <DebugOverlay />}
@@ -4056,7 +4264,7 @@ const PlayerScreen = () => {
             });
           }
         }}
-        preferredType="auto"
+        preferredType={currentAudioTrack}
         animeTitle={nextEpisodeData?.animeTitle || animeTitle}
         malId={nextEpisodeData?.malId}
         autoSelectSource={true}

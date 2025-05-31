@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
@@ -87,49 +87,51 @@ const LoadingMessages = [
 ];
 
 // Add this new component for animated particles
+const AnimatedParticle = ({ index, totalParticles }: { index: number; totalParticles: number }) => {
+  const animatedValue = useSharedValue(0);
+  
+  useEffect(() => {
+    const delay = index * 200;
+    setTimeout(() => {
+      animatedValue.value = withRepeat(
+        withTiming(1, { duration: 1500 + Math.random() * 1000 }),
+        -1,
+        false
+      );
+    }, delay);
+  }, [index]);
+  
+  const particleStyle = useAnimatedStyle(() => {
+    const size = 4 + Math.random() * 4;
+    const angle = (index / totalParticles) * Math.PI * 2;
+    const radius = 30 + Math.random() * 40;
+    
+    return {
+      width: size,
+      height: size,
+      borderRadius: size / 2,
+      backgroundColor: index % 3 === 0 ? '#02A9FF' : index % 3 === 1 ? '#5D3FD3' : '#FF6B6B',
+      position: 'absolute',
+      opacity: 0.2 + (animatedValue.value * 0.8),
+      transform: [
+        { translateX: radius * Math.cos(angle) * (0.4 + animatedValue.value * 0.6) },
+        { translateY: radius * Math.sin(angle) * (0.4 + animatedValue.value * 0.6) },
+        { scale: 0.5 + animatedValue.value * 1 }
+      ]
+    };
+  });
+  
+  return <Reanimated.View style={particleStyle} />;
+};
+
 const AnimatedParticles = () => {
   const particles = Array(12).fill(0);
   
   return (
     <View style={styles.particleContainer}>
-      {particles.map((_, index) => {
-        const animatedValue = useSharedValue(0);
-        
-        useEffect(() => {
-          const delay = index * 200;
-          setTimeout(() => {
-            animatedValue.value = withRepeat(
-              withTiming(1, { duration: 1500 + Math.random() * 1000 }),
-              -1,
-              false
-            );
-          }, delay);
-        }, []);
-        
-        const particleStyle = useAnimatedStyle(() => {
-          const size = 4 + Math.random() * 4;
-          const angle = (index / particles.length) * Math.PI * 2;
-          const radius = 30 + Math.random() * 40;
-          
-          return {
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: index % 3 === 0 ? '#02A9FF' : index % 3 === 1 ? '#5D3FD3' : '#FF6B6B',
-            position: 'absolute',
-            opacity: 0.2 + (animatedValue.value * 0.8),
-            transform: [
-              { translateX: radius * Math.cos(angle) * (0.4 + animatedValue.value * 0.6) },
-              { translateY: radius * Math.sin(angle) * (0.4 + animatedValue.value * 0.6) },
-              { scale: 0.5 + animatedValue.value * 1 }
-            ]
-          };
-        });
-        
-        return (
-          <Reanimated.View key={index} style={particleStyle} />
-        );
-      })}
+      {particles.map((_, index) => (
+        <AnimatedParticle key={index} index={index} totalParticles={particles.length} />
+      ))}
     </View>
   );
 };
@@ -305,8 +307,16 @@ const AutoLoadingMessage = ({
 };
 
 const CONSUMET_API_URL = 'https://takiapi.xyz';
+const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
 
 const API_ENDPOINTS = {
+  anilistMeta: {
+    episodes: (anilistId: string, dub?: boolean) => 
+      `${CONSUMET_API_URL}/meta/anilist/episodes/${anilistId}?provider=zoro${dub ? '&dub=true' : ''}`,
+    watch: (episodeId: string, dub?: boolean) => 
+      `${CONSUMET_API_URL}/meta/anilist/watch/${episodeId}?provider=zoro${dub ? '&dub=true' : ''}`
+  },
+  // Keep legacy endpoints as fallback
   zoro: {
     search: (query: string) => `${CONSUMET_API_URL}/anime/zoro/${encodeURIComponent(query)}?type=1`,
     info: (id: string) => `${CONSUMET_API_URL}/anime/zoro/info?id=${id}`,
@@ -417,27 +427,29 @@ export default function EpisodeSourcesModal({
   episodeId, 
   onClose, 
   onSelectSource,
-  preferredType,
+  preferredType = 'sub',
   animeTitle,
   malId,
   anilistId,
-  autoSelectSource = false
+  autoSelectSource = false,
+  mangaTitle
 }: {
   visible: boolean;
   episodeId: string;
   onClose: () => void;
   onSelectSource: (url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: Subtitle[], timings?: VideoTimings, anilistId?: string, dataKey?: string) => void;
-  preferredType?: 'auto' | 'sub' | 'dub';
+  preferredType?: 'sub' | 'dub';
   animeTitle?: string;
   malId?: string;
   anilistId?: string;
   autoSelectSource?: boolean;
+  mangaTitle?: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
-  const [type, setType] = useState<'sub' | 'dub'>(preferredType === 'dub' ? 'dub' : 'sub');
+  const [type, setType] = useState<'sub' | 'dub'>(preferredType || 'sub');
   const [error, setError] = useState<string | null>(null);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [scaleAnim] = useState(new Animated.Value(0.95));
@@ -496,10 +508,6 @@ export default function EpisodeSourcesModal({
 
   useEffect(() => {
     if (visible) {
-      // Always show visual loading feedback
-      setPillVisible(true);
-      setPillMessage(`Loading Episode ${episodeNumber || ''}...`);
-
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -544,8 +552,11 @@ export default function EpisodeSourcesModal({
 
       logUserSettings();
 
-      // Always fetch sources regardless of mode
-      fetchSources(episodeId, type);
+      // Always fetch sources for the preferred type when modal opens
+      setLoading(true);
+      const initialType = preferredType || 'sub';
+      setType(initialType);
+      fetchSources(episodeId, initialType);
     } else {
       fadeAnim.setValue(0);
       scaleAnim.setValue(0.95);
@@ -571,105 +582,158 @@ export default function EpisodeSourcesModal({
     };
   };
 
+  // Function to fetch anime titles from AniList
+  const fetchAnimeFromAniList = async (): Promise<{
+    title: string;
+    englishTitle?: string;
+    romajiTitle?: string;
+    nativeTitle?: string;
+    synonyms?: string[];
+  } | null> => {
+    if (!anilistId) return null;
+    
+    try {
+      console.log(`🔍 Fetching anime details from AniList ID: ${anilistId}`);
+      
+      const query = `
+        query ($id: Int) {
+          Media(id: $id, type: ANIME) {
+            title {
+              romaji
+              english
+              native
+            }
+            synonyms
+          }
+        }
+      `;
+      
+      const response = await axios.post(
+        ANILIST_GRAPHQL_ENDPOINT,
+        {
+          query,
+          variables: {
+            id: parseInt(anilistId)
+          }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+      
+      if (response.data?.data?.Media) {
+        const media = response.data.data.Media;
+        console.log(`✅ AniList data:`, {
+          romaji: media.title.romaji,
+          english: media.title.english,
+          native: media.title.native,
+          synonyms: media.synonyms
+        });
+        
+        return {
+          title: media.title.english || media.title.romaji || animeTitle || '',
+          englishTitle: media.title.english,
+          romajiTitle: media.title.romaji,
+          nativeTitle: media.title.native,
+          synonyms: media.synonyms || []
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching from AniList:', error);
+    }
+    
+    return null;
+  };
+
   const fetchSources = async (episodeId: string, type: 'sub' | 'dub') => {
     try {
-      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (DETAILED) ===`);
+      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (AniList Meta) ===`);
       console.log(`📡 Fetching ${type.toUpperCase()} sources for episode ${episodeId}`);
       console.log(`📺 Anime title:`, animeTitle);
+      console.log(`🆔 AniList ID:`, anilistId);
       console.log(`🔄 Auto-select mode: ${autoSelectSource ? 'ON' : 'OFF'}`);
       
       setError(null);
       setLoading(true);
 
-      const [, episodeNum] = episodeId.split('?ep=');
-      
-      // Normalize anime title for search
-      const normalizedTitle = animeTitle?.toLowerCase().replace(/\s+/g, '') || '';
-      console.log(`🔍 Normalized anime title for search:`, normalizedTitle);
-      
-      const searchUrl = API_ENDPOINTS.zoro.search(animeTitle || '');
-      console.log(`🔍 Searching anime:`, searchUrl);
-      
-      const searchResponse = await axios.get(searchUrl);
-      console.log(`✅ Search response status:`, searchResponse.status);
-      console.log(`📊 Search results count:`, searchResponse.data?.results?.length || 0);
-      
-      if (!searchResponse?.data?.results?.length) {
-        console.log(`❌ No results found for "${animeTitle}"`);
-        throw new Error('Anime not found');
+      // Extract episode number from episodeId
+      let episodeNum;
+      if (episodeId.includes('/')) {
+        // New format: animeId/episodeNumber
+        episodeNum = episodeId.split('/')[1] || '1';
+      } else if (episodeId.includes('?ep=')) {
+        // Legacy format: animeId?ep=episodeNumber
+        episodeNum = episodeId.split('?ep=')[1] || '1';
+      } else {
+        episodeNum = '1';
       }
-
-      let allResults = searchResponse.data.results;
       
-      // Log all search results for debugging
-      console.log('📋 Search results:');
-      allResults.slice(0, 5).forEach((result: any, index: number) => {
-        console.log(`   ${index + 1}. "${result.title}" (Type: ${result.type || 'unknown'}, ID: ${result.id})`);
-      });
+      console.log(`📺 Episode number:`, episodeNum);
       
-      // Find the best match using normalized titles
-      let matchedAnime = null;
+      if (!anilistId) {
+        throw new Error('AniList ID is required for fetching sources');
+      }
       
-      // First try exact match with normalized titles
-      matchedAnime = allResults.find((anime: any) => 
-        anime.title.toLowerCase().replace(/\s+/g, '') === normalizedTitle
+      // Use AniList meta endpoint to get episodes
+      const isDub = type === 'dub';
+      const episodesUrl = API_ENDPOINTS.anilistMeta.episodes(anilistId, isDub);
+      console.log(`🔍 Fetching episodes from AniList meta:`, episodesUrl);
+      
+      const episodesResponse = await axios.get(episodesUrl);
+      console.log(`✅ EPISODES RESPONSE STATUS:`, episodesResponse.status);
+      console.log(`📊 EPISODES RESPONSE HEADERS:`, JSON.stringify(episodesResponse.headers, null, 2));
+      console.log(`📊 FULL EPISODES RESPONSE JSON:`, JSON.stringify(episodesResponse.data, null, 2));
+      
+      if (!episodesResponse?.data || episodesResponse.data.length === 0) {
+        console.log(`❌ No ${type.toUpperCase()} episodes found for AniList ID ${anilistId}`);
+        
+        // If we're looking for dub and auto-select is enabled, automatically try sub
+        if (type === 'dub' && autoSelectSource) {
+          console.log(`🔄 Auto-fallback: Trying SUB version instead...`);
+          setPillMessage('Dub not available, loading sub version...');
+          return fetchSources(episodeId, 'sub');
+        }
+        
+        throw new Error(`No ${type.toUpperCase()} episodes found for this anime`);
+      }
+      
+      console.log(`📊 Episodes available:`, episodesResponse.data.length);
+      
+      // Find the specific episode
+      const targetEpisode = episodesResponse.data.find((ep: any) => 
+        ep.number === parseInt(episodeNum)
       );
       
-      if (matchedAnime) {
-        console.log(`✅ Found exact match with normalized title: ${matchedAnime.title} (ID: ${matchedAnime.id})`);
-      } else {
-        // Try partial match with normalized titles
-        matchedAnime = allResults.find((anime: any) => 
-          anime.title.toLowerCase().replace(/\s+/g, '').includes(normalizedTitle) ||
-          normalizedTitle.includes(anime.title.toLowerCase().replace(/\s+/g, ''))
-        );
+      if (!targetEpisode) {
+        console.log(`❌ Episode ${episodeNum} not found in ${type.toUpperCase()} format`);
+        console.log(`📋 Available episodes:`, episodesResponse.data.map((ep: any) => ep.number).slice(0, 10));
         
-        if (matchedAnime) {
-          console.log(`✅ Found partial match with normalized title: ${matchedAnime.title} (ID: ${matchedAnime.id})`);
-        } else {
-          // Fallback to first TV series
-          matchedAnime = allResults.find((anime: any) => anime.type === 'TV');
-          
-          if (matchedAnime) {
-            console.log(`⚠️ No title match, using first TV series: ${matchedAnime.title} (ID: ${matchedAnime.id})`);
-          } else {
-            // Last resort: use first result
-            matchedAnime = allResults[0];
-            console.log(`⚠️ No TV series found, using first result: ${matchedAnime.title} (ID: ${matchedAnime.id})`);
-          }
+        // If we're looking for dub and auto-select is enabled, automatically try sub
+        if (type === 'dub' && autoSelectSource) {
+          console.log(`🔄 Auto-fallback: Episode ${episodeNum} not found in DUB, trying SUB...`);
+          setPillMessage(`Episode ${episodeNum} not available in dub, loading sub...`);
+          return fetchSources(episodeId, 'sub');
         }
+        
+        throw new Error(`Episode ${episodeNum} not found in ${type.toUpperCase()} format`);
       }
-
-      // Check if we actually found a match
-      if (!matchedAnime) {
-        console.log(`❌ Failed to find any anime result`);
-        throw new Error(`Could not find anime "${animeTitle}"`);
-      }
-
-      console.log(`✅ Selected anime: "${matchedAnime.title}" (ID: ${matchedAnime.id}, Type: ${matchedAnime.type || 'unknown'})`);
       
-      const infoUrl = API_ENDPOINTS.zoro.info(matchedAnime.id);
-      console.log(`📝 Fetching anime info:`, infoUrl);
+      console.log(`🎯 Target episode found:`, {
+        id: targetEpisode.id,
+        number: targetEpisode.number,
+        title: targetEpisode.title || 'No title'
+      });
       
-      const infoResponse = await axios.get(infoUrl);
-      console.log(`✅ Info response status:`, infoResponse.status);
-      console.log(`📊 Episodes available:`, infoResponse.data?.episodes?.length || 0);
-      
-      if (!infoResponse?.data) {
-        console.log(`❌ Failed to get anime info`);
-        throw new Error('Failed to get anime info');
-      }
-
-      // Always use the new format: animeId/episodeNumber
-      const correctEpisodeId = `${matchedAnime.id}/${episodeNum}`;
-      console.log(`ℹ️ Using new episode ID format: ${correctEpisodeId}`);
-
-      const watchUrl = API_ENDPOINTS.zoro.watch(correctEpisodeId);
-      console.log(`📡 Fetching sources:`, watchUrl);
-      console.log(`🔊 Requesting ${type.toUpperCase()} version`);
+      // Get watch data for the episode using the episode ID
+      const watchUrl = API_ENDPOINTS.anilistMeta.watch(targetEpisode.id, isDub);
+      console.log(`🎬 WATCH URL:`, watchUrl);
       
       const response = await axios.get(watchUrl);
-      console.log(`✅ Sources response status:`, response.status);
+      console.log(`✅ WATCH RESPONSE STATUS:`, response.status);
+      console.log(`📊 WATCH RESPONSE HEADERS:`, JSON.stringify(response.headers, null, 2));
+      console.log(`📊 FULL WATCH RESPONSE JSON:`, JSON.stringify(response.data, null, 2));
       
       // Debug log the raw response structure
       console.log(`📋 Source response structure:`, {
@@ -717,11 +781,13 @@ export default function EpisodeSourcesModal({
         // Process sources
         const allSources = response.data.sources || [];
         console.log(`📊 Total sources available: ${allSources.length}`);
+        console.log(`📊 RAW SOURCES JSON:`, JSON.stringify(allSources, null, 2));
 
         if (allSources.length) {
           // Filter out Google sources and format the remaining ones
           const filteredSources = allSources.filter((source: any) => !source.url.includes('m3u8.google'));
           console.log(`📊 Sources after filtering: ${filteredSources.length}`);
+          console.log(`📊 FILTERED SOURCES JSON:`, JSON.stringify(filteredSources, null, 2));
           
           // Check available qualities
           const qualities = filteredSources.map((s: any) => s.quality).filter(Boolean);
@@ -731,6 +797,8 @@ export default function EpisodeSourcesModal({
           const formattedSources = filteredSources.map((source: any) => 
             formatSourceWithHeaders(source, response.data.headers || {}, type)
           );
+          
+          console.log(`📊 FORMATTED SOURCES JSON:`, JSON.stringify(formattedSources, null, 2));
           
           if (formattedSources.length > 0) {
             console.log(`✅ Found ${type.toUpperCase()} sources: ${formattedSources.length}`);
@@ -742,6 +810,7 @@ export default function EpisodeSourcesModal({
             if (response.data.subtitles?.length) {
               const subLangs = response.data.subtitles.map((sub: any) => sub.lang).join(', ');
               console.log(`✅ Subtitles available: ${response.data.subtitles.length} - Languages: ${subLangs}`);
+              console.log(`📊 RAW SUBTITLES JSON:`, JSON.stringify(response.data.subtitles, null, 2));
               
               // Log raw subtitles for debugging
               console.log(`📋 Raw subtitles from API:`, response.data.subtitles.map((sub: any) => ({
@@ -760,6 +829,7 @@ export default function EpisodeSourcesModal({
               
               console.log(`✅ Processed ${directSubtitles.length} valid subtitles`);
               console.log(`🔒 Created direct subtitles array with ${directSubtitles.length} items`);
+              console.log(`📊 PROCESSED SUBTITLES JSON:`, JSON.stringify(directSubtitles, null, 2));
               console.log(`📋 First direct subtitle:`, directSubtitles[0] ? {
                 lang: directSubtitles[0].lang,
                 urlPreview: directSubtitles[0].url.substring(0, 50) + '...'
@@ -777,16 +847,21 @@ export default function EpisodeSourcesModal({
             
             // If auto-select, proceed with automatic selection
             if (autoSelectSource) {
+              // Update pill message to show successful loading
+              setPillMessage(`Loading ${type} version...`);
+              
               // Check for m3u8 source
               const m3u8Source = formattedSources.find((source: Source) => source.isM3U8);
               if (m3u8Source) {
                 console.log(`✅ Found HLS (m3u8) stream for ${type}`);
+                console.log(`📊 SELECTED M3U8 SOURCE:`, JSON.stringify(m3u8Source, null, 2));
                 handleDirectSourceSelect(m3u8Source, directSubtitles, directTimings, anilistId);
                 return;
               } else {
                 console.log(`ℹ️ No HLS stream found, using direct source`);
                 const firstSource = formattedSources[0];
                 if (firstSource) {
+                  console.log(`📊 SELECTED FIRST SOURCE:`, JSON.stringify(firstSource, null, 2));
                   handleDirectSourceSelect(firstSource, directSubtitles, directTimings, anilistId);
                   return;
                 }
@@ -809,6 +884,8 @@ export default function EpisodeSourcesModal({
                 return getQualityNumber(b.quality) - getQualityNumber(a.quality);
               });
               
+              console.log(`📊 QUALITY OPTIONS JSON:`, JSON.stringify(qualityOptions, null, 2));
+              
               setAvailableQualities(qualityOptions);
               setShowQualitySelection(true);
               setLoading(false);
@@ -824,6 +901,13 @@ export default function EpisodeSourcesModal({
             console.log(`❌ No ${type.toUpperCase()} sources available`);
             setSources([]);
             
+            // If we're looking for dub and auto-select is enabled, automatically try sub
+            if (type === 'dub' && autoSelectSource) {
+              console.log(`🔄 Auto-fallback: No DUB sources available, trying SUB...`);
+              setPillMessage('Dub sources not available, loading sub...');
+              return fetchSources(episodeId, 'sub');
+            }
+            
             // Try to determine if the other type might be available
             const oppositeType = type === 'sub' ? 'dub' : 'sub';
             console.log(`ℹ️ ${type.toUpperCase()} not available, user may want to try ${oppositeType.toUpperCase()} instead`);
@@ -832,39 +916,50 @@ export default function EpisodeSourcesModal({
           }
         } else {
           console.log(`❌ No sources returned from API`);
+          
+          // If we're looking for dub and auto-select is enabled, automatically try sub
+          if (type === 'dub' && autoSelectSource) {
+            console.log(`🔄 Auto-fallback: No DUB sources in API response, trying SUB...`);
+            setPillMessage('Dub not found, loading sub version...');
+            return fetchSources(episodeId, 'sub');
+          }
+          
           throw new Error('No video sources available');
         }
       } else {
         console.log(`❌ Empty response data`);
+        
+        // If we're looking for dub and auto-select is enabled, automatically try sub
+        if (type === 'dub' && autoSelectSource) {
+          console.log(`🔄 Auto-fallback: Empty response for DUB, trying SUB...`);
+          setPillMessage('Dub request failed, loading sub...');
+          return fetchSources(episodeId, 'sub');
+        }
+        
         throw new Error('No data returned from source');
       }
       console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
 
       // Update pill message to reflect current status
-      if (autoSelectSource && preferredType === 'auto') {
-        setPillMessage(`Found ${matchedAnime.title}...`);
-      }
-      
-      // When sources are being fetched
-      if (correctEpisodeId) {
-        if (autoSelectSource && preferredType === 'auto') {
-          setPillMessage(`Loading Episode ${episodeNum}...`);
-        }
-      }
-      
-      // When sources are set, we know they were found and formatted
-      if (sources.length > 0) {
-        if (autoSelectSource && preferredType === 'auto') {
-          setPillMessage(`Preparing video player...`);
-        }
+      if (autoSelectSource) {
+        setPillMessage(`Found episode ${episodeNum}...`);
       }
     } catch (error) {
       console.error(`❌ Error:`, error);
+      console.error(`❌ ERROR STACK TRACE:`, error instanceof Error ? error.stack : 'No stack trace');
+      
+      // If we're looking for dub and auto-select is enabled, automatically try sub as last resort
+      if (type === 'dub' && autoSelectSource && !error?.toString().includes('SUB')) {
+        console.log(`🔄 Final auto-fallback: DUB failed with error, trying SUB as last resort...`);
+        setPillMessage('Dub failed, trying sub...');
+        return fetchSources(episodeId, 'sub');
+      }
+      
       setError(error instanceof Error ? error.message : 'Failed to fetch sources');
       console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
       
       // Update pill message for errors
-      if (autoSelectSource && preferredType === 'auto') {
+      if (autoSelectSource) {
         setPillMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load'}`);
         // Auto-hide pill after error is shown
         setTimeout(() => setPillVisible(false), 3000);
@@ -944,7 +1039,7 @@ export default function EpisodeSourcesModal({
     });
     
     // Update pill message before navigating
-    if (autoSelectSource && preferredType === 'auto') {
+    if (autoSelectSource) {
       setPillMessage(`Starting Episode ${episodeNumber || ''}...`);
     }
     
@@ -1025,9 +1120,11 @@ export default function EpisodeSourcesModal({
     onSelectSource(source.url, source.headers, episodeId, episodeNumber || '', currentSubtitles, videoTimings, anilistId, dataKey);
   };
 
-  const handleTypeSelect = (type: 'sub' | 'dub') => {
-    setType(type);
-    fetchSources(episodeId, type);
+  const handleTypeSelect = (selectedType: 'sub' | 'dub') => {
+    setType(selectedType);
+    setLoading(true);
+    setError(null);
+    fetchSources(episodeId, selectedType);
   };
 
   // Add new component for quality selection
@@ -1085,6 +1182,46 @@ export default function EpisodeSourcesModal({
     );
   };
 
+  // Add function to check availability of both sub and dub
+  const checkAvailability = useCallback(async (episodeId: string, anilistId: string) => {
+    if (!anilistId) return { sub: false, dub: false };
+    
+    try {
+      // Extract episode number
+      let episodeNum;
+      if (episodeId.includes('/')) {
+        episodeNum = episodeId.split('/')[1] || '1';
+      } else if (episodeId.includes('?ep=')) {
+        episodeNum = episodeId.split('?ep=')[1] || '1';
+      } else {
+        episodeNum = '1';
+      }
+      
+      console.log(`🔍 Checking SUB/DUB availability for episode ${episodeNum}`);
+      
+      // Check both sub and dub availability in parallel
+      const [subCheck, dubCheck] = await Promise.allSettled([
+        axios.get(API_ENDPOINTS.anilistMeta.episodes(anilistId, false)),
+        axios.get(API_ENDPOINTS.anilistMeta.episodes(anilistId, true))
+      ]);
+      
+      const subAvailable = subCheck.status === 'fulfilled' && 
+        subCheck.value?.data?.length > 0 &&
+        subCheck.value.data.some((ep: any) => ep.number === parseInt(episodeNum));
+        
+      const dubAvailable = dubCheck.status === 'fulfilled' && 
+        dubCheck.value?.data?.length > 0 &&
+        dubCheck.value.data.some((ep: any) => ep.number === parseInt(episodeNum));
+      
+      console.log(`📊 Availability check: SUB=${subAvailable}, DUB=${dubAvailable}`);
+      
+      return { sub: subAvailable, dub: dubAvailable };
+    } catch (error) {
+      console.error('Error checking availability:', error);
+      return { sub: true, dub: true }; // Assume both available if check fails
+    }
+  }, []);
+
   // Now replace the return statement entirely
   return (
     <Modal
@@ -1096,7 +1233,7 @@ export default function EpisodeSourcesModal({
       <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
         <BlurView intensity={20} tint="dark" style={styles.blurContainer}>
           <Animated.View style={[styles.content, { transform: [{ scale: scaleAnim }] }]}>
-            {autoSelectSource && preferredType === 'auto' ? (
+            {autoSelectSource ? (
               // Show simplified UI with prominent loading for auto-select mode
               <AutoLoadingMessage episodeNumber={episodeNumber} onClose={onClose} />
             ) : loading ? (
@@ -1162,7 +1299,7 @@ export default function EpisodeSourcesModal({
       </Animated.View>
       
       {/* Also keep the pill for additional subtle feedback */}
-      {autoSelectSource && preferredType === 'auto' && (
+      {autoSelectSource && (
         <AutoSelectPill 
           visible={pillVisible} 
           message={pillMessage} 

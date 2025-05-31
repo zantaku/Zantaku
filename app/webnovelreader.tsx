@@ -104,17 +104,20 @@ export default function WebNovelReader() {
     }
     
     if (targetChapter) {
-      if (!isIncognito && !progressTracker.hasUpdatedProgress) {
-        setPendingNextChapter(true);
-        setShowSaveModal(true);
-        setNavigationType(type);
-      } else {
+      // Skip save modal if in incognito mode, auto-save enabled, or progress already updated
+      if (isIncognito || shouldAutoSave || progressTracker.hasUpdatedProgress) {
         setSelectedChapter(targetChapter);
         setAutoLoadChapter(true);
         setShowChapterModal(true);
+      } else {
+        // Only show save modal if not in incognito mode and progress hasn't been updated
+        setPendingNextChapter(true);
+        setShowSaveModal(true);
+        setNavigationType(type);
+        setSelectedChapter(targetChapter);
       }
     }
-  }, [chapterNav, progressTracker.hasUpdatedProgress, isIncognito, params.chapter]);
+  }, [chapterNav, progressTracker.hasUpdatedProgress, isIncognito, shouldAutoSave, params.chapter]);
 
   // Load images from params
   useEffect(() => {
@@ -174,13 +177,15 @@ export default function WebNovelReader() {
 
   // Handle back navigation
   const handleBack = useCallback(() => {
-    if (!isIncognito && !progressTracker.hasUpdatedProgress) {
-      setShowExitModal(true);
-    } else {
+    // Skip save modal if in incognito mode, auto-save enabled, or progress already updated
+    if (isIncognito || shouldAutoSave || progressTracker.hasUpdatedProgress) {
       DeviceEventEmitter.emit('refreshMangaDetails');
       router.back();
+    } else {
+      // Only show exit modal if not in incognito mode and progress hasn't been updated
+      setShowExitModal(true);
     }
-  }, [progressTracker.hasUpdatedProgress, router, isIncognito]);
+  }, [progressTracker.hasUpdatedProgress, router, isIncognito, shouldAutoSave]);
 
   // Optimized scroll handler with throttling and efficient page calculation
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -229,12 +234,16 @@ export default function WebNovelReader() {
       const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
       
       if (isAtBottom) {
-        if (!isIncognito && !progressTracker.hasUpdatedProgress) {
+        // Skip save modal if in incognito mode, auto-save enabled, or progress already updated
+        if (isIncognito || shouldAutoSave || progressTracker.hasUpdatedProgress) {
+          if (chapterNav.hasNextChapter) {
+            handleChapterNavigation('next');
+          }
+        } else {
+          // Only show save modal if not in incognito mode and progress hasn't been updated
           setPendingNextChapter(true);
           setShowSaveModal(true);
           setNavigationType('next');
-        } else if (chapterNav.hasNextChapter) {
-          handleChapterNavigation('next');
         }
       }
     }, 50); // Debounce by 50ms

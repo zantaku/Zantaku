@@ -51,7 +51,7 @@ export default function AnimeSettingsPage() {
 
   // Local state for source settings
   const [sourceSettings, setSourceSettings] = useState({
-    preferredType: 'sub' as 'auto' | 'sub' | 'dub',
+    preferredType: 'sub' as 'sub' | 'dub',
     autoTryAlternateVersion: false,
     preferHLSStreams: true,
     logSourceDetails: true,
@@ -391,25 +391,29 @@ export default function AnimeSettingsPage() {
           <View style={{ marginBottom: 12 }}>
             <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Preferred Version</Text>
             <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-              Currently only SUB version is available
+              Choose your preferred audio version
             </Text>
           </View>
           <View style={styles.versionOptions}>
-            {['auto', 'sub', 'dub'].map(type => (
+            {['sub', 'dub'].map(type => (
               <TouchableOpacity
                 key={`version-${type}`}
                 style={[
                   styles.versionOption,
-                  { opacity: type === 'sub' ? 1 : 0.5 },
                   sourceSettings.preferredType === type && styles.versionOptionSelected
                 ]}
-                disabled={type !== 'sub'}
+                onPress={() => {
+                  saveSourceSettings({
+                    ...sourceSettings,
+                    preferredType: type as 'sub' | 'dub'
+                  });
+                }}
               >
                 <Text style={[
                   styles.versionOptionText,
                   { color: sourceSettings.preferredType === type ? '#fff' : currentTheme.colors.text }
                 ]}>
-                  {type}
+                  {type.toUpperCase()}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -421,14 +425,19 @@ export default function AnimeSettingsPage() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Try Alternate Version if Preferred Unavailable</Text>
               <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                Currently disabled as only SUB version is available
+                Automatically try DUB if SUB is unavailable (or vice versa)
               </Text>
             </View>
             <Switch
-              value={false}
-              disabled={true}
+              value={sourceSettings.autoTryAlternateVersion}
+              onValueChange={(value) => {
+                saveSourceSettings({
+                  ...sourceSettings,
+                  autoTryAlternateVersion: value
+                });
+              }}
               trackColor={{ false: '#767577', true: '#2196F3' }}
-              thumbColor={'#f4f3f4'}
+              thumbColor={sourceSettings.autoTryAlternateVersion ? '#fff' : '#f4f3f4'}
             />
           </View>
         </View>
@@ -491,7 +500,7 @@ export default function AnimeSettingsPage() {
             
             saveSourceSettings({
               preferredType: 'sub',
-              autoTryAlternateVersion: false,
+              autoTryAlternateVersion: true,
               preferHLSStreams: true,
               logSourceDetails: true,
             });

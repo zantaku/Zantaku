@@ -26,6 +26,14 @@ export interface VideoTimings {
   };
 }
 
+// Define audio track types for dub/sub switching
+export interface AudioTrack {
+  type: 'sub' | 'dub';
+  available: boolean;
+  episodeId?: string;
+  anilistId?: string;
+}
+
 // Define player progress data
 export interface VideoProgressData {
   currentTime: number;

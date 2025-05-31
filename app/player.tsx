@@ -4,6 +4,8 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
 import VideoPlayer from './videoplayer/PlayerScreen';
 import { useTheme } from '../hooks/useTheme';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Player component that forces landscape orientation
 export default function Player() {
@@ -11,6 +13,72 @@ export default function Player() {
   const isLocked = useRef(false);
   const lockTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const params = useLocalSearchParams();
+  const router = useRouter();
+
+  // Log all route parameters and data when component mounts
+  useEffect(() => {
+    const logPlayerData = async () => {
+      console.log('\n=== PLAYER COMPONENT DEBUG ===');
+      console.log('📱 Player component mounted');
+      console.log('🔗 Route parameters:', JSON.stringify(params, null, 2));
+      
+      // Log individual parameters for clarity
+      Object.keys(params).forEach(key => {
+        console.log(`📋 Param "${key}":`, params[key]);
+      });
+      
+      // If there's a dataKey parameter, fetch the stored data
+      if (params.dataKey) {
+        try {
+          console.log('🔑 DataKey found, fetching stored data:', params.dataKey);
+          const storedData = await AsyncStorage.getItem(params.dataKey as string);
+          if (storedData) {
+            const parsedData = JSON.parse(storedData);
+            console.log('📊 STORED VIDEO DATA JSON:', JSON.stringify(parsedData, null, 2));
+            console.log('🎬 Video source URL:', parsedData.source ? parsedData.source.substring(0, 50) + '...' : 'none');
+            console.log('📝 Episode info:', {
+              episodeId: parsedData.episodeId,
+              episodeNumber: parsedData.episodeNumber,
+              animeTitle: parsedData.animeTitle,
+              anilistId: parsedData.anilistId
+            });
+            console.log('📋 Headers:', JSON.stringify(parsedData.headers, null, 2));
+            console.log('🎯 Subtitles count:', parsedData.subtitles?.length || 0);
+            if (parsedData.subtitles?.length > 0) {
+              console.log('🎯 Subtitle languages:', parsedData.subtitles.map((s: any) => s.lang).join(', '));
+            }
+            console.log('⏱️ Video timings:', parsedData.timings ? JSON.stringify(parsedData.timings, null, 2) : 'none');
+          } else {
+            console.log('⚠️ No stored data found for dataKey:', params.dataKey);
+          }
+        } catch (error) {
+          console.error('❌ Error fetching stored data:', error);
+        }
+      }
+      
+      // Log any direct URL parameters that might contain video data
+      if (params.url) {
+        console.log('🎬 Direct video URL from params:', typeof params.url === 'string' ? params.url.substring(0, 50) + '...' : params.url);
+      }
+      
+      if (params.headers) {
+        console.log('📋 Headers from params:', params.headers);
+      }
+      
+      if (params.subtitles) {
+        console.log('🎯 Subtitles from params:', params.subtitles);
+      }
+      
+      if (params.timings) {
+        console.log('⏱️ Timings from params:', params.timings);
+      }
+      
+      console.log('=== END PLAYER COMPONENT DEBUG ===\n');
+    };
+
+    logPlayerData();
+  }, [params]);
 
   // Force landscape mode immediately and maintain it
   useEffect(() => {
@@ -59,6 +127,7 @@ export default function Player() {
         if (!isMounted) return;
         
         const currentOrientation = event.orientationInfo.orientation;
+        console.log('[PLAYER] 📱 Orientation changed to:', currentOrientation);
         
         // Only force landscape if currently in portrait and we're still mounted
         if (currentOrientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
@@ -67,6 +136,7 @@ export default function Player() {
           
           try {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+            console.log('[PLAYER] ✅ Successfully re-locked to landscape');
           } catch (error) {
             console.error('[PLAYER] ❌ Failed to re-lock orientation:', error);
           }
@@ -78,6 +148,7 @@ export default function Player() {
     const addListener = () => {
       if (isMounted) {
         subscription = ScreenOrientation.addOrientationChangeListener(handleOrientationChange);
+        console.log('[PLAYER] 👂 Added orientation change listener');
       }
     };
 
@@ -89,6 +160,8 @@ export default function Player() {
       isMounted = false;
       isLocked.current = false;
       
+      console.log('[PLAYER] 🧹 Cleaning up player component...');
+      
       // Clear any pending timeout
       if (lockTimeout.current) {
         clearTimeout(lockTimeout.current);
@@ -98,6 +171,7 @@ export default function Player() {
       // Remove the orientation change listener
       if (subscription) {
         ScreenOrientation.removeOrientationChangeListener(subscription);
+        console.log('[PLAYER] 👂 Removed orientation change listener');
       }
       
       const unlockAndRotate = async () => {
@@ -106,15 +180,17 @@ export default function Player() {
           
           // Force back to portrait with a cleaner transition
           await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+          console.log('[PLAYER] 📱 Locked to portrait');
           
           // Show status bar after orientation change is complete
           setTimeout(() => {
             StatusBar.setHidden(false, 'fade');
+            console.log('[PLAYER] 📱 Status bar restored');
             // Then unlock completely if the app needs to allow rotation elsewhere
             setTimeout(async () => {
               try {
                 await ScreenOrientation.unlockAsync();
-                console.log('[PLAYER] 🔄 Restored orientation');
+                console.log('[PLAYER] 🔄 Orientation unlocked - restored to normal');
               } catch (err) {
                 console.error('[PLAYER] ❌ Error unlocking orientation:', err);
               }
@@ -141,12 +217,15 @@ export default function Player() {
 
   // Don't render the player until orientation is ready
   if (!isReady) {
+    console.log('[PLAYER] ⏳ Waiting for orientation to be ready...');
     return (
       <View style={[styles.container, styles.loading, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
         <StatusBar hidden={true} />
       </View>
     );
   }
+
+  console.log('[PLAYER] ✅ Player ready, rendering VideoPlayer component');
 
   return (
     <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>

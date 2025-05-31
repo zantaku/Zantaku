@@ -35,6 +35,9 @@ interface SettingsModalProps {
   autoRotateEnabled: boolean;
   setAutoRotateEnabled: (enabled: boolean) => void;
   videoRef: any;
+  currentAudioTrack?: 'sub' | 'dub';
+  availableAudioTracks?: { sub: boolean; dub: boolean };
+  onAudioTrackChange?: (track: 'sub' | 'dub') => void;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -51,6 +54,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   autoRotateEnabled,
   setAutoRotateEnabled,
   videoRef,
+  currentAudioTrack,
+  availableAudioTracks,
+  onAudioTrackChange,
 }) => {
   // Add state for sample subtitle text
   const [previewText] = useState('Sample subtitle text for preview');
@@ -121,6 +127,65 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
           </View>
+
+          {/* Audio Track Section */}
+          {availableAudioTracks && onAudioTrackChange && (availableAudioTracks.sub || availableAudioTracks.dub) && (
+            <View style={styles.settingSection}>
+              <Text style={styles.settingSectionTitle}>Audio Track</Text>
+              
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Version</Text>
+                <View style={styles.audioTrackOptions}>
+                  {availableAudioTracks.sub && (
+                    <TouchableOpacity
+                      style={[
+                        styles.audioTrackOption,
+                        currentAudioTrack === 'sub' && styles.audioTrackOptionSelected
+                      ]}
+                      onPress={() => onAudioTrackChange('sub')}
+                    >
+                      <View style={styles.audioTrackContent}>
+                        <Text style={styles.audioTrackIcon}>💬</Text>
+                        <Text style={[
+                          styles.audioTrackText,
+                          currentAudioTrack === 'sub' && styles.audioTrackTextSelected
+                        ]}>
+                          Subbed
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                  
+                  {availableAudioTracks.dub && (
+                    <TouchableOpacity
+                      style={[
+                        styles.audioTrackOption,
+                        currentAudioTrack === 'dub' && styles.audioTrackOptionSelected
+                      ]}
+                      onPress={() => onAudioTrackChange('dub')}
+                    >
+                      <View style={styles.audioTrackContent}>
+                        <Text style={styles.audioTrackIcon}>🎤</Text>
+                        <Text style={[
+                          styles.audioTrackText,
+                          currentAudioTrack === 'dub' && styles.audioTrackTextSelected
+                        ]}>
+                          Dubbed
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              
+              {/* Show loading indicator when switching */}
+              <View style={styles.audioTrackNote}>
+                <Text style={styles.audioTrackNoteText}>
+                  💡 Switching audio track will reload the video
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Subtitles Section */}
           <View style={styles.settingSection}>
@@ -759,6 +824,49 @@ const styles = StyleSheet.create({
   switchHint: {
     color: 'white',
     fontSize: 12,
+    fontWeight: '500',
+  },
+  audioTrackOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+  },
+  audioTrackOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    margin: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  audioTrackOptionSelected: {
+    backgroundColor: '#FF6B00',
+  },
+  audioTrackContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  audioTrackIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  audioTrackText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  audioTrackTextSelected: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  audioTrackNote: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  audioTrackNoteText: {
+    color: 'white',
+    fontSize: 14,
     fontWeight: '500',
   },
 });

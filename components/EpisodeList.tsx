@@ -73,6 +73,8 @@ interface Episode {
   description?: string;
   duration?: number;
   provider?: string;
+  isSubbed?: boolean;
+  isDubbed?: boolean;
 }
 
 interface AiringSchedule {
@@ -205,6 +207,22 @@ const GridEpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDa
             {episode.number}
           </Text>
         </View>
+        
+        {/* SUB/DUB availability badges */}
+        {(episode.isSubbed || episode.isDubbed) && (
+          <View style={styles.gridAvailabilityContainer}>
+            {episode.isSubbed && (
+              <View style={[styles.gridAvailabilityBadge, styles.gridSubBadge]}>
+                <Text style={styles.gridAvailabilityText}>SUB</Text>
+              </View>
+            )}
+            {episode.isDubbed && (
+              <View style={[styles.gridAvailabilityBadge, styles.gridDubBadge]}>
+                <Text style={styles.gridAvailabilityText}>DUB</Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
       
       <View style={styles.gridEpisodeContent}>
@@ -342,6 +360,22 @@ const ListEpisodeCard = ({ episode, onPress, currentProgress, currentTheme, isDa
                 </Text>
               </View>
             )}
+            
+            {/* SUB/DUB availability badges */}
+            {(episode.isSubbed || episode.isDubbed) && (
+              <View style={styles.listAvailabilityContainer}>
+                {episode.isSubbed && (
+                  <View style={[styles.listAvailabilityBadge, styles.listSubBadge]}>
+                    <Text style={styles.listAvailabilityText}>SUB</Text>
+                  </View>
+                )}
+                {episode.isDubbed && (
+                  <View style={[styles.listAvailabilityBadge, styles.listDubBadge]}>
+                    <Text style={styles.listAvailabilityText}>DUB</Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         </View>
         
@@ -454,7 +488,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
   
   // Source settings state
   const [sourceSettings, setSourceSettings] = useState({
-    preferredType: 'auto' as 'auto' | 'sub' | 'dub',
+    preferredType: 'sub' as 'sub' | 'dub',
     autoTryAlternateVersion: true,
   });
 
@@ -620,6 +654,29 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     return mergedEpisodes;
   }, [coverImage]);
 
+  // Add function to fetch SUB/DUB availability for episodes
+  const fetchEpisodeAvailability = useCallback(async (animeId: string): Promise<{sub: Episode[], dub: Episode[]}> => {
+    try {
+      console.log(`🔍 Fetching SUB/DUB availability for anime ID: ${animeId}`);
+      
+      // Fetch both SUB and DUB episode lists
+      const [subResponse, dubResponse] = await Promise.all([
+        axios.get(`${CONSUMET_API_URL}/meta/anilist/episodes/${animeId}?provider=zoro`),
+        axios.get(`${CONSUMET_API_URL}/meta/anilist/episodes/${animeId}?provider=zoro&dub=true`)
+      ]);
+      
+      const subEpisodes = subResponse.data || [];
+      const dubEpisodes = dubResponse.data || [];
+      
+      console.log(`✅ Found ${subEpisodes.length} SUB episodes and ${dubEpisodes.length} DUB episodes`);
+      
+      return { sub: subEpisodes, dub: dubEpisodes };
+    } catch (error) {
+      console.error('Error fetching episode availability:', error);
+      return { sub: [], dub: [] };
+    }
+  }, []);
+
   // Add function to fetch episodes from HiAnime
   const fetchHiAnimeEpisodes = useCallback(async (): Promise<void> => {
     // Use manga title if available, otherwise fall back to anime title
@@ -713,22 +770,47 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
       
       // Update merged episodes if we have both Jikan and HiAnime data
       if (animeInfo.episodes && animeInfo.episodes.length > 0) {
+        // Fetch SUB/DUB availability for this anime
+        let episodeAvailability: {sub: Episode[], dub: Episode[]} = { sub: [], dub: [] };
+        if (anilistId) {
+          episodeAvailability = await fetchEpisodeAvailability(anilistId);
+        }
+        
+        // Create a map for quick lookup of SUB/DUB availability
+        const subEpisodeMap = new Map();
+        const dubEpisodeMap = new Map();
+        
+        episodeAvailability.sub.forEach((ep: any) => {
+          if (ep.number) subEpisodeMap.set(ep.number, true);
+        });
+        
+        episodeAvailability.dub.forEach((ep: any) => {
+          if (ep.number) dubEpisodeMap.set(ep.number, true);
+        });
+        
         if (currentEpisodes && currentEpisodes.length > 0) {
-          // Merge with current episodes (from Jikan)
-          const newMergedEpisodes = mergeEpisodes(currentEpisodes, animeInfo.episodes);
+          // Merge with current episodes (from Jikan) and add SUB/DUB info
+          const newMergedEpisodes = mergeEpisodes(currentEpisodes, animeInfo.episodes).map((ep: Episode) => ({
+            ...ep,
+            isSubbed: subEpisodeMap.get(ep.number) || false,
+            isDubbed: dubEpisodeMap.get(ep.number) || false
+          }));
+          
           setCurrentEpisodes(newMergedEpisodes);
           setEpisodes(newMergedEpisodes);
           
           // Save the merged episodes to cache
           await saveEpisodesToCache(newMergedEpisodes, anilistId, malId, animeTitle);
         } else {
-          // No Jikan episodes yet, just use HiAnime episodes
+          // No Jikan episodes yet, just use HiAnime episodes with SUB/DUB info
           const hiAnimeConverted: Episode[] = animeInfo.episodes.map((ep: any) => ({
             id: ep.id || `hianime-${ep.number}`,
             number: ep.number,
             title: ep.title || `Episode ${ep.number}`,
             image: coverImage,
-            provider: 'HiAnime'
+            provider: 'HiAnime',
+            isSubbed: subEpisodeMap.get(ep.number) || false,
+            isDubbed: dubEpisodeMap.get(ep.number) || false
           }));
           
           setCurrentEpisodes(hiAnimeConverted);
@@ -1271,6 +1353,29 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     fetchAiringSchedule();
   }, [fetchAiringSchedule]);
 
+  // Load source settings from AsyncStorage
+  useEffect(() => {
+    const loadSourceSettings = async () => {
+      try {
+        const savedSettings = await AsyncStorage.getItem('sourceSettings');
+        if (savedSettings) {
+          const parsedSettings = JSON.parse(savedSettings);
+          console.log('[EpisodeList] Loading saved source settings:', parsedSettings);
+          setSourceSettings(prevSettings => ({
+            ...prevSettings,
+            ...parsedSettings
+          }));
+        } else {
+          console.log('[EpisodeList] No saved source settings found, using defaults');
+        }
+      } catch (error) {
+        console.error('[EpisodeList] Error loading source settings:', error);
+      }
+    };
+
+    loadSourceSettings();
+  }, []);
+
   // Render the header with airing info and tabs
   const renderHeader = () => (
     <View style={{ backgroundColor: 'transparent' }}>
@@ -1613,7 +1718,8 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         preferredType={sourceSettings.preferredType}
         anilistId={anilistId}
         malId={malId}
-        autoSelectSource={sourceSettings.preferredType === 'auto'}
+        autoSelectSource={false}
+        mangaTitle={mangaTitle}
       />
     </View>
   );
@@ -2388,5 +2494,57 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     borderWidth: 1,
     borderColor: '#02A9FF',
+  },
+  
+  // Grid SUB/DUB availability styles
+  gridAvailabilityContainer: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    flexDirection: 'row',
+    gap: 2,
+  },
+  gridAvailabilityBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 3,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  gridSubBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.9)', // Green for SUB
+  },
+  gridDubBadge: {
+    backgroundColor: 'rgba(255, 152, 0, 0.9)', // Orange for DUB
+  },
+  gridAvailabilityText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '700',
+  },
+  
+  // List SUB/DUB availability styles
+  listAvailabilityContainer: {
+    flexDirection: 'row',
+    gap: 4,
+    marginLeft: 8,
+  },
+  listAvailabilityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    minWidth: 25,
+    alignItems: 'center',
+  },
+  listSubBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.9)', // Green for SUB
+  },
+  listDubBadge: {
+    backgroundColor: 'rgba(255, 152, 0, 0.9)', // Orange for DUB
+  },
+  listAvailabilityText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
   },
 }); 
