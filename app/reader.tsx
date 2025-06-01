@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import { View, Text, StyleSheet, Dimensions, Platform, FlatList, TouchableOpacity, StatusBar, Image, ActivityIndicator, SafeAreaView, BackHandler, ImageErrorEventData, Animated, DeviceEventEmitter, Switch, Modal } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Platform, FlatList, TouchableOpacity, StatusBar, Image, ActivityIndicator, SafeAreaView, BackHandler, ImageErrorEventData, Animated, DeviceEventEmitter, Switch, Modal, ScrollView } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -17,6 +17,7 @@ import Reanimated, {
   withSpring,
   runOnJS
 } from 'react-native-reanimated';
+import Slider from '@react-native-community/slider';
 import { useOrientation } from '../hooks/useOrientation';
 import { useIncognito } from '../hooks/useIncognito';
 import { useTheme } from '../hooks/useTheme';
@@ -805,6 +806,64 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 16,
   },
+  // Settings modal styles
+  settingsScrollView: {
+    maxHeight: 400,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 8,
+  },
+  settingItem: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  settingLabel: {
+    fontSize: 16,
+    marginBottom: 12,
+    flexShrink: 1,
+  },
+  directionOptions: {
+    flexDirection: 'column',
+    gap: 8,
+    width: '100%',
+  },
+  directionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    gap: 8,
+  },
+  directionOptionSelected: {
+    backgroundColor: '#42A5F5',
+    borderColor: '#42A5F5',
+  },
+  directionOptionText: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  sliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  sliderValue: {
+    width: 30,
+    textAlign: 'right',
+    fontSize: 14,
+  },
 });
 
 const ImageItem = memo(({ 
@@ -819,7 +878,11 @@ const ImageItem = memo(({
   isLoading,
   hasError,
   onRetry,
-  isNearby
+  isNearby,
+  isZoomed,
+  zoomAnimatedValue,
+  translateX,
+  translateY
 }: {
   imageUrl: string;
   index: number;
@@ -833,9 +896,54 @@ const ImageItem = memo(({
   hasError: boolean;
   onRetry: () => void;
   isNearby: boolean;
+  isZoomed?: boolean;
+  zoomAnimatedValue?: Animated.Value;
+  translateX?: Reanimated.SharedValue<number>;
+  translateY?: Reanimated.SharedValue<number>;
 }) => {
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 3;
+
+  // Pan gesture handler for dragging when zoomed
+  const panGestureHandler = useAnimatedGestureHandler({
+    onStart: (_, context: any) => {
+      if (translateX && translateY) {
+        context.startX = translateX.value;
+        context.startY = translateY.value;
+      }
+    },
+    onActive: (event, context: any) => {
+      if (isZoomed && translateX && translateY) {
+        // Calculate boundaries to prevent dragging too far
+        const maxTranslateX = WINDOW_WIDTH * 0.5; // Half screen width
+        const maxTranslateY = WINDOW_HEIGHT * 0.5; // Half screen height
+        
+        const newX = context.startX + event.translationX;
+        const newY = context.startY + event.translationY;
+        
+        // Clamp values to boundaries
+        translateX.value = Math.max(-maxTranslateX, Math.min(maxTranslateX, newX));
+        translateY.value = Math.max(-maxTranslateY, Math.min(maxTranslateY, newY));
+      }
+    },
+    onEnd: () => {
+      // Optional: Add spring back to center if dragged too far
+    },
+  });
+
+  // Animated style for pan gestures
+  const animatedStyle = useAnimatedStyle(() => {
+    if (!isZoomed || !translateX || !translateY) {
+      return {};
+    }
+    
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+      ],
+    };
+  });
 
   const LoadingComponent = useMemo(() => (
     <View style={styles.loadingContainer}>
@@ -884,25 +992,53 @@ const ImageItem = memo(({
         style={styles.imageContainer} 
         activeOpacity={1}
         onPress={onPress}
+        disabled={isZoomed} // Disable touch when zoomed to allow pan gestures
       >
         {isLoading && LoadingComponent}
-        {hasError ? ErrorComponent : (
-          <ExpoImage
-            source={{ 
-              uri: imageUrl,
-              headers: imageHeaders
-            }}
-            style={styles.image}
-            contentFit="contain"
-            onLoadStart={onLoadStart}
-            onLoad={onLoadSuccess}
-            onError={handleError}
-            cachePolicy="memory-disk"
-            contentPosition="center"
-            recyclingKey={`image-${index}-${imageUrl}`}
-            transition={200}
-            priority={isNearby ? "high" : "low"}
-          />
+        {hasError ? ErrorComponent : isNearby ? (
+          <PanGestureHandler
+            onGestureEvent={panGestureHandler}
+            enabled={isZoomed}
+          >
+            <Animated.View
+              style={[
+                styles.image,
+                zoomAnimatedValue && {
+                  transform: [{ scale: zoomAnimatedValue }]
+                },
+                animatedStyle
+              ]}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={onPress}
+                style={styles.image}
+                disabled={!isZoomed} // Only allow tap when zoomed (for zoom out)
+              >
+                <ExpoImage
+                  source={{ 
+                    uri: imageUrl,
+                    headers: imageHeaders
+                  }}
+                  style={styles.image}
+                  contentFit="contain"
+                  onLoadStart={onLoadStart}
+                  onLoad={onLoadSuccess}
+                  onError={handleError}
+                  cachePolicy="memory-disk"
+                  contentPosition="center"
+                  recyclingKey={`image-${index}-${imageUrl}`}
+                  transition={200}
+                  priority={isNearby ? "high" : "low"}
+                />
+              </TouchableOpacity>
+            </Animated.View>
+          </PanGestureHandler>
+        ) : (
+          <View style={[styles.image, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ color: '#666', fontSize: 14 }}>Page {index + 1}</Text>
+            <Text style={{ color: '#666', fontSize: 12, marginTop: 4 }}>Tap to load</Text>
+          </View>
         )}
       </TouchableOpacity>
     </View>
@@ -914,7 +1050,8 @@ const ImageItem = memo(({
     prevProps.index === nextProps.index &&
     prevProps.isLoading === nextProps.isLoading &&
     prevProps.hasError === nextProps.hasError &&
-    prevProps.isNearby === nextProps.isNearby
+    prevProps.isNearby === nextProps.isNearby &&
+    prevProps.isZoomed === nextProps.isZoomed
   );
 });
 
@@ -987,6 +1124,27 @@ interface DebugState {
   lastFrameTime: number;
   imageLoads: { [key: number]: ImageLoadTiming };
   animationFrame: number | null;
+}
+
+// Interface for manga reader preferences
+interface MangaReaderPreferences {
+  readingDirection: 'ltr' | 'rtl' | 'vertical';
+  rememberPosition: boolean;
+  autoNavigateNextChapter: boolean;
+  keepScreenOn: boolean;
+  showPageNumber: boolean;
+  fullscreenByDefault: boolean;
+  tapToNavigate: boolean;
+  zoomEnabled: boolean;
+  doubleTapToZoom: boolean;
+  preloadPages: number;
+  debugMode: boolean;
+  appearance: {
+    backgroundColor: string;
+    pageGap: number;
+    pageBorderRadius: number;
+    pageTransitionAnimation: boolean;
+  };
 }
 
 export default function ReaderScreen() {
@@ -1126,8 +1284,45 @@ export default function ReaderScreen() {
   const [mangaSlugId, setMangaSlugId] = useState<string | null>(null);
   const [mangaTitle, setMangaTitle] = useState<string | null>(null);
   
+  // Progressive loading state
+  const [loadedImageIndices, setLoadedImageIndices] = useState<Set<number>>(new Set());
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  
+  // Zoom state
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const zoomAnimatedValue = useRef(new Animated.Value(1)).current;
+  
+  // Pan gesture state for dragging when zoomed
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  
+  // Manga reader preferences state
+  const [mangaReaderPreferences, setMangaReaderPreferences] = useState<MangaReaderPreferences>({
+    readingDirection: 'rtl',
+    rememberPosition: true,
+    autoNavigateNextChapter: true,
+    keepScreenOn: true,
+    showPageNumber: true,
+    fullscreenByDefault: false,
+    tapToNavigate: true,
+    zoomEnabled: true,
+    doubleTapToZoom: true,
+    preloadPages: 5,
+    debugMode: false,
+    appearance: {
+      backgroundColor: '#000000',
+      pageGap: 8,
+      pageBorderRadius: 0,
+      pageTransitionAnimation: true
+    }
+  });
+  
   const SWIPE_DEBOUNCE_TIME = 500; // ms
   const lastSwipeTime = useRef(Date.now());
+  const INITIAL_LOAD_COUNT = 3; // Load first 3 images immediately
+  const PRELOAD_BUFFER = 2; // Preload 2 images ahead and behind current page
 
   const flatListRef = useRef<FlatList>(null);
   const abortControllerRef = useRef<{ [key: number]: AbortController }>({});
@@ -1159,6 +1354,63 @@ export default function ReaderScreen() {
     'Sec-Fetch-Mode': 'no-cors',
     'Sec-Fetch-Site': 'cross-site'
   };
+
+
+
+  // Load images progressively based on current page
+  const loadImagesAroundCurrentPage = useCallback(async (pageIndex: number) => {
+    if (images.length === 0) return;
+    
+    const indicesToLoad: number[] = [];
+    
+    // Load current page and buffer around it
+    for (let i = Math.max(0, pageIndex - PRELOAD_BUFFER); 
+         i <= Math.min(images.length - 1, pageIndex + PRELOAD_BUFFER); 
+         i++) {
+      if (!loadedImageIndices.has(i)) {
+        indicesToLoad.push(i);
+      }
+    }
+    
+    if (indicesToLoad.length > 0) {
+      // Create a local batch loading function to avoid dependency issues
+      const loadBatch = async (indices: number[]) => {
+        console.log(`[Reader] Loading batch of ${indices.length} images:`, indices);
+        
+        const loadPromises = indices.map(async (index) => {
+          if (loadedImageIndices.has(index) || index >= images.length) {
+            return;
+          }
+          
+          try {
+            // Preload the image using ExpoImage prefetch
+            const imageUrl = images[index];
+            const headers = dynamicImageHeaders[index] || imageHeaders;
+            
+            await ExpoImage.prefetch(imageUrl, {
+              headers,
+              cachePolicy: 'memory-disk'
+            });
+            
+            setLoadedImageIndices(prev => new Set([...prev, index]));
+            console.log(`[Reader] Successfully preloaded image ${index + 1}`);
+          } catch (error) {
+            if (error instanceof Error) {
+              console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
+            }
+          }
+        });
+        
+        await Promise.allSettled(loadPromises);
+        
+        // Update loading progress
+        const totalLoaded = loadedImageIndices.size + indices.filter(i => loadedImageIndices.has(i)).length;
+        setLoadingProgress((totalLoaded / images.length) * 100);
+      };
+      
+      await loadBatch(indicesToLoad);
+    }
+  }, [images, dynamicImageHeaders, imageHeaders, loadedImageIndices]);
 
   useEffect(() => {
     // Ensure this runs only once when the component mounts
@@ -1198,9 +1450,9 @@ export default function ReaderScreen() {
         setImages(imageUrls);
         setDynamicImageHeaders(imageHeadersMap);
   
-        // Initialize loading states for ALL images
+        // Initialize loading states for ALL images as NOT loaded initially
         const initialLoadingStates = Object.fromEntries(
-          imageUrls.map((_, i) => [i, true])
+          imageUrls.map((_, i) => [i, false])
         );
         setLoadingStates(initialLoadingStates);
         
@@ -1209,14 +1461,64 @@ export default function ReaderScreen() {
           imageUrls.map((_, i) => [i, false])
         );
         setErrorStates(initialErrorStates);
+        
+        // Start progressive loading with first few images
+        console.log(`[Reader] Starting progressive loading with first ${INITIAL_LOAD_COUNT} images`);
+        const initialIndices = Array.from({ length: Math.min(INITIAL_LOAD_COUNT, imageUrls.length) }, (_, i) => i);
+        
+        // Load initial batch - create a local function to avoid dependency issues
+        const loadInitialBatch = async (indices: number[]) => {
+          console.log(`[Reader] Loading batch of ${indices.length} images:`, indices);
+          
+          const loadPromises = indices.map(async (index) => {
+            if (index >= imageUrls.length) {
+              return;
+            }
+            
+            try {
+              // Preload the image using ExpoImage prefetch
+              const imageUrl = imageUrls[index];
+              const headers = imageHeadersMap[index] || {
+                'Referer': 'https://mangakatana.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Origin': 'https://mangakatana.com'
+              };
+              
+              await ExpoImage.prefetch(imageUrl, {
+                headers,
+                cachePolicy: 'memory-disk'
+              });
+              
+              setLoadedImageIndices(prev => new Set([...prev, index]));
+              console.log(`[Reader] Successfully preloaded image ${index + 1}`);
+            } catch (error) {
+              if (error instanceof Error) {
+                console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
+              }
+            }
+          });
+          
+          await Promise.allSettled(loadPromises);
+          
+          // Update loading progress
+          setLoadingProgress((indices.length / imageUrls.length) * 100);
+        };
+        
+        setTimeout(async () => {
+          await loadInitialBatch(initialIndices);
+          setIsInitialLoading(false);
+          console.log(`[Reader] Initial loading complete`);
+        }, 100);
+        
       } catch (err) {
         console.error('Error loading images:', err);
         setError(err instanceof Error ? err.message : 'Failed to load chapter images');
+        setIsInitialLoading(false);
       }
     };
   
     loadImages();
-  }, []);
+  }, []); // Remove loadImageBatch dependency to prevent infinite loop
   
   useEffect(() => {
     const loadProgress = async () => {
@@ -1281,6 +1583,44 @@ export default function ReaderScreen() {
       }
     };
     checkAutoSavePreference();
+  }, []);
+
+  // Load manga reader preferences
+  useEffect(() => {
+    const loadMangaReaderPreferences = async () => {
+      try {
+        const savedPreferences = await AsyncStorage.getItem('mangaReaderPreferences');
+        if (savedPreferences) {
+          const preferences = JSON.parse(savedPreferences);
+          setMangaReaderPreferences(preferences);
+          
+          // Apply reading direction from preferences
+          setReadingDirection(preferences.readingDirection === 'vertical' ? 'ltr' : preferences.readingDirection);
+          
+          // Apply debug mode from preferences
+          setDebugMode(preferences.debugMode);
+        }
+      } catch (err) {
+        console.error('Error loading manga reader preferences:', err);
+      }
+    };
+    loadMangaReaderPreferences();
+  }, []);
+
+  // Save manga reader preferences
+  const saveMangaReaderPreferences = useCallback(async (newPreferences: MangaReaderPreferences) => {
+    try {
+      await AsyncStorage.setItem('mangaReaderPreferences', JSON.stringify(newPreferences));
+      setMangaReaderPreferences(newPreferences);
+      
+      // Apply reading direction immediately
+      setReadingDirection(newPreferences.readingDirection === 'vertical' ? 'ltr' : newPreferences.readingDirection);
+      
+      // Apply debug mode immediately
+      setDebugMode(newPreferences.debugMode);
+    } catch (error) {
+      console.error('Failed to save manga reader preferences:', error);
+    }
   }, []);
 
   // Add searchMangaOnAniList before handleNextChapterConfirmed
@@ -1711,9 +2051,52 @@ export default function ReaderScreen() {
     loadAutoSavePreferences();
   }, []);
 
+  // Handle zoom functionality
+  const handleZoomToggle = useCallback(() => {
+    if (!mangaReaderPreferences.zoomEnabled) {
+      // If zoom is disabled, just toggle UI
+      setShowUI(prev => !prev);
+      return;
+    }
+
+    if (isZoomed) {
+      // Zoom out: restore UI and navigation, reset pan position
+      setIsZoomed(false);
+      setZoomScale(1);
+      setShowUI(true);
+      
+      // Reset pan position
+      translateX.value = withSpring(0);
+      translateY.value = withSpring(0);
+      
+      Animated.timing(zoomAnimatedValue, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Zoom in: hide UI and disable navigation
+      setIsZoomed(true);
+      setZoomScale(2);
+      setShowUI(false);
+      
+      Animated.timing(zoomAnimatedValue, {
+        toValue: 2,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isZoomed, mangaReaderPreferences.zoomEnabled, zoomAnimatedValue, translateX, translateY]);
+
   const toggleUI = useCallback(() => {
-    setShowUI(prev => !prev);
-  }, []);
+    if (isZoomed) {
+      // If zoomed, clicking should zoom out instead of toggling UI
+      handleZoomToggle();
+    } else {
+      // Normal UI toggle when not zoomed
+      setShowUI(prev => !prev);
+    }
+  }, [isZoomed, handleZoomToggle]);
 
   // Add function to fetch and set all chapters
   const fetchChapters = useCallback(async () => {
@@ -2490,6 +2873,10 @@ export default function ReaderScreen() {
       if (Platform.OS === 'ios') {
         Haptics.selectionAsync();
       }
+      
+      // Progressive loading: Load images around the current page
+      const pageIndex = newPage - 1; // Convert to 0-based index
+      loadImagesAroundCurrentPage(pageIndex);
     }
   }, [
     currentPage,
@@ -2691,26 +3078,35 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     // Get the specific headers for this image, or use default headers
     const specificHeaders = dynamicImageHeaders[index] || imageHeaders;
     
+    // Check if this image should be loaded based on progressive loading
+    const shouldLoad = loadedImageIndices.has(index) || 
+                      Math.abs(index - (currentPage - 1)) <= PRELOAD_BUFFER ||
+                      index < INITIAL_LOAD_COUNT;
+    
     return (
       <View style={styles.pageContainer}>
         <TouchableOpacity 
           style={styles.imageContainer} 
           activeOpacity={1}
-          onPress={toggleUI}
+          onPress={handleZoomToggle}
         >
           <ImageItem
             imageUrl={imageUrl}
             index={index}
             totalImages={images.length}
             imageHeaders={specificHeaders}
-            onPress={toggleUI}
+            onPress={handleZoomToggle}
             onLoadStart={() => handleImageLoadStart(index)}
             onLoadSuccess={() => handleImageLoadSuccess(index)}
             onLoadError={(error) => handleImageLoadError(index, error)}
-            isLoading={loadingStates[index] ?? true}
+            isLoading={loadingStates[index] ?? !shouldLoad}
             hasError={errorStates[index] ?? false}
             onRetry={() => retryImage(index)}
-            isNearby={true} // Always true to force loading
+            isNearby={shouldLoad}
+            isZoomed={isZoomed}
+            zoomAnimatedValue={zoomAnimatedValue}
+            translateX={translateX}
+            translateY={translateY}
           />
         </TouchableOpacity>
       </View>
@@ -2718,13 +3114,19 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
   }, [
     images.length,
     dynamicImageHeaders,
-    toggleUI,
+    handleZoomToggle,
     handleImageLoadStart,
     handleImageLoadSuccess,
     handleImageLoadError,
     loadingStates,
     errorStates,
-    retryImage
+    retryImage,
+    loadedImageIndices,
+    currentPage,
+    isZoomed,
+    zoomAnimatedValue,
+    translateX,
+    translateY
   ]);
 
   const getItemLayout = useCallback((data: any, index: number) => ({
@@ -3077,149 +3479,329 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
               Reader Settings
             </Text>
             
-            <View style={styles.settingsSection}>
-              <Text style={[
-                styles.settingsSectionTitle,
-                { color: isDarkMode ? '#FFFFFF' : '#333333' }
-              ]}>
-                Advanced Options
-              </Text>
-              
-              <View 
-                style={[
-                  styles.settingsOption,
-                  { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }
-                ]}
-              >
-                <Text style={[
-                  styles.settingsOptionLabel,
-                  { color: isDarkMode ? '#FFFFFF' : '#333333' }
-                ]}>
-                  Auto-save Progress
-                </Text>
-                <Switch
-                  value={shouldAutoSave}
-                  onValueChange={setShouldAutoSave}
-                  trackColor={{ false: '#767577', true: theme.colors.primary }}
-                  thumbColor={shouldAutoSave ? '#f4f3f4' : '#f4f3f4'}
-                  ios_backgroundColor="#3e3e3e"
-                  style={styles.settingsSwitch}
-                />
-              </View>
-            </View>
-            
-            <View style={styles.settingsSection}>
-              <Text style={[
-                styles.settingsSectionTitle,
-                { color: isDarkMode ? '#FFFFFF' : '#333333' }
-              ]}>
-                Debug Options
-              </Text>
-              
-              <View 
-                style={[
-                  styles.settingsOption,
-                  { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }
-                ]}
-              >
-                <Text style={[
-                  styles.settingsOptionLabel,
-                  { color: isDarkMode ? '#FFFFFF' : '#333333' }
-                ]}>
-                  Debug Mode
-                </Text>
-                <Switch
-                  value={debugMode}
-                  onValueChange={toggleDebugMode}
-                  trackColor={{ false: '#767577', true: theme.colors.primary }}
-                  thumbColor={debugMode ? '#f4f3f4' : '#f4f3f4'}
-                  ios_backgroundColor="#3e3e3e"
-                  style={styles.settingsSwitch}
-                />
-              </View>
-              
-              {debugMode && (
-                <>
-                  <View style={[
-                    styles.settingsDropdown,
-                    { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5', position: 'relative' }
-                  ]}>
-                    <Text style={[
-                      styles.settingsDropdownLabel,
-                      { color: isDarkMode ? '#FFFFFF' : '#333333' }
-                    ]}>
-                      Debug Level
-                    </Text>
-                    <TouchableOpacity 
-                      style={[
-                        styles.dropdownButton,
-                        { backgroundColor: isDarkMode ? '#444' : '#E0E0E0' }
-                      ]}
-                      onPress={() => setShowDebugDropdown(!showDebugDropdown)}
-                    >
-                      <Text 
+            <ScrollView style={styles.settingsScrollView} showsVerticalScrollIndicator={false}>
+              {/* Reading Direction Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="book-open" size={20} color="#42A5F5" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Reading Settings
+                  </Text>
+                </View>
+
+                {/* Reading Direction Setting */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Reading Direction</Text>
+                  </View>
+                  <View style={styles.directionOptions}>
+                    {[
+                      { id: 'rtl', name: 'Right to Left', icon: 'arrow-left' },
+                      { id: 'ltr', name: 'Left to Right', icon: 'arrow-right' }
+                    ].map(direction => (
+                      <TouchableOpacity
+                        key={`direction-${direction.id}`}
                         style={[
-                          styles.dropdownButtonText, 
-                          { color: isDarkMode ? '#FFF' : '#333' }
+                          styles.directionOption,
+                          mangaReaderPreferences.readingDirection === direction.id && styles.directionOptionSelected
                         ]}
+                        onPress={() => {
+                          saveMangaReaderPreferences({
+                            ...mangaReaderPreferences,
+                            readingDirection: direction.id as 'ltr' | 'rtl' | 'vertical'
+                          });
+                        }}
                       >
-                        {debugLevel}
+                        <FontAwesome5 
+                          name={direction.icon} 
+                          size={14} 
+                          color={mangaReaderPreferences.readingDirection === direction.id ? '#fff' : (isDarkMode ? '#FFFFFF' : '#333333')} 
+                        />
+                        <Text style={[
+                          styles.directionOptionText,
+                          { color: mangaReaderPreferences.readingDirection === direction.id ? '#fff' : (isDarkMode ? '#FFFFFF' : '#333333') }
+                        ]}>
+                          {direction.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Toggle Settings */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Remember Reading Position</Text>
+                    <Switch
+                      value={mangaReaderPreferences.rememberPosition}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          rememberPosition: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={mangaReaderPreferences.rememberPosition ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Auto-Navigate to Next Chapter</Text>
+                    <Switch
+                      value={mangaReaderPreferences.autoNavigateNextChapter}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          autoNavigateNextChapter: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={mangaReaderPreferences.autoNavigateNextChapter ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Keep Screen On While Reading</Text>
+                    <Switch
+                      value={mangaReaderPreferences.keepScreenOn}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          keepScreenOn: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={mangaReaderPreferences.keepScreenOn ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Show Page Number</Text>
+                    <Switch
+                      value={mangaReaderPreferences.showPageNumber}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          showPageNumber: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={mangaReaderPreferences.showPageNumber ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                {/* Preload Pages */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Preload Pages</Text>
+                  <View style={styles.sliderContainer}>
+                    <Slider
+                      style={{ width: '90%', height: 40 }}
+                      minimumValue={1}
+                      maximumValue={10}
+                      step={1}
+                      value={mangaReaderPreferences.preloadPages}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          preloadPages: value
+                        });
+                      }}
+                      minimumTrackTintColor="#42A5F5"
+                      maximumTrackTintColor="#777777"
+                      thumbTintColor="#42A5F5"
+                    />
+                    <Text style={[styles.sliderValue, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                      {mangaReaderPreferences.preloadPages}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Advanced Options Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="cogs" size={20} color="#9C27B0" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Advanced Options
+                  </Text>
+                </View>
+                
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Auto-save Progress</Text>
+                    <Switch
+                      value={shouldAutoSave}
+                      onValueChange={setShouldAutoSave}
+                      trackColor={{ false: '#767577', true: theme.colors.primary }}
+                      thumbColor={shouldAutoSave ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Tap to Navigate</Text>
+                    <Switch
+                      value={mangaReaderPreferences.tapToNavigate}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          tapToNavigate: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={mangaReaderPreferences.tapToNavigate ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Zoom Enabled</Text>
+                    <Switch
+                      value={mangaReaderPreferences.zoomEnabled}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          zoomEnabled: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={mangaReaderPreferences.zoomEnabled ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+              </View>
+              
+              {/* Debug Options Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="bug" size={20} color="#f44336" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Debug Options
+                  </Text>
+                </View>
+                
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Debug Mode</Text>
+                    <Switch
+                      value={debugMode}
+                      onValueChange={(value) => {
+                        saveMangaReaderPreferences({
+                          ...mangaReaderPreferences,
+                          debugMode: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#f44336' }}
+                      thumbColor={debugMode ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+                
+                {debugMode && (
+                  <>
+                    <View style={[
+                      styles.settingsDropdown,
+                      { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5', position: 'relative' }
+                    ]}>
+                      <Text style={[
+                        styles.settingsDropdownLabel,
+                        { color: isDarkMode ? '#FFFFFF' : '#333333' }
+                      ]}>
+                        Debug Level
                       </Text>
-                      <FontAwesome5 
-                        name={showDebugDropdown ? "chevron-up" : "chevron-down"} 
-                        size={10} 
-                        color={isDarkMode ? '#FFF' : '#333'} 
-                      />
-                    </TouchableOpacity>
-                    {renderDropdownMenu()}
-                  </View>
-                  
-                  <View 
-                    style={[
-                      styles.settingsOption,
-                      { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }
-                    ]}
-                  >
-                    <Text style={[
-                      styles.settingsOptionLabel,
-                      { color: isDarkMode ? '#FFFFFF' : '#333333' }
-                    ]}>
-                      Show Gesture Guides
-                    </Text>
-                    <Switch
-                      value={debugGestures}
-                      onValueChange={() => toggleDebugFeature('gestures')}
-                      trackColor={{ false: '#767577', true: theme.colors.primary }}
-                      thumbColor={debugGestures ? '#f4f3f4' : '#f4f3f4'}
-                      ios_backgroundColor="#3e3e3e"
-                      style={styles.settingsSwitch}
-                    />
-                  </View>
-                  
-                  <View 
-                    style={[
-                      styles.settingsOption,
-                      { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }
-                    ]}
-                  >
-                    <Text style={[
-                      styles.settingsOptionLabel,
-                      { color: isDarkMode ? '#FFFFFF' : '#333333' }
-                    ]}>
-                      Show Image Bounds
-                    </Text>
-                    <Switch
-                      value={debugImages}
-                      onValueChange={() => toggleDebugFeature('images')}
-                      trackColor={{ false: '#767577', true: theme.colors.primary }}
-                      thumbColor={debugImages ? '#f4f3f4' : '#f4f3f4'}
-                      ios_backgroundColor="#3e3e3e"
-                      style={styles.settingsSwitch}
-                    />
-                  </View>
-                </>
-              )}
-            </View>
+                      <TouchableOpacity 
+                        style={[
+                          styles.dropdownButton,
+                          { backgroundColor: isDarkMode ? '#444' : '#E0E0E0' }
+                        ]}
+                        onPress={() => setShowDebugDropdown(!showDebugDropdown)}
+                      >
+                        <Text 
+                          style={[
+                            styles.dropdownButtonText, 
+                            { color: isDarkMode ? '#FFF' : '#333' }
+                          ]}
+                        >
+                          {debugLevel}
+                        </Text>
+                        <FontAwesome5 
+                          name={showDebugDropdown ? "chevron-up" : "chevron-down"} 
+                          size={10} 
+                          color={isDarkMode ? '#FFF' : '#333'} 
+                        />
+                      </TouchableOpacity>
+                      {renderDropdownMenu()}
+                    </View>
+                    
+                    <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Show Gesture Guides</Text>
+                        <Switch
+                          value={debugGestures}
+                          onValueChange={() => toggleDebugFeature('gestures')}
+                          trackColor={{ false: '#767577', true: '#f44336' }}
+                          thumbColor={debugGestures ? '#fff' : '#f4f3f4'}
+                        />
+                      </View>
+                    </View>
+                    
+                    <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Show Image Bounds</Text>
+                        <Switch
+                          value={debugImages}
+                          onValueChange={() => toggleDebugFeature('images')}
+                          trackColor={{ false: '#767577', true: '#f44336' }}
+                          thumbColor={debugImages ? '#fff' : '#f4f3f4'}
+                        />
+                      </View>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              {/* Reset Section */}
+              <View style={styles.settingsSection}>
+                <TouchableOpacity 
+                  style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}
+                  onPress={() => {
+                    // Reset all manga reader settings to default
+                    const defaultSettings: MangaReaderPreferences = {
+                      readingDirection: 'rtl',
+                      rememberPosition: true,
+                      autoNavigateNextChapter: true,
+                      keepScreenOn: true,
+                      showPageNumber: true,
+                      fullscreenByDefault: false,
+                      tapToNavigate: true,
+                      zoomEnabled: true,
+                      doubleTapToZoom: true,
+                      preloadPages: 5,
+                      debugMode: false,
+                      appearance: {
+                        backgroundColor: '#000000',
+                        pageGap: 8,
+                        pageBorderRadius: 0,
+                        pageTransitionAnimation: true
+                      }
+                    };
+                    saveMangaReaderPreferences(defaultSettings);
+                  }}
+                >
+                  <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Reset to Default Settings</Text>
+                  <FontAwesome5 name="undo" size={20} color="#f44336" />
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity 
@@ -3464,13 +4046,14 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
           renderItem={renderItem}
           keyExtractor={(item, index) => `page-${index}`}
           horizontal
-          pagingEnabled
+          pagingEnabled={!isZoomed}
+          scrollEnabled={!isZoomed}
           showsHorizontalScrollIndicator={false}
           getItemLayout={getItemLayout}
           initialNumToRender={INITIAL_RENDER_COUNT}
           maxToRenderPerBatch={2}
           windowSize={5}
-          onScroll={handleScroll}
+          onScroll={isZoomed ? undefined : handleScroll}
           scrollEventThrottle={16}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -3531,6 +4114,11 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
             <Text style={styles.pageNumberText}>
               {currentPage} / {images.length}
             </Text>
+            {isInitialLoading && (
+              <Text style={[styles.pageNumberText, { fontSize: 12, marginTop: 4, color: '#02A9FF' }]}>
+                Loading {Math.round(loadingProgress)}%
+              </Text>
+            )}
           </View>
           <View style={styles.progressBarContainer}>
             <View 
@@ -3540,6 +4128,16 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
               ]} 
             />
           </View>
+          {isInitialLoading && (
+            <View style={[styles.progressBarContainer, { marginTop: 4, backgroundColor: 'rgba(2, 169, 255, 0.2)' }]}>
+              <View 
+                style={[
+                  styles.progressBar,
+                  { width: `${loadingProgress}%`, backgroundColor: '#02A9FF' }
+                ]} 
+              />
+            </View>
+          )}
         </Reanimated.View>
       )}
 

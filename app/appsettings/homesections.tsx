@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../../constants/auth';
 
@@ -270,8 +270,22 @@ export default function HomeSectionsScreen() {
     }
   };
 
+  // Toggle section visibility
+  const toggleSectionVisibility = useCallback((sectionId: string) => {
+    setSections(prevSections => {
+      const updatedSections = prevSections.map(section => 
+        section.id === sectionId 
+          ? { ...section, visible: !section.visible }
+          : section
+      );
+      // Save immediately
+      saveSectionPreferences(updatedSections);
+      return updatedSections;
+    });
+  }, []);
+
   // Render item for the draggable list
-  const renderDraggableItem = useCallback(({ item, drag, isActive }: any) => {
+  const renderDraggableItem = useCallback(({ item, drag, isActive }: RenderItemParams<Section>) => {
     return (
       <ScaleDecorator>
         <View style={[
@@ -279,20 +293,33 @@ export default function HomeSectionsScreen() {
           {
             backgroundColor: isActive ? currentTheme.colors.border : currentTheme.colors.surface,
             borderBottomColor: currentTheme.colors.border,
-            elevation: isActive ? 5 : 0,
-            shadowColor: '#000',
-            shadowOffset: isActive ? { width: 0, height: 2 } : { width: 0, height: 0 },
-            shadowOpacity: isActive ? 0.25 : 0,
-            shadowRadius: isActive ? 3.84 : 0,
+            transform: [{ scale: isActive ? 1.02 : 1 }],
+            ...Platform.select({
+              ios: {
+                shadowColor: '#000',
+                shadowOffset: isActive ? { width: 0, height: 4 } : { width: 0, height: 1 },
+                shadowOpacity: isActive ? 0.3 : 0.1,
+                shadowRadius: isActive ? 6 : 2,
+              },
+              android: {
+                elevation: isActive ? 8 : 2,
+              },
+            }),
           },
         ]}>
           <TouchableOpacity
-            activeOpacity={0.7}
-            onPressIn={drag}
+            activeOpacity={0.8}
+            onLongPress={drag}
+            delayLongPress={150}
             style={styles.sectionContent}
           >
             <View style={styles.dragHandle}>
-              <FontAwesome5 name="grip-lines" size={14} color={currentTheme.colors.textSecondary} style={{ opacity: 0.8 }} />
+              <FontAwesome5 
+                name="grip-lines" 
+                size={16} 
+                color={isActive ? currentTheme.colors.primary : currentTheme.colors.textSecondary} 
+                style={{ opacity: isActive ? 1 : 0.6 }} 
+              />
             </View>
             <View style={styles.sectionIcon}>
               <FontAwesome5 name={item.icon} size={20} color={currentTheme.colors.text} />
@@ -308,46 +335,46 @@ export default function HomeSectionsScreen() {
           </TouchableOpacity>
           <Switch
             value={item.visible}
-            onValueChange={() => {
-              const updatedSections = sections.map(section => 
-                section.id === item.id 
-                  ? { ...section, visible: !section.visible }
-                  : section
-              );
-              setSections(updatedSections);
-              saveSectionPreferences(updatedSections);
-            }}
+            onValueChange={() => toggleSectionVisibility(item.id)}
             trackColor={{ false: currentTheme.colors.border, true: '#02A9FF' }}
             thumbColor={item.visible ? '#fff' : '#f4f3f4'}
           />
         </View>
       </ScaleDecorator>
     );
-  }, [currentTheme, sections]);
+  }, [currentTheme, toggleSectionVisibility]);
 
-  // Handle drag end for both the modal and the main list
+  // Handle drag end - Create completely new objects to avoid Reanimated issues
   const handleDragEnd = useCallback(({ data }: { data: Section[] }) => {
     console.log('[Sections] Reordering sections...');
     
-    // Create new objects for all sections to avoid Reanimated shared object issues
-    // and assign new order based on position in array
-    const updatedData = data.map((section, index) => ({
-      ...section,
+    // Create completely new section objects with updated order
+    const reorderedSections = data.map((section, index) => ({
+      id: section.id,
+      title: section.title,
+      subtitle: section.subtitle,
+      icon: section.icon,
+      visible: section.visible,
       order: index
     }));
 
-    // Get the news section from current sections to preserve its state
+    // Get the news section to add at the end
     const newsSection = sections.find(section => section.id === 'news');
     
-    // Combine the reordered sections with news section at the end
+    // Combine reordered sections with news section
     const allSections = newsSection 
-      ? [...updatedData, { ...newsSection, order: updatedData.length }]
-      : updatedData;
+      ? [...reorderedSections, { 
+          id: newsSection.id,
+          title: newsSection.title,
+          subtitle: newsSection.subtitle,
+          icon: newsSection.icon,
+          visible: newsSection.visible,
+          order: reorderedSections.length 
+        }]
+      : reorderedSections;
 
-    // Update state first to maintain the visual order
+    // Update state and save
     setSections(allSections);
-    
-    // Then save the preferences with the new order
     saveSectionPreferences(allSections, false);
   }, [sections]);
 
@@ -596,7 +623,7 @@ export default function HomeSectionsScreen() {
         overScrollMode="always"
       >
         <Text style={[styles.instructions, { color: currentTheme.colors.textSecondary }]}>
-          Tap and drag sections with grip lines to reorder them. Use the switches to show/hide sections.
+          Long press and drag sections with grip lines to reorder them. Use the switches to show/hide sections.
         </Text>
 
         {/* Welcome Section Settings - Not draggable */}
@@ -608,22 +635,25 @@ export default function HomeSectionsScreen() {
             Content Sections
           </Text>
           <Text style={[styles.sectionHeaderSubtitle, { color: currentTheme.colors.textSecondary }]}>
-            Toggle visibility and set order
+            Long press to drag and reorder
           </Text>
         </View>
 
         {/* Draggable Sections - Only the middle sections */}
-        {sections.filter(section => section.id !== 'news').length > 0 && (
-          <DraggableFlatList
-            data={sections.filter(section => section.id !== 'news')}
-            onDragEnd={handleDragEnd}
-            keyExtractor={(item) => item.id}
-            renderItem={renderDraggableItem}
-            dragItemOverflow={true}
-            scrollEnabled={false} // Let the parent ScrollView handle scrolling
-            activationDistance={20}
-            contentContainerStyle={styles.draggableContainer}
-          />
+        {draggableSections.length > 0 && (
+          <View style={styles.draggableWrapper}>
+            <DraggableFlatList
+              data={draggableSections}
+              onDragEnd={handleDragEnd}
+              keyExtractor={(item) => item.id}
+              renderItem={renderDraggableItem}
+              dragItemOverflow={true}
+              scrollEnabled={false}
+              activationDistance={10}
+              dragHitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              containerStyle={styles.draggableContainer}
+            />
+          </View>
         )}
 
         {/* News Section - Not draggable */}
@@ -638,7 +668,9 @@ export default function HomeSectionsScreen() {
             }
           ]}>
             <View style={styles.sectionContent}>
-              <View style={[styles.dragHandle, { opacity: 0 }]} />
+              <View style={[styles.dragHandle, { opacity: 0.3 }]}>
+                <FontAwesome5 name="lock" size={12} color={currentTheme.colors.textSecondary} />
+              </View>
               <View style={styles.sectionIcon}>
                 <FontAwesome5 name={newsSection.icon} size={20} color={currentTheme.colors.text} />
               </View>
@@ -647,21 +679,13 @@ export default function HomeSectionsScreen() {
                   {newsSection.title}
                 </Text>
                 <Text style={[styles.sectionSubtitle, { color: currentTheme.colors.textSecondary }]}>
-                  {newsSection.subtitle}
+                  {newsSection.subtitle} • Always last
                 </Text>
               </View>
             </View>
             <Switch
               value={newsSection.visible}
-              onValueChange={() => {
-                const updatedSections = sections.map(section => 
-                  section.id === newsSection.id 
-                    ? { ...section, visible: !section.visible }
-                    : section
-                );
-                setSections(updatedSections);
-                saveSectionPreferences(updatedSections);
-              }}
+              onValueChange={() => toggleSectionVisibility(newsSection.id)}
               trackColor={{ false: currentTheme.colors.border, true: '#02A9FF' }}
               thumbColor={newsSection.visible ? '#fff' : '#f4f3f4'}
             />
@@ -706,6 +730,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
+    minHeight: 72,
   },
   sectionContent: {
     flex: 1,
@@ -714,11 +739,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   dragHandle: {
-    width: 20,
+    width: 24,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 12,
   },
   sectionIcon: {
     width: 40,
@@ -877,10 +902,13 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   scrollContent: {
-    padding: 16,
+    paddingBottom: 16,
+  },
+  draggableWrapper: {
+    marginBottom: 16,
   },
   draggableContainer: {
-    marginBottom: 16,
+    paddingHorizontal: 0,
   },
   sectionHeader: {
     padding: 16,

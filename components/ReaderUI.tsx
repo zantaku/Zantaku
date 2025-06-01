@@ -24,6 +24,8 @@ interface ReaderUIProps {
   onNextChapter: () => void;
   onPreviousChapter: () => void;
   onSettings?: () => void;
+  isInitialLoading?: boolean;
+  loadingProgress?: number;
 }
 
 const ReaderUI: React.FC<ReaderUIProps> = ({
@@ -41,6 +43,8 @@ const ReaderUI: React.FC<ReaderUIProps> = ({
   onNextChapter,
   onPreviousChapter,
   onSettings,
+  isInitialLoading = false,
+  loadingProgress = 0,
 }) => {
   if (!showUI) return null;
 
@@ -57,6 +61,7 @@ const ReaderUI: React.FC<ReaderUIProps> = ({
           </Text>
           <Text style={styles.subtitle}>
             Chapter {chapter} • Page {currentPageIndex + 1}/{totalPages}
+            {isInitialLoading && ` • Loading ${Math.round(loadingProgress)}%`}
           </Text>
         </View>
         <View style={styles.headerButtons}>
@@ -75,6 +80,13 @@ const ReaderUI: React.FC<ReaderUIProps> = ({
       <View style={styles.progressBarContainer}>
         <View style={[styles.progressBar, { width: `${readingProgress}%` }]} />
       </View>
+      
+      {/* Loading Progress Bar */}
+      {isInitialLoading && (
+        <View style={[styles.progressBarContainer, { top: Platform.OS === 'ios' ? 91 : (StatusBar.currentHeight || 0) + 47, backgroundColor: 'rgba(2, 169, 255, 0.2)' }]}>
+          <View style={[styles.progressBar, { width: `${loadingProgress}%`, backgroundColor: '#02A9FF' }]} />
+        </View>
+      )}
 
       {/* Chapter Navigation */}
       <View style={styles.chapterNavigation}>

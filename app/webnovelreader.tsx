@@ -1,11 +1,22 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { View, StyleSheet, Platform, StatusBar, TouchableOpacity, Modal, Text, NativeScrollEvent, NativeSyntheticEvent, Switch, Dimensions } from 'react-native';
+import { View, StyleSheet, Platform, StatusBar, TouchableOpacity, Modal, Text, NativeScrollEvent, NativeSyntheticEvent, Switch, Dimensions, Animated, ScrollView } from 'react-native';
+import Slider from '@react-native-community/slider';
+import Reanimated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  useAnimatedGestureHandler,
+  withTiming, 
+  withSpring,
+  runOnJS
+} from 'react-native-reanimated';
+import { PanGestureHandler } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { FlashList } from '@shopify/flash-list';
 import { DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Image as ExpoImage } from 'expo-image';
 
 import { useOrientation } from '../hooks/useOrientation';
 import { useIncognito } from '../hooks/useIncognito';
@@ -50,16 +61,55 @@ export default function WebNovelReader() {
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [autoLoadChapter, setAutoLoadChapter] = useState(false);
   
+  // Progressive loading state
+  const [loadedImageIndices, setLoadedImageIndices] = useState<Set<number>>(new Set());
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  
+  // Zoom state
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const zoomAnimatedValue = useRef(new Animated.Value(1)).current;
+  
+  // Pan gesture state for dragging when zoomed
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  
   // Settings state
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [shouldAutoSave, setShouldAutoSave] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [debugLevel, setDebugLevel] = useState(1);
   const [showDebugDropdown, setShowDebugDropdown] = useState(false);
+  
+  // Comprehensive webtoon reader preferences
+  const [webtoonReaderPreferences, setWebtoonReaderPreferences] = useState({
+    readingDirection: 'vertical' as 'vertical',
+    rememberPosition: true,
+    autoNavigateNextChapter: true,
+    keepScreenOn: true,
+    showPageNumber: true,
+    tapToNavigate: true,
+    zoomEnabled: true,
+    preloadPages: 5,
+    scrollSpeed: 1.0,
+    autoScrollEnabled: false,
+    autoScrollSpeed: 2,
+    debugMode: false,
+    appearance: {
+      backgroundColor: '#000000',
+      pageGap: 8,
+      imageQuality: 'high' as 'high' | 'medium' | 'low'
+    }
+  });
 
   // Local navigation state for fallback
   const [localHasNextChapter, setLocalHasNextChapter] = useState(false);
   const [localHasPreviousChapter, setLocalHasPreviousChapter] = useState(false);
+
+  // Progressive loading constants
+  const INITIAL_LOAD_COUNT = 5; // Load first 5 images immediately for webtoon
+  const PRELOAD_BUFFER = 3; // Preload 3 images ahead and behind current view
 
   // Hooks
   const { unlockOrientation, lockPortrait } = useOrientation();
@@ -79,6 +129,62 @@ export default function WebNovelReader() {
   // Memoize chapter navigation handlers
   const nextChapter = useMemo(() => chapterNav.getChapterByType('next'), [chapterNav]);
   const previousChapter = useMemo(() => chapterNav.getChapterByType('previous'), [chapterNav]);
+
+
+
+  // Load images progressively based on current scroll position
+  const loadImagesAroundCurrentView = useCallback(async (currentIndex: number) => {
+    if (images.length === 0) return;
+    
+    const indicesToLoad: number[] = [];
+    
+    // Load current view and buffer around it
+    for (let i = Math.max(0, currentIndex - PRELOAD_BUFFER); 
+         i <= Math.min(images.length - 1, currentIndex + PRELOAD_BUFFER); 
+         i++) {
+      if (!loadedImageIndices.has(i)) {
+        indicesToLoad.push(i);
+      }
+    }
+    
+    if (indicesToLoad.length > 0) {
+      // Create a local batch loading function to avoid dependency issues
+      const loadBatch = async (indices: number[]) => {
+        console.log(`[WebNovelReader] Loading batch of ${indices.length} images:`, indices);
+        
+        const loadPromises = indices.map(async (index) => {
+          if (loadedImageIndices.has(index) || index >= images.length) {
+            return;
+          }
+          
+          try {
+            // Preload the image using ExpoImage prefetch
+            const imageUrl = images[index];
+            
+            await ExpoImage.prefetch(imageUrl, {
+              headers: imageHeaders,
+              cachePolicy: 'memory-disk'
+            });
+            
+            setLoadedImageIndices(prev => new Set([...prev, index]));
+            console.log(`[WebNovelReader] Successfully preloaded image ${index + 1}`);
+          } catch (error) {
+            if (error instanceof Error) {
+              console.warn(`[WebNovelReader] Failed to preload image ${index + 1}:`, error.message);
+            }
+          }
+        });
+        
+        await Promise.allSettled(loadPromises);
+        
+        // Update loading progress
+        const totalLoaded = loadedImageIndices.size + indices.filter(i => loadedImageIndices.has(i)).length;
+        setLoadingProgress((totalLoaded / images.length) * 100);
+      };
+      
+      await loadBatch(indicesToLoad);
+    }
+  }, [images, imageHeaders, loadedImageIndices]);
 
   // Chapter navigation - moved before handleScroll
   const handleChapterNavigation = useCallback((type: 'next' | 'previous') => {
@@ -121,7 +227,7 @@ export default function WebNovelReader() {
 
   // Load images from params
   useEffect(() => {
-    const loadImages = () => {
+    const loadImages = async () => {
       try {
         const imageUrls: string[] = [];
         let index = 1;
@@ -136,6 +242,7 @@ export default function WebNovelReader() {
           throw new Error('No images found');
         }
 
+        console.log(`[WebNovelReader] Loaded ${imageUrls.length} images`);
         setImages(imageUrls);
         
         // Set fallback chapter navigation based on chapter number
@@ -152,14 +259,59 @@ export default function WebNovelReader() {
             setLocalHasNextChapter(true);
           }
         }
+        
+        // Start progressive loading with first few images
+        console.log(`[WebNovelReader] Starting progressive loading with first ${INITIAL_LOAD_COUNT} images`);
+        const initialIndices = Array.from({ length: Math.min(INITIAL_LOAD_COUNT, imageUrls.length) }, (_, i) => i);
+        
+        // Load initial batch - create a local function to avoid dependency issues
+        const loadInitialBatch = async (indices: number[]) => {
+          console.log(`[WebNovelReader] Loading batch of ${indices.length} images:`, indices);
+          
+          const loadPromises = indices.map(async (index) => {
+            if (index >= imageUrls.length) {
+              return;
+            }
+            
+            try {
+              // Preload the image using ExpoImage prefetch
+              const imageUrl = imageUrls[index];
+              
+              await ExpoImage.prefetch(imageUrl, {
+                headers: imageHeaders,
+                cachePolicy: 'memory-disk'
+              });
+              
+              setLoadedImageIndices(prev => new Set([...prev, index]));
+              console.log(`[WebNovelReader] Successfully preloaded image ${index + 1}`);
+            } catch (error) {
+              if (error instanceof Error) {
+                console.warn(`[WebNovelReader] Failed to preload image ${index + 1}:`, error.message);
+              }
+            }
+          });
+          
+          await Promise.allSettled(loadPromises);
+          
+          // Update loading progress
+          setLoadingProgress((indices.length / imageUrls.length) * 100);
+        };
+        
+        setTimeout(async () => {
+          await loadInitialBatch(initialIndices);
+          setIsInitialLoading(false);
+          console.log(`[WebNovelReader] Initial loading complete`);
+        }, 100);
+        
       } catch (err) {
         console.error('Error loading images:', err);
         setError('Failed to load chapter images');
+        setIsInitialLoading(false);
       }
     };
 
     loadImages();
-  }, [params, setLocalHasPreviousChapter, setLocalHasNextChapter]);
+  }, []); // Remove problematic dependencies to prevent infinite loop
 
   // Handle orientation
   useEffect(() => {
@@ -169,11 +321,50 @@ export default function WebNovelReader() {
     };
   }, [unlockOrientation, lockPortrait]);
 
+  // Handle zoom functionality
+  const handleZoomToggle = useCallback(() => {
+    if (isZoomed) {
+      // Zoom out: restore UI and navigation, reset pan position
+      setIsZoomed(false);
+      setZoomScale(1);
+      setShowUI(true);
+      
+      // Reset pan position
+      translateX.value = withSpring(0);
+      translateY.value = withSpring(0);
+      
+      Animated.timing(zoomAnimatedValue, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Zoom in: hide UI and disable navigation
+      setIsZoomed(true);
+      setZoomScale(2);
+      setShowUI(false);
+      
+      Animated.timing(zoomAnimatedValue, {
+        toValue: 2,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [isZoomed, zoomAnimatedValue, translateX, translateY]);
+
   // UI toggle
   const toggleUI = useCallback(() => {
-    setShowUI(prev => !prev);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+    if (isZoomed) {
+      // If zoomed, clicking should zoom out instead of toggling UI
+      handleZoomToggle();
+    } else {
+      // Normal UI toggle when not zoomed
+      setShowUI(prev => !prev);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, [isZoomed, handleZoomToggle]);
 
   // Handle back navigation
   const handleBack = useCallback(() => {
@@ -228,6 +419,9 @@ export default function WebNovelReader() {
       if (currentPage !== lastUpdatedPage.current) {
         progressTracker.updateProgress(currentPage, images.length);
         lastUpdatedPage.current = currentPage;
+        
+        // Progressive loading: Load images around the current view
+        loadImagesAroundCurrentView(currentPage);
       }
 
       // Check if we're at the bottom with some buffer
@@ -290,6 +484,34 @@ export default function WebNovelReader() {
     savePreferences();
   }, [shouldAutoSave, debugMode, debugLevel]);
 
+  // Load webtoon reader preferences
+  useEffect(() => {
+    const loadWebtoonReaderPreferences = async () => {
+      try {
+        const saved = await AsyncStorage.getItem('webtoon_reader_preferences');
+        if (saved) {
+          const preferences = JSON.parse(saved);
+          setWebtoonReaderPreferences(preferences);
+          setDebugMode(preferences.debugMode);
+        }
+      } catch (error) {
+        console.error('Error loading webtoon reader preferences:', error);
+      }
+    };
+    loadWebtoonReaderPreferences();
+  }, []);
+
+  // Save webtoon reader preferences function
+  const saveWebtoonReaderPreferences = useCallback(async (preferences: typeof webtoonReaderPreferences) => {
+    try {
+      await AsyncStorage.setItem('webtoon_reader_preferences', JSON.stringify(preferences));
+      setWebtoonReaderPreferences(preferences);
+      setDebugMode(preferences.debugMode);
+    } catch (error) {
+      console.error('Error saving webtoon reader preferences:', error);
+    }
+  }, []);
+
   // Toggle functions
   const toggleDebugMode = useCallback(() => {
     setDebugMode(prev => !prev);
@@ -342,12 +564,15 @@ export default function WebNovelReader() {
   const renderItem = useCallback(({ item: imageUrl, index }: { item: string, index: number }) => {
     const imageState = imageLoader.getImageState(index);
     
+    // Check if this image should be loaded based on progressive loading
+    const shouldLoad = loadedImageIndices.has(index) || index < INITIAL_LOAD_COUNT;
+    
     return (
       <WebtoonImage
         imageUrl={imageUrl}
         index={index}
         imageHeaders={imageHeaders}
-        onPress={toggleUI}
+        onPress={handleZoomToggle}
         onLoadStart={() => imageLoader.handleImageLoadStart(index)}
         onLoadSuccess={(width, height) => imageLoader.handleImageLoadSuccess(index, width, height)}
         onLoadError={(error) => imageLoader.handleImageLoadError(index)}
@@ -355,81 +580,434 @@ export default function WebNovelReader() {
         hasError={imageState.hasError}
         onRetry={() => imageLoader.retryImage(index)}
         height={imageState.height}
+        shouldLoad={shouldLoad}
+        isZoomed={isZoomed}
+        zoomAnimatedValue={zoomAnimatedValue}
+        translateX={translateX}
+        translateY={translateY}
       />
     );
-  }, [imageHeaders, toggleUI, imageLoader]);
+  }, [imageHeaders, handleZoomToggle, imageLoader, loadedImageIndices, isZoomed, zoomAnimatedValue, translateX, translateY]);
 
   const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
 
   // Render settings modal
-  const renderSettingsModal = () => (
-    <Modal
-      visible={showSettingsModal}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setShowSettingsModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={[styles.modalContent, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFFFFF' }]}>
-          <Text style={[styles.modalTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
-            Webtoon Reader Settings
-          </Text>
-          
-          <View style={styles.settingsSection}>
-            <TouchableOpacity 
-              style={[styles.checkboxContainer, { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }]}
-              onPress={toggleAutoSave}
+  const renderSettingsModal = () => {
+    const renderDropdownMenu = () => {
+      if (!showDebugDropdown) return null;
+      
+      return (
+        <View style={styles.dropdownMenu}>
+          {[1, 2, 3].map((level) => (
+            <TouchableOpacity
+              key={level}
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setDebugLevel(level);
+                setShowDebugDropdown(false);
+                saveWebtoonReaderPreferences({
+                  ...webtoonReaderPreferences,
+                  debugMode: debugMode
+                });
+              }}
             >
-              <View style={[styles.checkbox, shouldAutoSave && styles.checkboxChecked]}>
-                {shouldAutoSave && (
-                  <FontAwesome5 name="check" size={12} color="#fff" />
-                )}
-              </View>
-              <Text style={[styles.checkboxLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
-                Auto-save Progress
-              </Text>
+              <Text style={styles.dropdownMenuItemText}>Level {level}</Text>
+              {debugLevel === level && (
+                <FontAwesome5 name="check" size={12} color="#02A9FF" />
+              )}
             </TouchableOpacity>
+          ))}
+        </View>
+      );
+    };
 
-            <TouchableOpacity 
-              style={[styles.checkboxContainer, { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }]}
-              onPress={toggleDebugMode}
-            >
-              <View style={[styles.checkbox, debugMode && styles.checkboxChecked]}>
-                {debugMode && (
-                  <FontAwesome5 name="check" size={12} color="#fff" />
-                )}
-              </View>
-              <Text style={[styles.checkboxLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
-                Debug Mode
-              </Text>
-            </TouchableOpacity>
-
-            {debugMode && (
-              <TouchableOpacity 
-                style={[styles.checkboxContainer, { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }]}
-                onPress={() => setDebugLevel(prev => prev < 3 ? prev + 1 : 1)}
-              >
-                <View style={styles.debugLevelContainer}>
-                  <Text style={[styles.checkboxLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
-                    Debug Level: {debugLevel}
+    return (
+      <Modal
+        visible={showSettingsModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[
+            styles.settingsModal,
+            { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFFFFF' }
+          ]}>
+            <Text style={[
+              styles.settingsTitle,
+              { color: isDarkMode ? '#FFFFFF' : '#333333' }
+            ]}>
+              Webtoon Reader Settings
+            </Text>
+            
+            <ScrollView style={styles.settingsScrollView} showsVerticalScrollIndicator={false}>
+              {/* Reading Settings Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="book-open" size={20} color="#42A5F5" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Reading Settings
                   </Text>
                 </View>
-              </TouchableOpacity>
-            )}
-          </View>
 
-          <View style={styles.modalButtons}>
-            <TouchableOpacity 
-              style={[styles.modalButton, styles.modalButtonYes]}
-              onPress={() => setShowSettingsModal(false)}
-            >
-              <Text style={styles.modalButtonText}>Close</Text>
-            </TouchableOpacity>
+                {/* Reading Direction (Fixed for Webtoons) */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Reading Direction</Text>
+                    <Text style={[styles.settingDescription, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>
+                      Webtoons are read vertically from top to bottom
+                    </Text>
+                  </View>
+                  <View style={styles.directionOptions}>
+                    <View style={[styles.directionOption, styles.directionOptionSelected]}>
+                      <FontAwesome5 name="arrow-down" size={14} color="#fff" />
+                      <Text style={[styles.directionOptionText, { color: '#fff' }]}>
+                        Vertical (Top to Bottom)
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Toggle Settings */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Remember Reading Position</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.rememberPosition}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          rememberPosition: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={webtoonReaderPreferences.rememberPosition ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Auto-Navigate to Next Chapter</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.autoNavigateNextChapter}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          autoNavigateNextChapter: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={webtoonReaderPreferences.autoNavigateNextChapter ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Keep Screen On While Reading</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.keepScreenOn}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          keepScreenOn: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={webtoonReaderPreferences.keepScreenOn ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Show Page Number</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.showPageNumber}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          showPageNumber: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#42A5F5' }}
+                      thumbColor={webtoonReaderPreferences.showPageNumber ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                {/* Preload Pages */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Preload Pages</Text>
+                  <View style={styles.sliderContainer}>
+                    <Slider
+                      style={{ width: '90%', height: 40 }}
+                      minimumValue={1}
+                      maximumValue={10}
+                      step={1}
+                      value={webtoonReaderPreferences.preloadPages}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          preloadPages: value
+                        });
+                      }}
+                      minimumTrackTintColor="#42A5F5"
+                      maximumTrackTintColor="#777777"
+                      thumbTintColor="#42A5F5"
+                    />
+                    <Text style={[styles.sliderValue, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                      {webtoonReaderPreferences.preloadPages}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Scroll Speed */}
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Scroll Speed</Text>
+                  <View style={styles.sliderContainer}>
+                    <Slider
+                      style={{ width: '90%', height: 40 }}
+                      minimumValue={0.5}
+                      maximumValue={2.0}
+                      step={0.1}
+                      value={webtoonReaderPreferences.scrollSpeed}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          scrollSpeed: value
+                        });
+                      }}
+                      minimumTrackTintColor="#42A5F5"
+                      maximumTrackTintColor="#777777"
+                      thumbTintColor="#42A5F5"
+                    />
+                    <Text style={[styles.sliderValue, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                      {webtoonReaderPreferences.scrollSpeed.toFixed(1)}x
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Advanced Options Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="cogs" size={20} color="#9C27B0" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Advanced Options
+                  </Text>
+                </View>
+                
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Auto-save Progress</Text>
+                    <Switch
+                      value={shouldAutoSave}
+                      onValueChange={setShouldAutoSave}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={shouldAutoSave ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Tap to Navigate</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.tapToNavigate}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          tapToNavigate: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={webtoonReaderPreferences.tapToNavigate ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Zoom Enabled</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.zoomEnabled}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          zoomEnabled: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={webtoonReaderPreferences.zoomEnabled ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Auto-scroll Enabled</Text>
+                    <Switch
+                      value={webtoonReaderPreferences.autoScrollEnabled}
+                      onValueChange={(value) => {
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          autoScrollEnabled: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#9C27B0' }}
+                      thumbColor={webtoonReaderPreferences.autoScrollEnabled ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                {/* Auto-scroll Speed */}
+                {webtoonReaderPreferences.autoScrollEnabled && (
+                  <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Auto-scroll Speed</Text>
+                    <View style={styles.sliderContainer}>
+                      <Slider
+                        style={{ width: '90%', height: 40 }}
+                        minimumValue={1}
+                        maximumValue={5}
+                        step={1}
+                        value={webtoonReaderPreferences.autoScrollSpeed}
+                        onValueChange={(value) => {
+                          saveWebtoonReaderPreferences({
+                            ...webtoonReaderPreferences,
+                            autoScrollSpeed: value
+                          });
+                        }}
+                        minimumTrackTintColor="#9C27B0"
+                        maximumTrackTintColor="#777777"
+                        thumbTintColor="#9C27B0"
+                      />
+                      <Text style={[styles.sliderValue, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                        {webtoonReaderPreferences.autoScrollSpeed}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+              
+              {/* Debug Options Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.sectionHeader}>
+                  <FontAwesome5 name="bug" size={20} color="#f44336" />
+                  <Text style={[styles.settingsSectionTitle, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>
+                    Debug Options
+                  </Text>
+                </View>
+                
+                <View style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333', marginBottom: 0 }]}>Debug Mode</Text>
+                    <Switch
+                      value={debugMode}
+                      onValueChange={(value) => {
+                        setDebugMode(value);
+                        saveWebtoonReaderPreferences({
+                          ...webtoonReaderPreferences,
+                          debugMode: value
+                        });
+                      }}
+                      trackColor={{ false: '#767577', true: '#f44336' }}
+                      thumbColor={debugMode ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+                
+                {debugMode && (
+                  <View style={[
+                    styles.settingsDropdown,
+                    { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5', position: 'relative' }
+                  ]}>
+                    <Text style={[
+                      styles.settingsDropdownLabel,
+                      { color: isDarkMode ? '#FFFFFF' : '#333333' }
+                    ]}>
+                      Debug Level
+                    </Text>
+                    <TouchableOpacity 
+                      style={[
+                        styles.dropdownButton,
+                        { backgroundColor: isDarkMode ? '#444' : '#E0E0E0' }
+                      ]}
+                      onPress={() => setShowDebugDropdown(!showDebugDropdown)}
+                    >
+                      <Text 
+                        style={[
+                          styles.dropdownButtonText, 
+                          { color: isDarkMode ? '#FFF' : '#333' }
+                        ]}
+                      >
+                        {debugLevel}
+                      </Text>
+                      <FontAwesome5 
+                        name={showDebugDropdown ? "chevron-up" : "chevron-down"} 
+                        size={10} 
+                        color={isDarkMode ? '#FFF' : '#333'} 
+                      />
+                    </TouchableOpacity>
+                    {renderDropdownMenu()}
+                  </View>
+                )}
+              </View>
+
+              {/* Reset Section */}
+              <View style={styles.settingsSection}>
+                <TouchableOpacity 
+                  style={[styles.settingItem, { borderBottomColor: isDarkMode ? '#333' : '#E0E0E0' }]}
+                  onPress={() => {
+                    // Reset all webtoon reader settings to default
+                    const defaultSettings = {
+                      readingDirection: 'vertical' as 'vertical',
+                      rememberPosition: true,
+                      autoNavigateNextChapter: true,
+                      keepScreenOn: true,
+                      showPageNumber: true,
+                      tapToNavigate: true,
+                      zoomEnabled: true,
+                      preloadPages: 5,
+                      scrollSpeed: 1.0,
+                      autoScrollEnabled: false,
+                      autoScrollSpeed: 2,
+                      debugMode: false,
+                      appearance: {
+                        backgroundColor: '#000000',
+                        pageGap: 8,
+                        imageQuality: 'high' as 'high' | 'medium' | 'low'
+                      }
+                    };
+                    saveWebtoonReaderPreferences(defaultSettings);
+                  }}
+                >
+                  <Text style={[styles.settingLabel, { color: isDarkMode ? '#FFFFFF' : '#333333' }]}>Reset to Default Settings</Text>
+                  <FontAwesome5 name="undo" size={20} color="#f44336" />
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[
+                  styles.modalButton,
+                  styles.modalButtonYes,
+                  { backgroundColor: theme.colors.primary }
+                ]}
+                onPress={() => setShowSettingsModal(false)}
+              >
+                <Text style={styles.modalButtonText}>
+                  Close
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
 
   if (error) {
     return (
@@ -452,9 +1030,10 @@ export default function WebNovelReader() {
         keyExtractor={keyExtractor}
         estimatedItemSize={400}
         showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
+        onScroll={isZoomed ? undefined : handleScroll}
         scrollEventThrottle={100}
         removeClippedSubviews={true}
+        scrollEnabled={!isZoomed}
       />
 
       <ReaderUI
@@ -472,6 +1051,8 @@ export default function WebNovelReader() {
         onNextChapter={() => handleChapterNavigation('next')}
         onPreviousChapter={() => handleChapterNavigation('previous')}
         onSettings={() => setShowSettingsModal(true)}
+        isInitialLoading={isInitialLoading}
+        loadingProgress={loadingProgress}
       />
 
       {/* Save Progress Modal */}
@@ -815,5 +1396,138 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginHorizontal: 8,
+  },
+  // Settings Modal Styles
+  settingsModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 0,
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '80%',
+  },
+  settingsTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 0,
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  settingsScrollView: {
+    maxHeight: 500,
+    paddingHorizontal: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 20,
+  },
+  settingsSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  settingItem: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  settingDescription: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  directionOptions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  directionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#F5F5F5',
+  },
+  directionOptionSelected: {
+    backgroundColor: '#42A5F5',
+    borderColor: '#42A5F5',
+  },
+  directionOptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  sliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  sliderValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    minWidth: 40,
+    textAlign: 'center',
+  },
+  settingsDropdown: {
+    padding: 16,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  settingsDropdownLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  dropdownButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  dropdownMenuItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  dropdownMenuItemText: {
+    fontSize: 14,
+    color: '#333',
   },
 }); 
