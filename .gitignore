@@ -21,6 +21,12 @@ fixed.env
 # EAS Build configuration with secrets
 eas.json
 
+# Documentation with sensitive information
+docs/
+**/*api*.md
+**/*secret*.md
+**/*config*.md
+
 # Dependencies
 node_modules/
 npm-debug.log*
