@@ -142,6 +142,30 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
+          name="activitiespage"
+          options={{
+            headerTransparent: true,
+            headerBlurEffect: isDarkMode ? 'dark' : 'light',
+            headerBackground: () => (
+              <BlurView 
+                tint={isDarkMode ? 'dark' : 'light'} 
+                intensity={100} 
+                style={StyleSheet.absoluteFill} 
+              />
+            ),
+            headerTitle: () => (
+              <View style={styles.headerTitle}>
+                <Text 
+                  style={[styles.headerTitleText, { color: currentTheme.colors.text }]}
+                  numberOfLines={1}
+                >
+                  Activities
+                </Text>
+              </View>
+            ),
+          }}
+        />
+        <Stack.Screen
           name="player"
           options={{
             headerShown: false,

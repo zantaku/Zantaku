@@ -216,11 +216,11 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
           >
             <Logo width={120} height={40} variant="auto" />
             <Text style={[styles.versionText, { color: currentTheme.colors.textSecondary }]}>
-              Early Access V1.0
+              Early Access V1.5
             </Text>
           </TouchableOpacity>
           <Text style={[styles.copyrightText, { color: currentTheme.colors.textSecondary }]}>
-            © 2025 ZanTaku. All rights reserved.
+            © 2025 Zantaku. All rights reserved.
           </Text>
         </View>
       </ScrollView>
@@ -256,9 +256,10 @@ const styles = StyleSheet.create({
   scrollViewContent: {
     flexGrow: 1,
     justifyContent: 'space-between',
+    paddingBottom: 100, // Add padding to account for bottom navigation
   },
   scrollViewContentGuest: {
-    paddingBottom: 40,
+    paddingBottom: 100, // Consistent padding for guest users too
   },
   settingsContainer: {
     marginTop: 12,
@@ -280,11 +281,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 1,
     marginTop: 16,
+    marginBottom: 20, // Add margin to separate from bottom edge
   },
   copyrightSectionGuest: {
     marginTop: 0,
     paddingTop: 24,
     paddingBottom: 24,
+    marginBottom: 20, // Consistent margin for guest users
   },
   copyrightText: {
     fontSize: 12,

@@ -1,135 +1,78 @@
 import { Link, Stack } from 'expo-router';
-import { StyleSheet, Image, Dimensions, View } from 'react-native';
+import { StyleSheet, View, Dimensions } from 'react-native';
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { FontAwesome5 } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import { useTheme } from '@/hooks/useTheme';
 
 const { width, height } = Dimensions.get('window');
 
-const ANILIST_ENDPOINT = 'https://graphql.anilist.co';
-
-const NOT_FOUND_MESSAGES = [
-  "Oops! Looks like this page got isekai'd! 🌟",
-  "404 - Even my Stand can't find this page! ゴゴゴゴ",
-  "Nani?! This page seems to have disappeared! 👀",
-  "Gomen ne~ The page you're looking for isn't here! 🎀",
-  "This page must be training in the Hyperbolic Time Chamber! ⏳",
-  "Even with my Sharingan, I can't see this page! 👁️",
+const ANIME_404_MESSAGES = [
+  "Ara ara~ This page seems to have vanished! (´･ω･`)",
+  "Nani?! 404 Error desu! ヽ(°〇°)ﾉ",
+  "Gomen nasai! Page not found! (╥﹏╥)",
+  "Eh?! This page got isekai'd to another world! ✨",
+  "Mou~ The page you're looking for is missing! (>_<)",
+  "Kyaa! 404 - Page-kun has disappeared! (⊙_⊙)",
 ];
 
 export default function NotFoundScreen() {
-  const [character, setCharacter] = useState<any>(null);
   const [message, setMessage] = useState('');
-  const { isDarkMode, currentTheme } = useTheme();
 
   useEffect(() => {
-    const fetchRandomCharacter = async () => {
-      try {
-        const query = `
-          query {
-            Page(page: ${Math.floor(Math.random() * 50)}, perPage: 1) {
-              characters(sort: FAVOURITES_DESC) {
-                id
-                name {
-                  full
-                }
-                image {
-                  large
-                }
-                media(perPage: 1) {
-                  nodes {
-                    coverImage {
-                      extraLarge
-                      color
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
-
-        const { data } = await axios.post(ANILIST_ENDPOINT, { query });
-        const characters = data?.data?.Page?.characters;
-        if (characters && characters.length > 0) {
-          setCharacter(characters[0]);
-        }
-      } catch (error) {
-        console.error('Error fetching character:', error);
-      }
-    };
-
-    fetchRandomCharacter();
-    setMessage(NOT_FOUND_MESSAGES[Math.floor(Math.random() * NOT_FOUND_MESSAGES.length)]);
+    setMessage(ANIME_404_MESSAGES[Math.floor(Math.random() * ANIME_404_MESSAGES.length)]);
   }, []);
-
-  const accentColor = character?.media?.nodes?.[0]?.coverImage?.color || '#5C73F2';
 
   return (
     <>
       <Stack.Screen options={{ 
         title: 'Page Not Found',
-        headerStyle: {
-          backgroundColor: 'transparent',
-        },
-        headerTransparent: true,
-        headerTintColor: isDarkMode ? '#fff' : '#000',
-        headerShadowVisible: false,
+        headerShown: false,
       }} />
-      <ThemedView style={styles.container}>
-        {character && (
-          <>
-            <Image
-              source={{ uri: character.media?.nodes?.[0]?.coverImage?.extraLarge || character.image.large }}
-              style={[styles.backgroundImage, { opacity: 0.4 }]}
-              blurRadius={15}
-            />
-            <View style={styles.characterContainer}>
-              <Image
-                source={{ uri: character.image.large }}
-                style={styles.characterImage}
-                resizeMode="contain"
-              />
-              <LinearGradient
-                colors={[
-                  'transparent',
-                  isDarkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)',
-                  isDarkMode ? 'rgba(0,0,0,0.95)' : 'rgba(255,255,255,0.95)'
-                ]}
-                locations={[0, 0.5, 1]}
-                style={styles.gradient}
-              />
-            </View>
-          </>
-        )}
+      <View style={styles.container}>
+        <View style={styles.sadFaceContainer}>
+          <ThemedText style={styles.sadFace}>:(</ThemedText>
+        </View>
+        
         <View style={styles.contentContainer}>
-          <View style={styles.messageContainer}>
-            <ThemedText type="title" style={[
-              styles.message,
-              isDarkMode ? styles.darkModeText : styles.lightModeText
-            ]}>{message}</ThemedText>
-            <ThemedText style={[
-              styles.subMessage,
-              isDarkMode ? styles.darkModeText : styles.lightModeText
-            ]}>
-              The page you're looking for doesn't exist or has been moved.
+          <ThemedText style={styles.mainMessage}>
+            {message}
+          </ThemedText>
+          
+          <ThemedText style={styles.errorCode}>
+            Error Code: 404_ANIME_CHAN
+          </ThemedText>
+          
+          <ThemedText style={styles.description}>
+            Your waifu ran into a problem and needs to restart. We're{'\n'}
+            just collecting some error info, and then we'll redirect you{'\n'}
+            back to safety.
+          </ThemedText>
+          
+          <ThemedText style={styles.percentage}>
+            0% complete
+          </ThemedText>
+          
+          <View style={styles.infoContainer}>
+            <ThemedText style={styles.infoText}>
+              For more information about this issue and possible fixes, visit our help center
+            </ThemedText>
+            
+            <ThemedText style={styles.infoText}>
+              If you call a support person, give them this info:
+            </ThemedText>
+            
+            <ThemedText style={styles.stopCode}>
+              Stop code: PAGE_NOT_FOUND_DESU
             </ThemedText>
           </View>
-          <Link 
-            href="/" 
-            style={styles.link}
-          >
-            <ThemedText type="link" style={styles.linkText}>Take me</ThemedText>
-            <FontAwesome5 name="home" size={14} color="#FFF" style={styles.linkIcon} />
+          
+          <Link href="/" style={styles.homeButton}>
+            <ThemedText style={styles.homeButtonText}>
+              Return to Home ♡
+            </ThemedText>
           </Link>
         </View>
-      </ThemedView>
+      </View>
     </>
   );
 }
@@ -137,84 +80,77 @@ export default function NotFoundScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#0078D4', // Classic Windows blue
+    paddingHorizontal: 40,
+    paddingVertical: 60,
   },
-  backgroundImage: {
-    width: width,
-    height: height,
-    position: 'absolute',
+  sadFaceContainer: {
+    marginBottom: 40,
   },
-  characterContainer: {
-    position: 'absolute',
-    width: width,
-    height: height,
-    alignItems: 'center',
-  },
-  characterImage: {
-    width: width * 0.9,
-    height: height * 0.6,
-    marginTop: height * 0.1,
-  },
-  gradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: height * 0.5,
+  sadFace: {
+    fontSize: 120,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    textAlign: 'left',
   },
   contentContainer: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: height * 0.08,
   },
-  messageContainer: {
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    marginBottom: 24,
-    backgroundColor: 'transparent',
-  },
-  message: {
-    fontSize: 32,
-    textAlign: 'center',
-    marginBottom: 12,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  subMessage: {
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.8,
-    fontWeight: '500',
-  },
-  darkModeText: {
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+  mainMessage: {
+    fontSize: 24,
     color: '#FFFFFF',
+    fontWeight: '400',
+    marginBottom: 30,
+    lineHeight: 32,
   },
-  lightModeText: {
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-    color: '#000000',
+  errorCode: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginBottom: 20,
   },
-  link: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  description: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    lineHeight: 24,
+    marginBottom: 30,
+  },
+  percentage: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    marginBottom: 40,
+  },
+  infoContainer: {
+    marginBottom: 40,
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  stopCode: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '400',
+    marginTop: 8,
+  },
+  homeButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 50,
-    backgroundColor: '#00C2FF',
-    width: 150,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignSelf: 'flex-start',
+    marginTop: 20,
   },
-  linkIcon: {
-    marginLeft: 6,
-  },
-  linkText: {
+  homeButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
   },
 });

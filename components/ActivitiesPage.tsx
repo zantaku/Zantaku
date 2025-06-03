@@ -26,7 +26,7 @@ interface Activity {
 }
 
 interface ActivitiesPageProps {
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 export default function ActivitiesPage({ onClose }: ActivitiesPageProps) {
@@ -175,9 +175,6 @@ export default function ActivitiesPage({ onClose }: ActivitiesPageProps) {
   };
 
   const handleActivityPress = (activity: Activity) => {
-    // Close the activities modal first
-    onClose();
-    
     // Navigate to the appropriate detail page based on media type
     if (activity.media.type === 'ANIME') {
       router.push({
@@ -261,17 +258,6 @@ export default function ActivitiesPage({ onClose }: ActivitiesPageProps) {
 
   return (
     <View style={[styles.container, { backgroundColor: currentTheme.colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { 
-        backgroundColor: currentTheme.colors.background,
-        borderBottomColor: currentTheme.colors.border
-      }]}>
-        <TouchableOpacity onPress={onClose} style={styles.backButton}>
-          <FontAwesome5 name="arrow-left" size={20} color={currentTheme.colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: currentTheme.colors.text }]}>Activities</Text>
-      </View>
-
       {/* Activities List */}
       {loading && activities.length === 0 ? (
         <View style={styles.centerContent}>
@@ -303,22 +289,7 @@ export default function ActivitiesPage({ onClose }: ActivitiesPageProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 16,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    paddingTop: 60,
   },
   centerContent: {
     flex: 1,
@@ -327,6 +298,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: 16,
+    paddingTop: 0,
   },
   activityItem: {
     flexDirection: 'row',

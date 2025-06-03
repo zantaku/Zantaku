@@ -204,7 +204,7 @@ const FavoriteSection = ({ title, items, type, onPress, fadeAnim }: FavoriteSect
         }}
       >
         <TouchableOpacity 
-          style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(40, 40, 40, 0.7)' : 'rgba(240, 240, 240, 0.7)' }]}
+          style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(60, 60, 60, 0.9)' : 'rgba(240, 240, 240, 0.9)' }]}
           onPress={() => onPress?.(item)}
           activeOpacity={0.7}
         >
@@ -220,7 +220,7 @@ const FavoriteSection = ({ title, items, type, onPress, fadeAnim }: FavoriteSect
             </View>
           ) : null}
           <Text 
-            style={[styles.favoriteName, { color: theme.colors.text }]} 
+            style={[styles.favoriteName, { color: isDark ? '#FFFFFF' : theme.colors.text }]} 
             numberOfLines={2}
           >
             {displayName}
@@ -253,7 +253,7 @@ const FavoriteSection = ({ title, items, type, onPress, fadeAnim }: FavoriteSect
           size={20} 
           color={theme.colors.primary} 
         />
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+        <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
           {title}
         </Text>
       </View>
@@ -327,7 +327,7 @@ const StatCard = ({ label, value, max = 0 }: StatCardProps) => {
                 borderColor: getScoreColor(value),
               }]}>
                 <Text style={[styles.scoreValue, { 
-                  color: theme.colors.text,
+                  color: isDark ? '#FFFFFF' : theme.colors.text,
                   fontSize: 12,
                 }]}>
                   {value}
@@ -335,8 +335,8 @@ const StatCard = ({ label, value, max = 0 }: StatCardProps) => {
               </View>
             </View>
             <Text style={[styles.statLabel, { 
-              color: theme.colors.text,
-              opacity: 0.7,
+              color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.text,
+              opacity: isDark ? 1 : 0.7,
               marginTop: 8,
             }]}>
               {label}
@@ -345,14 +345,14 @@ const StatCard = ({ label, value, max = 0 }: StatCardProps) => {
         ) : (
           <>
             <Text style={[styles.statValue, { 
-              color: theme.colors.text,
+              color: isDark ? '#FFFFFF' : theme.colors.text,
               opacity: 0.95
             }]}>
               {max > 0 ? `${value}/${max}` : value}
             </Text>
             <Text style={[styles.statLabel, { 
-              color: theme.colors.text,
-              opacity: 0.7
+              color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.text,
+              opacity: isDark ? 1 : 0.7
             }]}>
               {label}
             </Text>
@@ -834,16 +834,16 @@ const ProfileScreen = () => {
         )}
         <View style={styles.activityContent}>
           <View style={styles.activityHeader}>
-            <Text style={[styles.activityTitle, { color: theme.colors.text }]} numberOfLines={2}>
+            <Text style={[styles.activityTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]} numberOfLines={2}>
               {activity.media?.title.userPreferred}
             </Text>
-            <Text style={[styles.activityTime, { color: theme.colors.textSecondary }]}>
+            <Text style={[styles.activityTime, { color: isDark ? 'rgba(255, 255, 255, 0.7)' : theme.colors.textSecondary }]}>
               {formatTimestamp(activity.createdAt)}
             </Text>
           </View>
           <View style={styles.activityDetails}>
-            <View style={[styles.activityBadge, { backgroundColor: isDark ? '#333' : '#F0F0F0' }]}>
-              <Text style={[styles.activityBadgeText, { color: theme.colors.textSecondary }]}>
+            <View style={[styles.activityBadge, { backgroundColor: isDark ? 'rgba(80, 80, 80, 0.9)' : '#F0F0F0' }]}>
+              <Text style={[styles.activityBadgeText, { color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.textSecondary }]}>
                 {activity.media?.format}
               </Text>
             </View>
@@ -943,7 +943,7 @@ const ProfileScreen = () => {
         style={[
           styles.bioContainer,
           {
-            backgroundColor: isDark ? 'rgba(15, 15, 15, 0.7)' : 'rgba(255, 255, 255, 0.7)',
+            backgroundColor: isDark ? 'rgba(45, 45, 45, 0.95)' : 'rgba(255, 255, 255, 0.95)',
             borderColor: borderColor,
             opacity: fadeAnim,
             transform: [{ scale: scaleAnim }],
@@ -1211,8 +1211,10 @@ const ProfileScreen = () => {
                     transform: [
                       { scale: verifiedBadgeAnim }
                     ],
-                    marginLeft: 8,
-                    opacity: verifiedBadgeAnim
+                    marginLeft: 10,
+                    opacity: verifiedBadgeAnim,
+                    alignSelf: 'flex-start',
+                    marginTop: 2
                   }}
                 >
                   <LinearGradient
@@ -1291,36 +1293,36 @@ const ProfileScreen = () => {
               </Text>
             </View>
             
-            <View style={[
-              styles.streakContainer, 
-              { 
-                backgroundColor: isDark ? 'rgba(40, 40, 40, 0.7)' : 'rgba(240, 240, 240, 0.7)',
-                borderRadius: 12, 
-                padding: 16,
-                flexDirection: 'row',
-                justifyContent: 'space-around',
-                alignItems: 'center',
-              }
-            ]}>
-              <View style={styles.streakItem}>
-                <Text style={[styles.streakValue, { color: theme.colors.text }]}>
-                  {currentStreak}
-                </Text>
-                <Text style={[styles.streakLabel, { color: theme.colors.textSecondary }]}>
-                  Current Streak
-                </Text>
-              </View>
-              
-              <View style={styles.streakDivider} />
-              
-              <View style={styles.streakItem}>
-                <Text style={[styles.streakValue, { color: theme.colors.text }]}>
-                  {longestStreak}
-                </Text>
-                <Text style={[styles.streakLabel, { color: theme.colors.textSecondary }]}>
-                  Longest Streak
-                </Text>
-              </View>
+                    <View style={[
+          styles.streakContainer, 
+          { 
+            backgroundColor: isDark ? 'rgba(70, 70, 70, 0.95)' : 'rgba(240, 240, 240, 0.95)',
+            borderRadius: 12, 
+            padding: 16,
+            flexDirection: 'row',
+            justifyContent: 'space-around',
+            alignItems: 'center',
+          }
+        ]}>
+          <View style={styles.streakItem}>
+            <Text style={[styles.streakValue, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
+              {currentStreak}
+            </Text>
+            <Text style={[styles.streakLabel, { color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.textSecondary }]}>
+              Current Streak
+            </Text>
+          </View>
+          
+          <View style={styles.streakDivider} />
+          
+          <View style={styles.streakItem}>
+            <Text style={[styles.streakValue, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
+              {longestStreak}
+            </Text>
+            <Text style={[styles.streakLabel, { color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.textSecondary }]}>
+              Longest Streak
+            </Text>
+          </View>
               
               {activityType !== 'none' && (
                 <>
@@ -1330,13 +1332,13 @@ const ProfileScreen = () => {
                     <Text style={[
                       styles.streakTypeValue, 
                       { 
-                        color: theme.colors.text,
+                        color: isDark ? '#FFFFFF' : theme.colors.text,
                         textTransform: 'capitalize' 
                       }
                     ]}>
                       {activityType}
                     </Text>
-                    <Text style={[styles.streakLabel, { color: theme.colors.textSecondary }]}>
+                    <Text style={[styles.streakLabel, { color: isDark ? 'rgba(255, 255, 255, 0.8)' : theme.colors.textSecondary }]}>
                       Activity Type
                     </Text>
                   </View>
@@ -1366,7 +1368,7 @@ const ProfileScreen = () => {
           >
             <View style={styles.sectionHeader}>
               <MaterialCommunityIcons name="television-classic" size={20} color={theme.colors.primary} />
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
                 Favorite Anime
               </Text>
             </View>
@@ -1378,7 +1380,7 @@ const ProfileScreen = () => {
               {userProfile.favourites.anime.nodes.map((item, index) => (
                 <TouchableOpacity 
                   key={index}
-                  style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(40, 40, 40, 0.7)' : 'rgba(240, 240, 240, 0.7)' }]}
+                  style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(60, 60, 60, 0.9)' : 'rgba(240, 240, 240, 0.9)' }]}
                   onPress={() => router.push({
                     pathname: '/anime/[id]',
                     params: { id: item.id }
@@ -1393,7 +1395,7 @@ const ProfileScreen = () => {
                     />
                   )}
                   <Text 
-                    style={[styles.favoriteName, { color: theme.colors.text }]} 
+                    style={[styles.favoriteName, { color: isDark ? '#FFFFFF' : theme.colors.text }]} 
                     numberOfLines={2}
                   >
                     {item.title?.userPreferred}
@@ -1420,7 +1422,7 @@ const ProfileScreen = () => {
           >
             <View style={styles.sectionHeader}>
               <MaterialCommunityIcons name="book-open-variant" size={20} color={theme.colors.primary} />
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
                 Favorite Manga
               </Text>
             </View>
@@ -1432,7 +1434,7 @@ const ProfileScreen = () => {
               {userProfile.favourites.manga.nodes.map((item, index) => (
                 <TouchableOpacity 
                   key={index}
-                  style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(40, 40, 40, 0.7)' : 'rgba(240, 240, 240, 0.7)' }]}
+                  style={[styles.favoriteItem, { backgroundColor: isDark ? 'rgba(60, 60, 60, 0.9)' : 'rgba(240, 240, 240, 0.9)' }]}
                   onPress={() => router.push({
                     pathname: '/manga/[id]',
                     params: { id: item.id }
@@ -1447,7 +1449,7 @@ const ProfileScreen = () => {
                     />
                   )}
                   <Text 
-                    style={[styles.favoriteName, { color: theme.colors.text }]} 
+                    style={[styles.favoriteName, { color: isDark ? '#FFFFFF' : theme.colors.text }]} 
                     numberOfLines={2}
                   >
                     {item.title?.userPreferred}
@@ -1507,8 +1509,8 @@ const ProfileScreen = () => {
             >
               <FontAwesome5 name="tv" size={16} color={theme.colors.primary} />
               <View style={styles.listButtonContent}>
-                <Text style={[styles.listButtonTitle, { color: theme.colors.text }]}>Anime List</Text>
-                <Text style={[styles.listButtonSubtitle, { color: theme.colors.textSecondary }]}>
+                <Text style={[styles.listButtonTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>Anime List</Text>
+                <Text style={[styles.listButtonSubtitle, { color: isDark ? 'rgba(255, 255, 255, 0.7)' : theme.colors.textSecondary }]}>
                   {stats.animeStatusDistribution.CURRENT} watching now
                 </Text>
               </View>
@@ -1523,8 +1525,8 @@ const ProfileScreen = () => {
             >
               <FontAwesome5 name="book" size={16} color={theme.colors.primary} />
               <View style={styles.listButtonContent}>
-                <Text style={[styles.listButtonTitle, { color: theme.colors.text }]}>Manga List</Text>
-                <Text style={[styles.listButtonSubtitle, { color: theme.colors.textSecondary }]}>
+                <Text style={[styles.listButtonTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>Manga List</Text>
+                <Text style={[styles.listButtonSubtitle, { color: isDark ? 'rgba(255, 255, 255, 0.7)' : theme.colors.textSecondary }]}>
                   {stats.mangaStatusDistribution.CURRENT} reading now
                 </Text>
               </View>
@@ -1544,7 +1546,7 @@ const ProfileScreen = () => {
         >
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="chart-box-outline" size={20} color={theme.colors.primary} />
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Overview</Text>
+            <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>Overview</Text>
           </View>
           <View style={styles.statsGrid}>
             <View style={styles.statsRow}>
@@ -1572,7 +1574,7 @@ const ProfileScreen = () => {
         >
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="television-classic" size={20} color={theme.colors.primary} />
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
               Anime Status Distribution
             </Text>
           </View>
@@ -1605,7 +1607,7 @@ const ProfileScreen = () => {
         >
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="book-open-variant" size={20} color={theme.colors.primary} />
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text }]}>
               Manga Status Distribution
             </Text>
           </View>
@@ -1639,43 +1641,25 @@ const ProfileScreen = () => {
           >
             <View style={styles.sectionHeader}>
               <FontAwesome5 name="history" size={18} color={theme.colors.primary} />
-              <Text style={[styles.sectionTitle, { color: theme.colors.text, marginTop: 0 }]}>Recent Activity</Text>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#FFFFFF' : theme.colors.text, marginTop: 0 }]}>Recent Activity</Text>
             </View>
             <View style={styles.activityFeed}>
-              {activities.map((activity, index) => {
-                // Create a delayed animation for each activity item
-                const itemDelayRef = useRef(new Animated.Value(0)).current;
-                
-                useEffect(() => {
-                  // Stagger the animations
-                  const delay = 400 + (index * 100);
-                  
-                  setTimeout(() => {
-                    Animated.timing(itemDelayRef, {
-                      toValue: 1,
-                      duration: 600,
-                      useNativeDriver: true,
-                    }).start();
-                  }, delay);
-                }, []);
-                
-                return (
-                  <Animated.View 
-                    key={activity.id} 
-                    style={{
-                      opacity: itemDelayRef,
-                      transform: [{ 
-                        translateY: itemDelayRef.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [20, 0]
-                        })
-                      }]
-                    }}
-                  >
-                    {renderActivity(activity)}
-                  </Animated.View>
-                );
-              })}
+              {activities.map((activity, index) => (
+                <Animated.View 
+                  key={activity.id} 
+                  style={{
+                    opacity: fadeAnim,
+                    transform: [{ 
+                      translateY: fadeAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [20, 0]
+                      })
+                    }]
+                  }}
+                >
+                  {renderActivity(activity)}
+                </Animated.View>
+              ))}
             </View>
           </Animated.View>
         )}
@@ -1761,6 +1745,7 @@ const styles = StyleSheet.create({
   usernameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
   username: {
     fontSize: 22,
@@ -1768,14 +1753,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   verifiedGradient: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   verifiedIcon: {
-    marginLeft: 1,
+    marginLeft: 0.5,
   },
   userFlair: {
     fontSize: 14,

@@ -3,31 +3,33 @@ module.exports = function (api) {
   
   const isProduction = process.env.NODE_ENV === 'production';
   
-  const plugins = [
-    [
-      'module-resolver',
-      {
-        root: ['.'],
-        alias: {
-          '@': '.',
-          '@hooks': './hooks',
-          '@components': './components',
-          '@utils': './utils',
-          '@constants': './constants',
-          '@services': './services',
-        },
-      },
-    ],
-  ];
-  
-  // Add production-only plugins for obfuscation and console removal
-  if (isProduction) {
-    // Remove console statements in production
-    plugins.push('transform-remove-console');
-  }
-  
   return {
-    presets: ['babel-preset-expo'],
-    plugins,
+    presets: [
+      ['babel-preset-expo', { 
+        jsxImportSource: 'nativewind'
+      }]
+    ],
+    plugins: [
+      // Module resolver for better tree-shaking
+      ['module-resolver', {
+        root: ['./'],
+        extensions: ['.ios.js', '.android.js', '.js', '.ts', '.tsx', '.json'],
+        alias: {
+          '@': './',
+          '@components': './components',
+          '@screens': './screens',
+          '@utils': './utils',
+          '@services': './services',
+          '@contexts': './contexts',
+          '@constants': './constants',
+          '@types': './types',
+          '@hooks': './hooks',
+          '@lib': './lib'
+        }
+      }],
+      
+      // React Native Reanimated (must be last)
+      'react-native-reanimated/plugin'
+    ]
   };
 }; 

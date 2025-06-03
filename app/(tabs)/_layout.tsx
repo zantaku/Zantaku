@@ -275,10 +275,7 @@ export default function TabsLayout() {
               }),
               paddingTop: 12,
               paddingHorizontal: 8,
-              borderTopWidth: 1,
-              borderTopColor: isDarkMode 
-                ? 'rgba(255, 255, 255, 0.1)'
-                : 'rgba(0, 0, 0, 0.1)',
+              borderTopWidth: 0,
               elevation: 0,
               zIndex: 999,
             },
@@ -338,12 +335,12 @@ export default function TabsLayout() {
           <Tabs.Screen
             name="@anime"
             options={{
-              title: 'Anime',
+              title: 'Watch',
               tabBarLabel: () => null,
               tabBarIcon: ({ color, focused }) => (
                 <TabIcon 
                   name="tv" 
-                  label="Anime"
+                  label="Watch"
                   color={color}
                   focused={focused}
                   isDarkMode={isDarkMode}
@@ -370,12 +367,12 @@ export default function TabsLayout() {
           <Tabs.Screen
             name="@manga"
             options={{
-              title: 'Manga',
+              title: 'Read',
               tabBarLabel: () => null,
               tabBarIcon: ({ color, focused }) => (
                 <TabIcon 
                   name="book" 
-                  label="Manga"
+                  label="Read"
                   color={color}
                   focused={focused}
                   isDarkMode={isDarkMode}

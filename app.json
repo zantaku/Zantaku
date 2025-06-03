@@ -13,8 +13,7 @@
       "backgroundColor": "#ffffff"
     },
     "assetBundlePatterns": [
-      "assets/images/*",
-      "assets/fonts/*"
+      "assets/images/*"
     ],
     "ios": {
       "supportsTablet": true,
@@ -40,7 +39,9 @@
       "jsEngine": "hermes",
       "buildType": "apk",
       "includeSupportedAbis": ["arm64-v8a"],
-      "enableDangerousExperimentalLeanBuilds": true
+      "enableDangerousExperimentalLeanBuilds": true,
+      "enableSeparateBuildPerCPUArchitecture": true,
+      "enableHermes": true
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -61,13 +62,6 @@
         "projectId": "6e9bc65b-f841-4d04-80d8-2fb3ca903bd8"
       }
     },
-    "fonts": [
-      "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Entypo.ttf",
-      "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf",
-      "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Brands.ttf",
-      "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Regular.ttf",
-      "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Solid.ttf"
-    ],
     "runtimeVersion": {
       "policy": "appVersion"
     },
