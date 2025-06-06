@@ -116,6 +116,30 @@ export default function WelcomeScreen() {
     fetchTrendingAnime();
   }, []);
 
+  // Add a safety check to ensure functions are not optimized away
+  useEffect(() => {
+    console.log('=== Welcome Screen Function Availability Check ===');
+    console.log('signIn function available:', typeof signIn === 'function');
+    console.log('handleToken function available:', typeof handleToken === 'function');
+    console.log('enableAnonymousMode function available:', typeof enableAnonymousMode === 'function');
+    console.log('router.replace function available:', typeof router.replace === 'function');
+    console.log('handleLogin function available:', typeof handleLogin === 'function');
+    console.log('handleContinueWithoutAccount function available:', typeof handleContinueWithoutAccount === 'function');
+    
+    // Test that the functions can be called (but don't actually call them)
+    if (typeof signIn !== 'function') {
+      console.error('CRITICAL: signIn function is not available!');
+    }
+    if (typeof enableAnonymousMode !== 'function') {
+      console.error('CRITICAL: enableAnonymousMode function is not available!');
+    }
+    if (typeof router.replace !== 'function') {
+      console.error('CRITICAL: router.replace function is not available!');
+    }
+    
+    console.log('=== Function Check Complete ===');
+  }, [signIn, handleToken, enableAnonymousMode, router]);
+
   useEffect(() => {
     if (trendingAnime.length > 1) {
       const interval = setInterval(() => {
@@ -247,20 +271,48 @@ export default function WelcomeScreen() {
   };
 
   const handleLogin = async () => {
-    await signIn();
+    console.log('=== Welcome Screen: handleLogin called ===');
+    try {
+      console.log('Calling signIn function...');
+      const result = await signIn();
+      console.log('signIn result:', result);
+      if (result) {
+        console.log('Login successful, should navigate automatically');
+      } else {
+        console.log('Login failed or was cancelled');
+      }
+    } catch (error) {
+      console.error('Error in handleLogin:', error);
+    }
   };
 
   const handleDevLogin = async () => {
-    const result = await signInWithPin();
-    if (result?.accessToken) {
-      await handleToken(result.accessToken);
+    console.log('=== Welcome Screen: handleDevLogin called ===');
+    try {
+      const result = await signInWithPin();
+      console.log('signInWithPin result:', result);
+      if (result?.accessToken) {
+        console.log('Dev login successful, handling token...');
+        await handleToken(result.accessToken);
+      } else {
+        console.log('Dev login failed or was cancelled');
+      }
+    } catch (error) {
+      console.error('Error in handleDevLogin:', error);
     }
   };
 
   const handleDevTokenLogin = async () => {
-    const success = await authWithClipboardToken();
-    if (!success) {
-      console.error('Dev clipboard token login failed');
+    console.log('=== Welcome Screen: handleDevTokenLogin called ===');
+    try {
+      const success = await authWithClipboardToken();
+      if (!success) {
+        console.error('Dev clipboard token login failed');
+      } else {
+        console.log('Dev clipboard token login successful');
+      }
+    } catch (error) {
+      console.error('Error in handleDevTokenLogin:', error);
     }
   };
 
@@ -283,10 +335,15 @@ export default function WelcomeScreen() {
   };
 
   const handleContinueWithoutAccount = async () => {
+    console.log('=== Welcome Screen: handleContinueWithoutAccount called ===');
     try {
+      console.log('Calling enableAnonymousMode...');
       const success = await enableAnonymousMode();
+      console.log('enableAnonymousMode result:', success);
       if (success) {
+        console.log('Anonymous mode enabled, navigating to tabs...');
         router.replace('/(tabs)');
+        console.log('Navigation command sent');
       } else {
         console.error('Failed to enable anonymous mode');
       }
@@ -465,13 +522,26 @@ export default function WelcomeScreen() {
         {/* Main Login Button */}
         <Animated.View style={[buttonStyle]}>
           <TouchableOpacity
-            onPress={handleLogin}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
+            onPress={() => {
+              console.log('Login button pressed');
+              handleLogin();
+            }}
+            onPressIn={() => {
+              console.log('Login button press in');
+              handlePressIn();
+            }}
+            onPressOut={() => {
+              console.log('Login button press out');
+              handlePressOut();
+            }}
             style={[
               styles.loginButton,
               { backgroundColor: currentTheme.colors.primary }
             ]}
+            activeOpacity={0.8}
+            accessible={true}
+            accessibilityLabel="Login with AniList"
+            accessibilityRole="button"
           >
             <Text style={styles.loginButtonText}>Login with AniList</Text>
           </TouchableOpacity>
@@ -480,14 +550,32 @@ export default function WelcomeScreen() {
         {/* Secondary Options Container */}
         <View style={styles.secondaryOptionsContainer}>
           <View style={styles.optionRow}>
-            <TouchableOpacity onPress={handleContinueWithoutAccount}>
+            <TouchableOpacity 
+              onPress={() => {
+                console.log('Continue without account button pressed');
+                handleContinueWithoutAccount();
+              }}
+              activeOpacity={0.8}
+              accessible={true}
+              accessibilityLabel="Continue without account"
+              accessibilityRole="button"
+            >
               <Text style={styles.secondaryOptionText}>Continue without account</Text>
             </TouchableOpacity>
           </View>
           
           {__DEV__ && (
             <View style={styles.optionRow}>
-              <TouchableOpacity onPress={handleDevLogin}>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('Dev login button pressed');
+                  handleDevLogin();
+                }}
+                activeOpacity={0.8}
+                accessible={true}
+                accessibilityLabel="Dev Login with Pin"
+                accessibilityRole="button"
+              >
                 <Text style={styles.secondaryOptionText}>Dev Login (Pin)</Text>
               </TouchableOpacity>
             </View>

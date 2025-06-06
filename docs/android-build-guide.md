@@ -288,6 +288,8 @@ cd .\android
 # Linux/macOS:
 cd android
 
+# just use "$env:NODE_ENV="production"; .\gradlew clean assembleRelease" for windows 
+
 # Build release APK
 # PowerShell:
 .\gradlew assembleRelease

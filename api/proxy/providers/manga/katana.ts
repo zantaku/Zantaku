@@ -3,7 +3,7 @@
 // Katana Manga Provider
 import { CONSUMET_API_URL, KATANA_API_URLS } from '../../../../app/constants/api';
 import axios from 'axios';
-import { MangaDexProvider, MANGADEX_API_URL } from './mangadex';
+import { MangaDexProvider, MANGADEX_API_URL } from './mangadx';
 
 export const KATANA_API_URL = KATANA_API_URLS.PRIMARY;
 export const KATANA_FALLBACK_URL = KATANA_API_URLS.FALLBACK;

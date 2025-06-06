@@ -18,9 +18,6 @@ react {
     // works correctly with Expo projects.
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
-    
-    // Additional bundle optimization
-    extraPackagerArgs = ["--minify", "--reset-cache"]
 
     /* Folders */
      //   The root of your project, i.e. where "package.json" lives. Default is '../..'
@@ -97,30 +94,15 @@ android {
         versionCode 1
         versionName "1.0.0"
     }
-
+    
     splits {
         abi {
-            enable true
             reset()
-            include "arm64-v8a", "armeabi-v7a"
-            universalApk false
+            enable true
+            universalApk false  // If true, also generate a universal APK
+            include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }
-
-    // Create variant specific version codes for uniqueness
-    project.ext.versionCodes = ['armeabi-v7a': 1, 'arm64-v8a': 2, 'x86': 3, 'x86_64': 4]
-    android.applicationVariants.all { variant ->
-        // Assigns a different version code for each output APK
-        // other than the universal APK.
-        variant.outputs.each { output ->
-            def versionCodes = project.ext.versionCodes
-            def abiName = output.getFilter(com.android.build.OutputFile.ABI)
-            if (abiName != null) {
-                output.versionCodeOverride = defaultConfig.versionCode * 10000 + versionCodes.get(abiName)
-            }
-        }
-    }
-
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -128,64 +110,32 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
-            shrinkResources true
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            signingConfig signingConfigs.debug // Change this to signingConfigs.release when you have a release keystore
+            shrinkResources false
+            minifyEnabled false
+            // proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs true
             zipAlignEnabled true
-            
-            // Additional optimizations for smaller APK
             debuggable false
-            jniDebuggable false
-            renderscriptDebuggable false
-            pseudoLocalesEnabled false
-            
-            // Aggressive resource optimization
-            resValue "string", "build_config_package", "com.kamilist.app"
         }
     }
     packagingOptions {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
-        }
-        resources {
-            excludes += [
-                'META-INF/DEPENDENCIES', 
-                'META-INF/LICENSE', 
-                'META-INF/LICENSE.txt', 
-                'META-INF/NOTICE', 
-                'META-INF/NOTICE.txt',
-                'META-INF/ASL2.0',
-                'META-INF/LGPL2.1',
-                'META-INF/AL2.0',
-                'META-INF/INDEX.LIST',
-                'META-INF/io.netty.versions.properties',
-                '**/kotlin/**',
-                'kotlin/**',
-                '**/*.kotlin_metadata',
-                '**/*.version',
-                '**/*.properties',
-                'DebugProbesKt.bin',
-                'META-INF/com.android.tools/**',
-                'META-INF/proguard/**',
-                'META-INF/maven/**',
-                'reference.conf',
-                'AndroidManifest.xml'
-            ]
-            pickFirsts += [
-                '**/libc++_shared.so',
-                '**/libjsc.so',
-                '**/libhermes.so'
-            ]
         }
     }
     androidResources {

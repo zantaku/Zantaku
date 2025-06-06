@@ -1,8 +1,9 @@
 // Export all manga providers
 
-export * from './mangadex';
+export * from './mangadx';
 export * from './katana';
 export * from './mangafire';
+export * from './MangaProviderService';
 
 // Common types used across providers
 export interface Chapter {
