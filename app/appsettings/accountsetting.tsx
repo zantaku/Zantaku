@@ -1,15 +1,18 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, TextInput, DeviceEventEmitter, BackHandler } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, TextInput, DeviceEventEmitter, BackHandler, Image, Alert } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../../hooks/useTheme';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { useDiscordAuth } from '../../hooks/useDiscordAuth';
 import { STORAGE_KEY } from '../../constants/auth';
 import * as SecureStore from 'expo-secure-store';
 import { rateLimitedAxios } from '../../utils/api';
 import { Switch as PaperSwitch } from 'react-native-paper';
 import { Menu } from 'react-native-paper';
+import SuccessToast from '../../components/SuccessToast';
+import { useDiscordRPCContext } from '../../contexts/DiscordRPCContext';
 
 interface UserSettings {
   // Account Settings
@@ -40,14 +43,32 @@ interface UserSettings {
 
 export default function AccountScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { isDarkMode, currentTheme } = useTheme();
   const { user } = useAuth();
+  const { 
+    user: discordUser, 
+    loading: discordLoading, 
+    error: discordError,
+    signInWithDiscord, 
+    signOutDiscord, 
+    loadStoredDiscordUser,
+    checkCurrentSession,
+    refreshDiscordUser 
+  } = useDiscordAuth();
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scoreMenuVisible, setScoreMenuVisible] = useState(false);
   const [newAnimeList, setNewAnimeList] = useState('');
   const [newMangaList, setNewMangaList] = useState('');
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  // Discord RPC integration
+  const { 
+    connected: rpcConnected
+  } = useDiscordRPCContext();
 
   // Handle back navigation
   const handleBack = () => {
@@ -66,6 +87,86 @@ export default function AccountScreen() {
 
     return () => backHandler.remove();
   }, [router]);
+
+  // Load stored Discord user on mount and when component focuses
+  useEffect(() => {
+    loadStoredDiscordUser();
+  }, []);
+
+  // Check for Discord user on mount only
+  useEffect(() => {
+    if (!discordUser) {
+      console.log('🔄 Component mounted, checking for Discord user...');
+      refreshDiscordUser();
+    }
+  }, []); // Empty dependency array - only run on mount
+
+  // Handle Discord auth success/error from URL params
+  useEffect(() => {
+    if (params.discord_success === 'true') {
+      setSuccessMessage('Discord account connected successfully!');
+      setShowSuccessToast(true);
+      // Refresh Discord user data after successful connection
+      setTimeout(() => {
+        refreshDiscordUser();
+      }, 1000);
+    } else if (params.error) {
+      let errorMessage = 'Failed to connect Discord account';
+      switch (params.error) {
+        case 'discord_auth_failed':
+          errorMessage = 'Discord authentication failed';
+          break;
+        case 'no_session':
+          errorMessage = 'No authentication session found';
+          break;
+        case 'callback_failed':
+          errorMessage = 'Failed to process Discord login';
+          break;
+        case 'invalid_provider':
+          errorMessage = 'Invalid authentication provider';
+          break;
+        default:
+          errorMessage = 'An unknown error occurred';
+      }
+      Alert.alert('Error', errorMessage);
+    }
+  }, [params, refreshDiscordUser]);
+
+  // RPC connection is now handled globally by DiscordRPCProvider
+
+  const handleDiscordLogin = async () => {
+    try {
+      console.log('Starting Discord login from account settings...');
+      const success = await signInWithDiscord();
+      console.log('Discord login result:', success);
+      
+      if (!success && discordError) {
+        console.error('Discord login failed with error:', discordError);
+        Alert.alert('Error', discordError);
+      }
+    } catch (error) {
+      console.error('Discord login error:', error);
+      Alert.alert('Error', 'Failed to initiate Discord login');
+    }
+  };
+
+  const handleDiscordLogout = async () => {
+    try {
+      const success = await signOutDiscord();
+      if (success) {
+        setSuccessMessage('Discord account disconnected successfully!');
+        setShowSuccessToast(true);
+      }
+    } catch (error) {
+      console.error('Discord logout error:', error);
+      Alert.alert('Error', 'Failed to disconnect Discord account');
+    }
+  };
+
+  const handleDebugSession = async () => {
+    console.log('🔧 Manual session check triggered...');
+    await checkCurrentSession();
+  };
 
   const updateSettings = async (newSettings: Partial<UserSettings>) => {
     try {
@@ -381,6 +482,81 @@ export default function AccountScreen() {
       <Header />
 
       <ScrollView style={styles.content}>
+        {/* Discord Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Discord Integration</Text>
+          <View style={[styles.settingsContainer, { backgroundColor: currentTheme.colors.surface }]}>
+            {!discordUser ? (
+              <View>
+                <TouchableOpacity 
+                  style={[styles.discordButton, { backgroundColor: '#5865F2' }]}
+                  onPress={handleDiscordLogin}
+                  disabled={discordLoading}
+                >
+                  <FontAwesome5 name="discord" size={20} color="#FFFFFF" />
+                  <Text style={[styles.discordButtonText, { color: '#FFFFFF' }]}>
+                    {discordLoading ? 'Connecting...' : 'Connect Discord'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {/* Debug button - remove this after testing */}
+                <TouchableOpacity 
+                  style={[styles.debugButton, { backgroundColor: currentTheme.colors.textSecondary, marginTop: 8 }]}
+                  onPress={handleDebugSession}
+                >
+                  <Text style={[styles.debugButtonText, { color: '#FFFFFF' }]}>
+                    Debug Session
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.discordUserContainer}>
+                <View style={styles.discordUserInfo}>
+                  {discordUser.avatar ? (
+                    <Image 
+                      source={{ 
+                        uri: `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png?size=64` 
+                      }}
+                      style={styles.discordAvatar}
+                    />
+                  ) : (
+                    <View style={[styles.discordAvatarPlaceholder, { backgroundColor: currentTheme.colors.primary }]}>
+                      <FontAwesome5 name="user" size={20} color="#FFFFFF" />
+                    </View>
+                  )}
+                  <View style={styles.discordUserDetails}>
+                    <Text style={[styles.discordUsername, { color: currentTheme.colors.text }]}>
+                      {discordUser.username}
+                      {discordUser.discriminator !== '0000' && (
+                        <Text style={[styles.discordDiscriminator, { color: currentTheme.colors.textSecondary }]}>
+                          #{discordUser.discriminator}
+                        </Text>
+                      )}
+                    </Text>
+                    <Text style={[styles.discordConnected, { color: currentTheme.colors.primary }]}>
+                      Connected
+                    </Text>
+                    {rpcConnected && (
+                      <Text style={[styles.discordRpcStatus, { color: '#22c55e' }]}>
+                        🎮 Rich Presence Active
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.discordDisconnectButton, { borderColor: currentTheme.colors.error }]}
+                  onPress={handleDiscordLogout}
+                  disabled={discordLoading}
+                >
+                  <Text style={[styles.discordDisconnectText, { color: currentTheme.colors.error }]}>
+                    Disconnect
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+
         {/* Account Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Account</Text>
@@ -669,6 +845,14 @@ export default function AccountScreen() {
           </View>
         </View>
       </ScrollView>
+      
+      {/* Success Toast */}
+      {showSuccessToast && (
+        <SuccessToast 
+          message={successMessage}
+          onDismiss={() => setShowSuccessToast(false)}
+        />
+      )}
     </View>
   );
 }
@@ -828,5 +1012,86 @@ const styles = StyleSheet.create({
   },
   menuAnchor: {
     padding: 4,
+  },
+  discordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 12,
+  },
+  discordButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  discordUserContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+  },
+  discordUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  discordAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  discordAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  discordUserDetails: {
+    flex: 1,
+  },
+  discordUsername: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  discordDiscriminator: {
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  discordConnected: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  discordRpcStatus: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 2,
+  },
+  discordDisconnectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  discordDisconnectText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  debugButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  debugButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 }); 

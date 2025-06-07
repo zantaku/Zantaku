@@ -20,6 +20,7 @@ export interface Chapter {
   updatedAt?: string;
   scanlationGroup?: string;
   thumbnail?: string;
+  thumbnailPage?: { url: string; headers?: Record<string, string> };
   isLatest?: boolean;
   source: string;
   katanaUrl?: string;

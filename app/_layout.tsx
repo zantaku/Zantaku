@@ -16,6 +16,7 @@ import { PlayerProvider } from '../contexts/PlayerContext';
 import { PortalProvider } from '@gorhom/portal';
 import { Slot } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { DiscordRPCProvider } from '../contexts/DiscordRPCContext';
 
 // Incognito mode indicator component
 function IncognitoIndicator() {
@@ -535,12 +536,14 @@ export default function RootLayout() {
                 <ThemeProvider>
                   <IncognitoProvider>
                     <OrientationProvider>
-                      <PortalProvider>
-                        {showSplash ? (
-                          <SplashScreen onAnimationComplete={() => setShowSplash(false)} />
-                        ) : null}
-                        <ThemedLayout />
-                      </PortalProvider>
+                      <DiscordRPCProvider>
+                        <PortalProvider>
+                          {showSplash ? (
+                            <SplashScreen onAnimationComplete={() => setShowSplash(false)} />
+                          ) : null}
+                          <ThemedLayout />
+                        </PortalProvider>
+                      </DiscordRPCProvider>
                     </OrientationProvider>
                   </IncognitoProvider>
                 </ThemeProvider>

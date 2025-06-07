@@ -10,7 +10,6 @@ import {
   Platform,
   Modal,
   Dimensions,
-  LogBox,
   FlatList,
   DeviceEventEmitter,
 } from 'react-native';
@@ -26,8 +25,7 @@ import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
 import { useSettings } from '../hooks/useSettings';
 
-// Ignore the text warning since it's a false positive
-LogBox.ignoreLogs(['Text strings must be rendered within a <Text> component']);
+// The LogBox suppression has been removed as we are fixing the root cause.
 
 interface AnimeResult {
   id: number;
@@ -509,6 +507,7 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
       if (lastRequestTime) {
         const timeSinceLastRequest = currentTime - parseInt(lastRequestTime);
         if (timeSinceLastRequest < 500) { // 500ms minimum delay between requests
+          console.log(`AnimeSearchGlobal: Rate limiting - Last request was ${timeSinceLastRequest}ms ago, waiting...`);
           throw new Error('Please wait a moment before searching again');
         }
       }
@@ -524,7 +523,7 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
 
       // Try to get token but don't require it
       const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
-      console.log('Token available:', !!token);
+      console.log('AnimeSearchGlobal: Token available:', !!token);
 
       let sortOptions = Object.keys(filters.sort);
 
@@ -537,6 +536,14 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
           sortOptions = ['POPULARITY_DESC'];
         }
       }
+
+      console.log('AnimeSearchGlobal: Search parameters:', {
+        query: searchQuery.trim() || 'None',
+        genreFilter: filters.genres.length > 0 ? filters.genres[0] : 'None',
+        sortOptions,
+        hasActiveFilters,
+        page: pageNum
+      });
 
       // Add retry logic
       let retryCount = 0;
@@ -553,6 +560,8 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
           if (token) {
             headers['Authorization'] = `Bearer ${token}`;
           }
+
+          console.log('AnimeSearchGlobal: Making API request, retry count:', retryCount);
 
           const response = await axios.post(
             ANILIST_GRAPHQL_ENDPOINT,
@@ -627,8 +636,11 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
           );
 
           if (response.data.errors) {
+            console.error('AnimeSearchGlobal: GraphQL errors:', response.data.errors);
             throw new Error(response.data.errors[0]?.message || 'Error fetching anime');
           }
+
+          console.log('AnimeSearchGlobal: API response received successfully, results count:', response.data.data.Page.media.length);
 
           // Process successful response
           const sanitizedResults = response.data.data.Page.media.map((item: any) => ({
@@ -646,13 +658,22 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
             trending: item.trending || false
           }));
 
+          console.log('AnimeSearchGlobal: Processed results count:', sanitizedResults.length);
+
           setHasNextPage(response.data.data.Page.pageInfo.hasNextPage);
           setResults(prev => pageNum === 1 ? sanitizedResults : [...prev, ...sanitizedResults]);
           setPage(pageNum);
           break; // Exit the retry loop on success
 
         } catch (error: any) {
+          console.error('AnimeSearchGlobal: API request error on retry', retryCount);
+          console.error('AnimeSearchGlobal: Error type:', typeof error);
+          console.error('AnimeSearchGlobal: Error message:', error.message);
+          console.error('AnimeSearchGlobal: Error response status:', error.response?.status);
+          console.error('AnimeSearchGlobal: Error response data:', error.response?.data);
+          
           if (error.response?.status === 429 && retryCount < maxRetries) {
+            console.log('AnimeSearchGlobal: Rate limited, waiting before retry...');
             // Wait before retrying (exponential backoff)
             await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
             retryCount++;
@@ -663,7 +684,13 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
       }
 
     } catch (error: any) {
-      console.error('Search error:', error);
+      console.error('AnimeSearchGlobal: Search error occurred');
+      console.error('AnimeSearchGlobal: Error type:', typeof error);
+      console.error('AnimeSearchGlobal: Error message:', error.message);
+      console.error('AnimeSearchGlobal: Error response status:', error.response?.status);
+      console.error('AnimeSearchGlobal: Error response data:', error.response?.data);
+      console.error('AnimeSearchGlobal: Full error object:', error);
+      
       setError(
         error.response?.status === 429
           ? 'Too many requests. Please wait a moment before trying again.'
@@ -876,111 +903,90 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
     setIsLoadingMore(true);
     searchAnime(query, page + 1, true);
   };
+  
+  // FIXED: Refactored renderItem to remove illegal whitespace and improve readability.
+  const renderItem = ({ item: result }: { item: AnimeResult }) => {
+    const mangaka = result.staff?.edges.find(edge =>
+      ['story', 'art', 'author', 'mangaka'].some(role => edge.role.toLowerCase().includes(role))
+    )?.node.name.full;
 
-  const renderItem = ({ item: result }: { item: AnimeResult }) => (
-      <TouchableOpacity 
-      key={result.id}
-                    style={[
-        styles.resultItem,
-        {
-          backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-          marginBottom: 12,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3
-        }
-      ]}
-      onPress={() => navigateToAnime(result.id)}
-      activeOpacity={0.7}
-    >
-      <ExpoImage
-        source={{ uri: result.coverImage.medium }}
-        style={styles.resultImage}
-        contentFit="cover"
-        transition={200}
-      />
-      <View style={styles.resultInfo}>
-        <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
-          {getPreferredTitle(result.title)}
-                    </Text>
-        {result.staff?.edges.some((edge: { role: string; node: { name: { full: string } } }) => 
-          edge.role.toLowerCase().includes('story') || 
-          edge.role.toLowerCase().includes('art') ||
-          edge.role.toLowerCase().includes('author') ||
-          edge.role.toLowerCase().includes('mangaka')
-        ) && (
-          <Text style={[styles.mangakaText, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
-            by {result.staff.edges
-              .find((edge: { role: string; node: { name: { full: string } } }) => 
-                edge.role.toLowerCase().includes('story') || 
-                edge.role.toLowerCase().includes('art') ||
-                edge.role.toLowerCase().includes('author') ||
-                edge.role.toLowerCase().includes('mangaka')
-              )?.node.name.full}
+    return (
+      <TouchableOpacity
+        key={result.id}
+        style={[
+          styles.resultItem,
+          {
+            backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 4,
+            elevation: 3
+          }
+        ]}
+        onPress={() => navigateToAnime(result.id)}
+        activeOpacity={0.7}
+      >
+        <ExpoImage
+          source={{ uri: result.coverImage.medium }}
+          style={styles.resultImage}
+          contentFit="cover"
+          transition={200}
+        />
+        <View style={styles.resultInfo}>
+          <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
+            {getPreferredTitle(result.title)}
           </Text>
-        )}
-        
-        <View style={styles.statsContainer}>
-          {result.averageScore && (
-            <View style={styles.statItem}>
-              <FontAwesome5 name="star" size={12} color="#FFD700" solid />
-              <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>
-                {formatScore(result.averageScore)}
-                    </Text>
-              </View>
+          {mangaka && (
+            <Text style={[styles.mangakaText, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+              {`by ${mangaka}`}
+            </Text>
           )}
-          {result.popularity && (
-            <View style={styles.statItem}>
-              <FontAwesome5 name="heart" size={12} color="#FF6B6B" solid />
-              <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>
-                {result.popularity.toLocaleString()}
-                </Text>
+          <View style={styles.statsContainer}>
+            {result.averageScore && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="star" size={12} color="#FFD700" solid />
+                <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>{formatScore(result.averageScore)}</Text>
               </View>
-          )}
-          {result.trending && (
-            <View style={styles.statItem}>
-              <FontAwesome5 name="fire" size={12} color="#02A9FF" solid />
+            )}
+            {result.popularity && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="heart" size={12} color="#FF6B6B" solid />
+                <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>{result.popularity.toLocaleString()}</Text>
               </View>
-          )}
-            </View>
-
-        <View style={styles.tagsContainer}>
-          {result.format && (
-            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                {result.format.replace(/_/g, ' ')}
-                    </Text>
+            )}
+            {result.trending && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="fire" size={12} color="#02A9FF" solid />
               </View>
-          )}
-          {result.status && (
-            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                {result.status.replace(/_/g, ' ')}
-              </Text>
-            </View>
-          )}
-          {result.episodes && (
-            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                {result.episodes} EP
-                    </Text>
+            )}
+          </View>
+          <View style={styles.tagsContainer}>
+            {result.format && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{result.format.replace(/_/g, ' ')}</Text>
               </View>
-          )}
-            </View>
-
-        {result.description && (
-          <Text 
-            style={[styles.description, { color: currentTheme.colors.textSecondary }]} 
-            numberOfLines={2}
-          >
-            {result.description.replace(/<[^>]*>/g, '')}
-                    </Text>
-        )}
+            )}
+            {result.status && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{result.status.replace(/_/g, ' ')}</Text>
               </View>
-            </TouchableOpacity>
-  );
+            )}
+            {result.episodes && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{`${result.episodes} EP`}</Text>
+              </View>
+            )}
+          </View>
+          {result.description && (
+            <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
+              {result.description.replace(/<[^>]*>/g, '')}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (!visible) return null;
 
@@ -991,136 +997,129 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
         transparent={true}
         onRequestClose={onClose}
         animationType="fade"
-        >
-          <View style={[
-            StyleSheet.absoluteFill,
-          { backgroundColor: 'rgba(0, 0, 0, 0.8)' }
-        ]}>
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <View style={[
-              styles.searchBar,
-              {
-                backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                elevation: 3
-              }
-            ]}>
-              <FontAwesome5 name="search" size={16} color={currentTheme.colors.primary} />
-              <TextInput
-                style={[styles.input, { color: currentTheme.colors.text }]}
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.8)' }]}>
+          <View style={styles.content}>
+            <View style={styles.header}>
+              <View style={[
+                styles.searchBar,
+                {
+                  backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
+                  elevation: 3
+                }
+              ]}>
+                <FontAwesome5 name="search" size={16} color={currentTheme.colors.primary} />
+                <TextInput
+                  style={[styles.input, { color: currentTheme.colors.text }]}
                   placeholder="Search anime, movies, OVAs..."
-                placeholderTextColor={currentTheme.colors.textSecondary}
-                value={query}
-                onChangeText={handleSearch}
-                autoFocus
-              />
-              {query.length > 0 && (
-                <TouchableOpacity 
-                  onPress={() => handleSearch('')}
-                  style={styles.clearButton}
-                >
-                  <FontAwesome5 name="times" size={14} color={currentTheme.colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-            <TouchableOpacity
-              style={[styles.filterButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
-              onPress={() => setShowFilterModal(true)}
-            >
-              <FontAwesome5
-                name="filter"
-                size={16}
-                color={Object.values(filters).some(f => 
-                  Array.isArray(f) ? f.length > 0 : f !== null
-                ) ? '#02A9FF' : currentTheme.colors.primary}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <FontAwesome5 name="times" size={18} color={isDarkMode ? '#FFFFFF' : '#000000'} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Show active genre filter if any */}
-          {filters.genres.length > 0 && (
-            <View style={styles.activeFilterContainer}>
-              <Text style={[styles.activeFilterLabel, { color: currentTheme.colors.textSecondary }]}>
-                Active Filter:
-              </Text>
-              <View style={styles.activeFilterChips}>
-                <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
-                  <Text style={styles.activeGenreChipText}>
-                    {filters.genres[0]}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setFilters(prev => ({
-                        ...prev,
-                        genres: []
-                      }));
-                      setTimeout(() => searchAnime(query), 100);
-                    }}
-                    style={styles.clearGenreButton}
+                  placeholderTextColor={currentTheme.colors.textSecondary}
+                  value={query}
+                  onChangeText={handleSearch}
+                  autoFocus
+                />
+                {query.length > 0 && (
+                  <TouchableOpacity 
+                    onPress={() => handleSearch('')}
+                    style={styles.clearButton}
                   >
-                    <FontAwesome5 name="times" size={12} color="#FFFFFF" />
+                    <FontAwesome5 name="times" size={14} color={currentTheme.colors.textSecondary} />
                   </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity
+                style={[styles.filterButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
+                onPress={() => setShowFilterModal(true)}
+              >
+                <FontAwesome5
+                  name="filter"
+                  size={16}
+                  color={Object.values(filters).some(f => 
+                    Array.isArray(f) ? f.length > 0 : f !== null
+                  ) ? '#02A9FF' : currentTheme.colors.primary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <FontAwesome5 name="times" size={18} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Show active genre filter if any */}
+            {filters.genres.length > 0 && (
+              <View style={styles.activeFilterContainer}>
+                <Text style={[styles.activeFilterLabel, { color: currentTheme.colors.textSecondary }]}>
+                  Active Filter:
+                </Text>
+                <View style={styles.activeFilterChips}>
+                  <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
+                    <Text style={styles.activeGenreChipText}>
+                      {filters.genres[0]}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setFilters(prev => ({
+                          ...prev,
+                          genres: []
+                        }));
+                        setTimeout(() => searchAnime(query), 100);
+                      }}
+                      style={styles.clearGenreButton}
+                    >
+                      <FontAwesome5 name="times" size={12} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
-            </View>
-          )}
+            )}
 
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={currentTheme.colors.primary} />
-            </View>
-          ) : (
-            <FlatList
-              data={results}
-              keyboardShouldPersistTaps="handled"
-              style={styles.results}
-              renderItem={renderItem}
-              keyExtractor={(item) => item.id.toString()}
-              ListEmptyComponent={() => (
-                error ? (
-                  <View style={styles.noResults}>
-                    <FontAwesome5 
-                      name="exclamation-circle" 
-                      size={24} 
-                      color={currentTheme.colors.error}
-                      style={{ marginBottom: 8 }}
-                    />
-                    <Text style={[styles.errorText, { color: currentTheme.colors.error }]}>
-                      {error}
-                      </Text>
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={results}
+                keyboardShouldPersistTaps="handled"
+                style={styles.results}
+                renderItem={renderItem}
+                keyExtractor={(item) => item.id.toString()}
+                ListEmptyComponent={() => (
+                  error ? (
+                    <View style={styles.noResults}>
+                      <FontAwesome5 
+                        name="exclamation-circle" 
+                        size={24} 
+                        color={currentTheme.colors.error || 'red'}
+                        style={{ marginBottom: 8 }}
+                      />
+                      <Text style={[styles.errorText, { color: currentTheme.colors.error || 'red' }]}>{error}</Text>
                     </View>
-              ) : query.length > 0 && !loading ? (
-                <View style={styles.noResults}>
-                  <FontAwesome5 
-                    name="search" 
-                    size={24} 
-                    color={currentTheme.colors.textSecondary}
-                    style={{ marginBottom: 8, opacity: 0.5 }}
-                  />
-                  <Text style={[styles.noResultsText, { color: currentTheme.colors.textSecondary }]}>
-                    No results found
-                  </Text>
-                </View>
-                ) : null
-              )}
-              onEndReached={loadMore}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={() => (
-                isLoadingMore ? (
-                  <View style={{ padding: 20 }}>
-                    <ActivityIndicator size="small" color={currentTheme.colors.primary} />
-                  </View>
-                ) : null
-              )}
-            />
-          )}
+                  ) : query.length > 0 && !loading ? (
+                    <View style={styles.noResults}>
+                      <FontAwesome5 
+                        name="search" 
+                        size={24} 
+                        color={currentTheme.colors.textSecondary}
+                        style={{ marginBottom: 8, opacity: 0.5 }}
+                      />
+                      <Text style={[styles.noResultsText, { color: currentTheme.colors.textSecondary }]}>No results found</Text>
+                    </View>
+                  ) : null
+                )}
+                onEndReached={loadMore}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={() => (
+                  isLoadingMore ? (
+                    <View style={{ padding: 20 }}>
+                      <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+                    </View>
+                  ) : null
+                )}
+              />
+            )}
           </View>
 
           {showFilterModal && (

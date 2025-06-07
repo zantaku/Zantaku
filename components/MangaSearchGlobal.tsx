@@ -10,7 +10,6 @@ import {
   Platform,
   Modal,
   Dimensions,
-  LogBox,
   FlatList,
   DeviceEventEmitter,
 } from 'react-native';
@@ -26,8 +25,7 @@ import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
 import { useSettings } from '../hooks/useSettings';
 
-// Ignore the text warning since it's a false positive
-LogBox.ignoreLogs(['Text strings must be rendered within a <Text> component']);
+// The LogBox suppression has been removed as we are fixing the root cause.
 
 interface MangaResult {
   id: number;
@@ -498,7 +496,7 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
       if (lastRequestTime) {
         const timeSinceLastRequest = currentTime - parseInt(lastRequestTime);
         if (timeSinceLastRequest < 1500) { // 1.5 seconds minimum delay between requests
-          console.log(`Rate limiting: Last request was ${timeSinceLastRequest}ms ago, waiting...`);
+          console.log(`MangaSearchGlobal: Rate limiting - Last request was ${timeSinceLastRequest}ms ago, waiting...`);
           // Instead of throwing an error, wait and then continue
           await new Promise(resolve => setTimeout(resolve, 1500 - timeSinceLastRequest));
         }
@@ -508,7 +506,7 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
 
       // Try to get token but don't require it
       const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
-      console.log('Token available:', !!token);
+      console.log('MangaSearchGlobal: Token available:', !!token);
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -528,10 +526,12 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
         try {
           // Inside the searchManga function before the API call
           // Log the search parameters
-          console.log('Search parameters:', {
+          console.log('MangaSearchGlobal: Search parameters:', {
             genreFilter: filters.genres.length > 0 ? filters.genres[0] : 'None',
             sortBy: Object.keys(filters.sort).length > 0 ? Object.keys(filters.sort) : ['TRENDING_DESC'],
-            query: searchQuery.trim() || 'None'
+            query: searchQuery.trim() || 'None',
+            page: pageNum,
+            retryCount
           });
 
           const response = await axios.post(
@@ -606,8 +606,11 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
           );
 
           if (response.data.errors) {
+            console.error('MangaSearchGlobal: GraphQL errors:', response.data.errors);
             throw new Error(response.data.errors[0]?.message || 'Error fetching manga');
           }
+
+          console.log('MangaSearchGlobal: API response received successfully, results count:', response.data.data.Page.media.length);
 
           const sanitizedResults = response.data.data.Page.media.map((item: any) => ({
             ...item,
@@ -624,13 +627,22 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
             trending: item.trending || false
           }));
 
+          console.log('MangaSearchGlobal: Processed results count:', sanitizedResults.length);
+
           setHasNextPage(response.data.data.Page.pageInfo.hasNextPage);
           setResults(prev => pageNum === 1 ? sanitizedResults : [...prev, ...sanitizedResults]);
           setPage(pageNum);
           break; // Exit the retry loop on success
 
         } catch (error: any) {
+          console.error('MangaSearchGlobal: API request error on retry', retryCount);
+          console.error('MangaSearchGlobal: Error type:', typeof error);
+          console.error('MangaSearchGlobal: Error message:', error.message);
+          console.error('MangaSearchGlobal: Error response status:', error.response?.status);
+          console.error('MangaSearchGlobal: Error response data:', error.response?.data);
+          
           if (error.response?.status === 429 && retryCount < maxRetries) {
+            console.log('MangaSearchGlobal: Rate limited, waiting before retry...');
             // Wait before retrying (exponential backoff)
             await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
             retryCount++;
@@ -641,14 +653,20 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
       }
 
     } catch (error: any) {
-      console.error('Search error:', error);
+      console.error('MangaSearchGlobal: Search error occurred');
+      console.error('MangaSearchGlobal: Error type:', typeof error);
+      console.error('MangaSearchGlobal: Error message:', error.message);
+      console.error('MangaSearchGlobal: Error response status:', error.response?.status);
+      console.error('MangaSearchGlobal: Error response data:', error.response?.data);
+      console.error('MangaSearchGlobal: Full error object:', error);
       
       // Check if it's a rate limit error
       if (error.message?.includes('wait') || error.response?.status === 429) {
+        console.log('MangaSearchGlobal: Rate limit detected, setting up auto-retry...');
         setError('Search is cooling down. Please wait a few seconds and try again.');
         // Auto-retry after 2 seconds
         setTimeout(() => {
-          console.log('Auto-retrying search...');
+          console.log('MangaSearchGlobal: Auto-retrying search...');
           searchManga(searchQuery, pageNum, isLoadingMore);
         }, 2000);
       } else {
@@ -912,6 +930,91 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
     searchManga(query, page + 1, true);
   };
 
+  // FIXED: Refactored renderItem to a standalone function to prevent text rendering errors.
+  const renderMangaItem = ({ item: result }: { item: MangaResult }) => {
+    const mangaka = result.staff?.edges.find(edge =>
+      ['story', 'art', 'author', 'mangaka'].some(role => edge.role.toLowerCase().includes(role))
+    )?.node.name.full;
+
+    return (
+      <TouchableOpacity
+        key={result.id}
+        style={[
+          styles.resultItem,
+          {
+            backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
+            marginBottom: 12,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 4,
+            elevation: 3
+          }
+        ]}
+        onPress={() => navigateToManga(result.id)}
+        activeOpacity={0.7}
+      >
+        <ExpoImage
+          source={{ uri: result.coverImage.medium }}
+          style={styles.resultImage}
+          contentFit="cover"
+          transition={200}
+        />
+        <View style={styles.resultInfo}>
+          <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
+            {getPreferredTitle(result.title)}
+          </Text>
+          {mangaka && (
+            <Text style={[styles.mangakaText, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+              {`by ${mangaka}`}
+            </Text>
+          )}
+          <View style={styles.statsContainer}>
+            {result.averageScore && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="star" size={12} color="#FFD700" solid />
+                <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>{formatScore(result.averageScore)}</Text>
+              </View>
+            )}
+            {result.popularity && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="heart" size={12} color="#FF6B6B" solid />
+                <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>{result.popularity.toLocaleString()}</Text>
+              </View>
+            )}
+            {result.trending && (
+              <View style={styles.statItem}>
+                <FontAwesome5 name="fire" size={12} color="#02A9FF" solid />
+              </View>
+            )}
+          </View>
+          <View style={styles.tagsContainer}>
+            {result.format && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{result.format.replace(/_/g, ' ')}</Text>
+              </View>
+            )}
+            {result.status && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{result.status.replace(/_/g, ' ')}</Text>
+              </View>
+            )}
+            {result.chapters && (
+              <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>{`${result.chapters} CH`}</Text>
+              </View>
+            )}
+          </View>
+          {result.description && (
+            <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
+              {result.description.replace(/<[^>]*>/g, '')}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   if (!visible) return null;
 
   return (
@@ -921,200 +1024,94 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
         transparent={true}
         onRequestClose={onClose}
         animationType="fade"
-        >
-          <View style={[
-            StyleSheet.absoluteFill,
-          { backgroundColor: 'rgba(0, 0, 0, 0.8)' }
-        ]}>
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <View style={[
-              styles.searchBar,
-              {
-                backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                elevation: 3
-              }
-            ]}>
-              <FontAwesome5 name="search" size={16} color={currentTheme.colors.primary} />
-              <TextInput
-                style={[styles.input, { color: currentTheme.colors.text }]}
-                placeholder="Search manga, light novels, manhwa..."
-                placeholderTextColor={currentTheme.colors.textSecondary}
-                value={query}
-                onChangeText={handleSearch}
-                autoFocus
-              />
-              {query.length > 0 && (
-                <TouchableOpacity 
-                  onPress={() => handleSearch('')}
-                  style={styles.clearButton}
-                >
-                  <FontAwesome5 name="times" size={14} color={currentTheme.colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-            <TouchableOpacity
-              style={[styles.filterButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
-              onPress={() => setShowFilterModal(true)}
-            >
-              <FontAwesome5
-                name="filter"
-                size={16}
-                color={Object.values(filters).some(f => 
-                  Array.isArray(f) ? f.length > 0 : f !== null
-                ) ? '#02A9FF' : currentTheme.colors.primary}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <FontAwesome5 name="times" size={18} color={isDarkMode ? '#FFFFFF' : '#000000'} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Show active genre filter if any */}
-          {filters.genres.length > 0 && (
-            <View style={styles.activeFilterContainer}>
-              <Text style={[styles.activeFilterLabel, { color: currentTheme.colors.textSecondary }]}>
-                Active Filter:
-              </Text>
-              <View style={styles.activeFilterChips}>
-                <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
-                  <Text style={styles.activeGenreChipText}>
-                    {filters.genres[0]}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setFilters(prev => ({
-                        ...prev,
-                        genres: []
-                      }));
-                      setTimeout(() => searchManga(query), 100);
-                    }}
-                    style={styles.clearGenreButton}
+      >
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.8)' }]}>
+          <View style={styles.content}>
+            <View style={styles.header}>
+              <View style={[
+                styles.searchBar,
+                {
+                  backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 4,
+                  elevation: 3
+                }
+              ]}>
+                <FontAwesome5 name="search" size={16} color={currentTheme.colors.primary} />
+                <TextInput
+                  style={[styles.input, { color: currentTheme.colors.text }]}
+                  placeholder="Search manga, light novels, manhwa..."
+                  placeholderTextColor={currentTheme.colors.textSecondary}
+                  value={query}
+                  onChangeText={handleSearch}
+                  autoFocus
+                />
+                {query.length > 0 && (
+                  <TouchableOpacity 
+                    onPress={() => handleSearch('')}
+                    style={styles.clearButton}
                   >
-                    <FontAwesome5 name="times" size={12} color="#FFFFFF" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={currentTheme.colors.primary} />
-            </View>
-          ) : (
-            <FlatList
-              data={results}
-              keyboardShouldPersistTaps="handled"
-              style={styles.results}
-              renderItem={({ item: result }) => (
-                <TouchableOpacity
-                  key={result.id}
-                  style={[
-                    styles.resultItem,
-                    {
-                      backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-                      marginBottom: 12,
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.1,
-                      shadowRadius: 4,
-                      elevation: 3
-                    }
-                  ]}
-                  onPress={() => navigateToManga(result.id)}
-                  activeOpacity={0.7}
-                >
-                  <ExpoImage
-                    source={{ uri: result.coverImage.medium }}
-                    style={styles.resultImage}
-                    contentFit="cover"
-                    transition={200}
-                  />
-                  <View style={styles.resultInfo}>
-                        <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
-                          {getPreferredTitle(result.title)}
-                        </Text>
-                        {result.staff?.edges.some(edge => 
-                          edge.role.toLowerCase().includes('story') || 
-                          edge.role.toLowerCase().includes('art') ||
-                          edge.role.toLowerCase().includes('author') ||
-                          edge.role.toLowerCase().includes('mangaka')
-                        ) && (
-                          <Text style={[styles.mangakaText, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
-                            by {result.staff.edges
-                              .find(edge => 
-                                edge.role.toLowerCase().includes('story') || 
-                                edge.role.toLowerCase().includes('art') ||
-                                edge.role.toLowerCase().includes('author') ||
-                                edge.role.toLowerCase().includes('mangaka')
-                              )?.node.name.full}
-                          </Text>
-                        )}
-                        
-                        <View style={styles.statsContainer}>
-                          {result.averageScore && (
-                            <View style={styles.statItem}>
-                              <FontAwesome5 name="star" size={12} color="#FFD700" solid />
-                              <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>
-                                {formatScore(result.averageScore)}
-                      </Text>
-                            </View>
-                          )}
-                          {result.popularity && (
-                            <View style={styles.statItem}>
-                              <FontAwesome5 name="heart" size={12} color="#FF6B6B" solid />
-                              <Text style={[styles.statText, { color: currentTheme.colors.textSecondary }]}>
-                                {result.popularity.toLocaleString()}
-                              </Text>
-                            </View>
-                          )}
-                          {result.trending && (
-                            <View style={styles.statItem}>
-                              <FontAwesome5 name="fire" size={12} color="#02A9FF" solid />
-                            </View>
-                          )}
-                        </View>
-
-                        <View style={styles.tagsContainer}>
-                          {result.format && (
-                            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-                              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                                {result.format.replace(/_/g, ' ')}
-                              </Text>
-                            </View>
-                          )}
-                          {result.status && (
-                            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-                              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                                {result.status.replace(/_/g, ' ')}
-                              </Text>
-                            </View>
-                          )}
-                          {result.chapters && (
-                            <View style={[styles.tag, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
-                              <Text style={[styles.tagText, { color: currentTheme.colors.textSecondary }]}>
-                                {result.chapters} CH
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-
-                        {result.description && (
-                          <Text 
-                            style={[styles.description, { color: currentTheme.colors.textSecondary }]} 
-                            numberOfLines={2}
-                          >
-                            {result.description.replace(/<[^>]*>/g, '')}
-                          </Text>
-                        )}
-                    </View>
+                    <FontAwesome5 name="times" size={14} color={currentTheme.colors.textSecondary} />
                   </TouchableOpacity>
                 )}
+              </View>
+              <TouchableOpacity
+                style={[styles.filterButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
+                onPress={() => setShowFilterModal(true)}
+              >
+                <FontAwesome5
+                  name="filter"
+                  size={16}
+                  color={Object.values(filters).some(f => 
+                    Array.isArray(f) ? f.length > 0 : f !== null
+                  ) ? '#02A9FF' : currentTheme.colors.primary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <FontAwesome5 name="times" size={18} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Show active genre filter if any */}
+            {filters.genres.length > 0 && (
+              <View style={styles.activeFilterContainer}>
+                <Text style={[styles.activeFilterLabel, { color: currentTheme.colors.textSecondary }]}>
+                  Active Filter:
+                </Text>
+                <View style={styles.activeFilterChips}>
+                  <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
+                    <Text style={styles.activeGenreChipText}>
+                      {filters.genres[0]}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setFilters(prev => ({
+                          ...prev,
+                          genres: []
+                        }));
+                        setTimeout(() => searchManga(query), 100);
+                      }}
+                      style={styles.clearGenreButton}
+                    >
+                      <FontAwesome5 name="times" size={12} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={results}
+                keyboardShouldPersistTaps="handled"
+                style={styles.results}
+                renderItem={renderMangaItem}
                 keyExtractor={(item) => item.id.toString()}
                 maxToRenderPerBatch={10}
                 windowSize={5}
@@ -1129,10 +1126,10 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
                       <FontAwesome5 
                         name="exclamation-circle" 
                         size={24} 
-                        color={currentTheme.colors.error}
+                        color={currentTheme.colors.error || 'red'}
                         style={{ marginBottom: 8 }}
                       />
-                      <Text style={[styles.errorText, { color: currentTheme.colors.error }]}>
+                      <Text style={[styles.errorText, { color: currentTheme.colors.error || 'red' }]}>
                         {error}
                       </Text>
                     </View>
@@ -1158,7 +1155,7 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
                   ) : null
                 )}
               />
-          )}
+            )}
           </View>
 
           {showFilterModal && (
@@ -1338,4 +1335,4 @@ export default function MangaSearchGlobal({ visible, onClose }: Props) {
       </Modal>
     </View>
   );
-} 
+}

@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Activity
 import { Image as ExpoImage } from 'expo-image';
 import Modal from 'react-native-modal';
 import { useRouter } from 'expo-router';
+import { MangaProviderService, ProviderPreferences } from '../api/proxy/providers/manga/MangaProviderService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface CorrectMangaSearchModalProps {
     isVisible: boolean;
@@ -17,40 +19,45 @@ interface MangaSearchResult {
     image: string;
 }
 
-const BASE_API_URL = 'https://enoki-api.vercel.app';
-
 export default function CorrectMangaSearchModal({ isVisible, onClose, currentTitle, onMangaSelect }: CorrectMangaSearchModalProps) {
     const [searchQuery, setSearchQuery] = useState(currentTitle);
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState<MangaSearchResult[]>([]);
+    const [preferences, setPreferences] = useState<ProviderPreferences | null>(null);
     const router = useRouter();
 
     useEffect(() => {
+        const loadPrefs = async () => {
+            try {
+                const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
+                setPreferences(prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+            } catch {
+                setPreferences({ defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+            }
+        };
+        loadPrefs();
+    }, []);
+
+    useEffect(() => {
         console.log('Modal visibility changed:', isVisible);
-        if (isVisible) {
+        if (isVisible && preferences) {
             setSearchQuery(currentTitle);
             searchManga();
         }
-    }, [isVisible, currentTitle]);
+    }, [isVisible, currentTitle, preferences]);
 
     const searchManga = async () => {
-        if (!searchQuery.trim()) return;
+        if (!searchQuery.trim() || !preferences) return;
         setLoading(true);
         try {
             console.log('Searching for manga:', searchQuery);
-            const cleanQuery = searchQuery.replace(/[^a-zA-Z\s]/g, '').trim();
-            const response = await fetch(`${BASE_API_URL}/manganato/search/${encodeURIComponent(cleanQuery)}/1`);
-            const data = await response.json();
-            console.log('Search results:', data);
-            if (Array.isArray(data)) {
-                setResults(data.map((item: any) => ({
-                    id: item.id,
-                    title: item.title,
-                    image: item.image
-                })));
-            } else {
-                setResults([]);
-            }
+            const { results: searchResults } = await MangaProviderService.searchManga(searchQuery, preferences);
+            console.log('Search results:', searchResults);
+            setResults(searchResults.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.coverImage || ''
+            })));
         } catch (error) {
             console.error('Error searching manga:', error);
             setResults([]);

@@ -259,6 +259,29 @@ export class MangaProviderService {
   }
 
   /**
+   * Get first page of a chapter for thumbnail preview
+   */
+  static async getChapterThumbnailPage(
+    chapterId: string, 
+    provider: Provider
+  ): Promise<PageWithHeaders | null> {
+    this.logDebug(`Getting thumbnail page for chapter ${chapterId} from ${provider}`);
+
+    try {
+      const allPages = await this.getChapterPages(chapterId, provider);
+      // Return first page for thumbnail preview
+      const thumbnailPage = allPages[0] || null;
+      
+      this.logDebug(`Successfully loaded thumbnail page from ${provider}`);
+      return thumbnailPage;
+
+    } catch (error: any) {
+      this.logError(`Failed to get chapter thumbnail page from ${provider}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get error message based on provider and auto-select setting
    */
   static getProviderErrorMessage(

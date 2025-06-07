@@ -10,6 +10,7 @@ import {
   Platform,
   Modal,
   FlatList,
+  SectionList, // Import SectionList
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -80,6 +81,8 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center', // Center filter modal
+    alignItems: 'center', // Center filter modal
   },
   filterModal: {
     width: '80%',
@@ -265,6 +268,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
               anime: Page(page: 1, perPage: 5) {
                 results: media(type: ANIME, search: $search, sort: SEARCH_MATCH, isAdult: $isAdult) {
                   id
+                  type
                   title { userPreferred romaji english native }
                   coverImage { medium }
                   format status episodes averageScore popularity trending
@@ -274,6 +278,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
               manga: Page(page: 1, perPage: 5) {
                 results: media(type: MANGA, search: $search, sort: SEARCH_MATCH, isAdult: $isAdult) {
                   id
+                  type
                   title { userPreferred romaji english native }
                   coverImage { medium }
                   format status chapters averageScore popularity trending
@@ -282,14 +287,16 @@ export default function GlobalSearch({ visible, onClose }: Props) {
               }
               characters: Page(page: 1, perPage: 5) {
                 results: characters(search: $search) {
-                  id name { userPreferred full }
+                  id
+                  name { userPreferred full }
                   image { medium }
                   description(asHtml: false)
                 }
               }
               staff: Page(page: 1, perPage: 5) {
                 results: staff(search: $search) {
-                  id name { userPreferred full }
+                  id
+                  name { userPreferred full }
                   image { medium }
                   description(asHtml: false)
                 }
@@ -311,7 +318,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
                     Page(page: $page, perPage: 20) {
                       pageInfo { hasNextPage }
                       results: media(type: ANIME, search: $search, sort: SEARCH_MATCH, isAdult: $isAdult) {
-                        id title { userPreferred romaji english native }
+                        id type title { userPreferred romaji english native }
                         coverImage { medium }
                         format status episodes averageScore popularity trending
                         description(asHtml: false)
@@ -325,7 +332,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
                     Page(page: $page, perPage: 20) {
                       pageInfo { hasNextPage }
                       results: media(type: MANGA, search: $search, sort: SEARCH_MATCH, isAdult: $isAdult) {
-                        id title { userPreferred romaji english native }
+                        id type title { userPreferred romaji english native }
                         coverImage { medium }
                         format status chapters averageScore popularity trending
                         description(asHtml: false)
@@ -379,6 +386,8 @@ export default function GlobalSearch({ visible, onClose }: Props) {
         }
       };
 
+      console.log('GlobalSearch: Making API request with query:', searchQuery, 'filter:', currentFilter, 'page:', pageNum);
+
       const response = await axios.post(
         ANILIST_GRAPHQL_ENDPOINT,
         {
@@ -393,8 +402,11 @@ export default function GlobalSearch({ visible, onClose }: Props) {
       );
 
       if (response.data.errors) {
+        console.error('GlobalSearch: GraphQL errors:', response.data.errors);
         throw new Error(response.data.errors[0]?.message || 'Error fetching results');
       }
+
+      console.log('GlobalSearch: API response received successfully');
 
       if (currentFilter === 'ALL') {
         const sections: SearchSection[] = [];
@@ -441,51 +453,24 @@ export default function GlobalSearch({ visible, onClose }: Props) {
             data: response.data.data.users.results.map((item: any) => ({
               ...item,
               type: 'USER',
-              name: { userPreferred: item.name }
+              name: { userPreferred: item.name },
+              description: item.about
             }))
           });
         }
         
+        console.log('GlobalSearch: Processed sections:', sections.length);
         setResults(sections);
         setHasNextPage(false);
       } else {
-        console.log('Filtered search response:', response.data.data); // Debug log
-        console.log('Current active filter:', currentFilter); // Debug log
+        const newResults = response.data.data.Page.results.map((item: any) => ({
+            ...item,
+            type: currentFilter,
+            description: item.description || item.about,
+            name: item.name?.full ? item.name : { userPreferred: item.name }
+        }));
         
-        const newResults = response.data.data.Page.results.map((item: any) => {
-          switch (currentFilter) {
-            case 'ANIME':
-            case 'MANGA':
-              return {
-                ...item,
-                type: currentFilter,
-                title: item.title,
-                coverImage: item.coverImage,
-                description: item.description
-              };
-            case 'CHARACTER':
-            case 'STAFF':
-              return {
-                ...item,
-                type: currentFilter,
-                name: item.name,
-                image: item.image,
-                description: item.description
-              };
-            case 'USER':
-              return {
-                ...item,
-                type: currentFilter,
-                name: { userPreferred: item.name },
-                avatar: item.avatar || {},
-                description: item.about
-              };
-            default:
-              return item;
-          }
-        });
-        
-        console.log('Mapped results:', newResults); // Debug log
+        console.log('GlobalSearch: Processed results count:', newResults.length);
         
         setResults(prevResults => {
           if (pageNum === 1) {
@@ -507,7 +492,13 @@ export default function GlobalSearch({ visible, onClose }: Props) {
       }
 
     } catch (error: any) {
-      console.error('Search error:', error);
+      console.error('GlobalSearch: Search error occurred');
+      console.error('GlobalSearch: Error type:', typeof error);
+      console.error('GlobalSearch: Error message:', error.message);
+      console.error('GlobalSearch: Error response status:', error.response?.status);
+      console.error('GlobalSearch: Error response data:', error.response?.data);
+      console.error('GlobalSearch: Full error object:', error);
+      
       setError(error.message || 'Failed to fetch results');
       if (pageNum === 1) {
         setResults([]);
@@ -516,7 +507,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
       setLoading(false);
       setIsLoadingMore(false);
     }
-  }, []);
+  }, [settings?.displayAdultContent]);
 
   const debouncedSearch = useCallback(
     debounce((text: string) => {
@@ -541,7 +532,6 @@ export default function GlobalSearch({ visible, onClose }: Props) {
     setResults([]);
     setHasNextPage(true);
     
-    // Only search if there's a query
     if (query.trim()) {
       searchAnilist(query, 1, false);
     }
@@ -557,9 +547,6 @@ export default function GlobalSearch({ visible, onClose }: Props) {
   };
 
   const getResultName = (result: GlobalSearchResult) => {
-    if (result.type === 'USER') {
-        return result.name?.userPreferred || 'Unknown User';
-    }
     if (result.title?.userPreferred) return result.title.userPreferred;
     if (result.name?.userPreferred) return result.name.userPreferred;
     if (result.name?.full) return result.name.full;
@@ -621,7 +608,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
       visible={showFilterModal}
       onRequestClose={() => setShowFilterModal(false)}
       transparent={true}
-      animationType="slide"
+      animationType="fade"
     >
       <TouchableOpacity 
         style={styles.modalOverlay}
@@ -670,6 +657,58 @@ export default function GlobalSearch({ visible, onClose }: Props) {
     setIsLoadingMore(true);
     searchAnilist(query, page + 1, true);
   };
+  
+  const renderResultItem = ({ item }: { item: GlobalSearchResult }) => (
+    <TouchableOpacity
+      style={[
+        styles.resultItem,
+        {
+          backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
+          marginBottom: 8,
+        }
+      ]}
+      onPress={() => navigateToResult(item)}
+    >
+      {getResultImage(item) ? (
+        <ExpoImage
+          source={{ uri: getResultImage(item)! }}
+          style={styles.resultImage}
+          contentFit="cover"
+          transition={200}
+        />
+      ) : (
+        <View style={[styles.imagePlaceholder, { backgroundColor: currentTheme.colors.border }]}>
+          <FontAwesome5 name={getTypeIcon(item.type)} size={14} color={currentTheme.colors.textSecondary} />
+        </View>
+      )}
+      <View style={styles.resultInfo}>
+        <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
+          {getResultName(item)}
+        </Text>
+        {item.description && (
+          <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
+            {item.description.replace(/<[^>]*>/g, '')}
+          </Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderEmptyComponent = () => (
+    query.length > 0 ? (
+      <View style={styles.noResults}>
+        <FontAwesome5 
+          name="search" 
+          size={24} 
+          color={currentTheme.colors.textSecondary}
+          style={{ marginBottom: 8, opacity: 0.5 }}
+        />
+        <Text style={[styles.noResultsText, { color: currentTheme.colors.textSecondary }]}>
+          No results found for "{query}"
+        </Text>
+      </View>
+    ) : null
+  );
 
   if (!visible) return null;
 
@@ -741,123 +780,49 @@ export default function GlobalSearch({ visible, onClose }: Props) {
               <FontAwesome5 name="times" size={18} color={isDarkMode ? '#FFFFFF' : '#000000'} />
             </TouchableOpacity>
           </View>
-
+          
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={currentTheme.colors.primary} />
             </View>
+          ) : error ? (
+            <View style={styles.noResults}>
+                <Text style={[styles.errorText, { color: currentTheme.colors.error || 'red' }]}>{error}</Text>
+            </View>
+          ) : activeFilter === 'ALL' ? (
+            <SectionList
+              sections={results}
+              style={styles.results}
+              keyboardShouldPersistTaps="handled"
+              keyExtractor={(item) => `${item.type}-${item.id}`}
+              renderItem={renderResultItem}
+              renderSectionHeader={({ section: { title } }) => (
+                <Text style={[styles.sectionTitle, { color: currentTheme.colors.textSecondary }]}>
+                  {title}
+                </Text>
+              )}
+              ListEmptyComponent={renderEmptyComponent}
+            />
           ) : (
             <FlatList
-              data={activeFilter === 'ALL' ? [] : results[0]?.data || []}
-              keyboardShouldPersistTaps="handled"
+              data={results[0]?.data || []}
               style={styles.results}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  key={`${item.type}-${item.id}`}
-                  style={[
-                    styles.resultItem,
-                    {
-                      backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-                      marginBottom: 8,
-                    }
-                  ]}
-                  onPress={() => navigateToResult(item)}
-                >
-                  {getResultImage(item) ? (
-                    <ExpoImage
-                      source={{ uri: getResultImage(item)! }}
-                      style={styles.resultImage}
-                      contentFit="cover"
-                      transition={200}
-                    />
-                  ) : (
-                    <View style={[styles.imagePlaceholder, { backgroundColor: currentTheme.colors.border }]}>
-                      <FontAwesome5 name={getTypeIcon(item.type)} size={14} color={currentTheme.colors.textSecondary} />
-                    </View>
-                  )}
-                  <View style={styles.resultInfo}>
-                    <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
-                      {getResultName(item)}
-                    </Text>
-                    {item.description && (
-                      <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
-                        {item.description.replace(/<[^>]*>/g, '')}
-                      </Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-              ListHeaderComponent={activeFilter === 'ALL' ? (
-                <ScrollView>
-                  {results.map((section) => (
-                    <View key={section.title} style={styles.section}>
-                      <Text style={[styles.sectionTitle, { color: currentTheme.colors.textSecondary }]}>
-                        {section.title}
-                      </Text>
-                      {section.data.map((result) => (
-                        <TouchableOpacity
-                          key={`${result.type}-${result.id}`}
-                          style={[
-                            styles.resultItem,
-                            {
-                              backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-                              marginBottom: 8,
-                            }
-                          ]}
-                          onPress={() => navigateToResult(result)}
-                        >
-                          {getResultImage(result) ? (
-                            <ExpoImage
-                              source={{ uri: getResultImage(result)! }}
-                              style={styles.resultImage}
-                              contentFit="cover"
-                              transition={200}
-                            />
-                          ) : (
-                            <View style={[styles.imagePlaceholder, { backgroundColor: currentTheme.colors.border }]}>
-                              <FontAwesome5 name={getTypeIcon(result.type)} size={14} color={currentTheme.colors.textSecondary} />
-                            </View>
-                          )}
-                          <View style={styles.resultInfo}>
-                            <Text style={[styles.resultName, { color: currentTheme.colors.text }]} numberOfLines={2}>
-                              {getResultName(result)}
-                            </Text>
-                            {result.description && (
-                              <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
-                                {result.description.replace(/<[^>]*>/g, '')}
-                              </Text>
-                            )}
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : null}
-              ListEmptyComponent={!loading && query.length > 0 && results.length === 0 ? (
-                <View style={styles.noResults}>
-                  <FontAwesome5 
-                    name="search" 
-                    size={24} 
-                    color={currentTheme.colors.textSecondary}
-                    style={{ marginBottom: 8, opacity: 0.5 }}
-                  />
-                  <Text style={[styles.noResultsText, { color: currentTheme.colors.textSecondary }]}>
-                    No results found
-                  </Text>
-                </View>
-              ) : null}
+              keyboardShouldPersistTaps="handled"
+              keyExtractor={(item) => `${item.type}-${item.id}`}
+              renderItem={renderResultItem}
+              ListEmptyComponent={renderEmptyComponent}
               onEndReached={loadMore}
               onEndReachedThreshold={0.5}
-              ListFooterComponent={() => (
+              ListFooterComponent={() =>
                 isLoadingMore ? (
                   <View style={{ padding: 20 }}>
                     <ActivityIndicator size="small" color={currentTheme.colors.primary} />
                   </View>
                 ) : null
-              )}
+              }
             />
           )}
+
         </View>
       </Modal>
       <FilterModal />
