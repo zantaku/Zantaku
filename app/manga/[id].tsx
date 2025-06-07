@@ -16,6 +16,8 @@ import * as Haptics from 'expo-haptics';
 import ChapterList from '../../components/chapterlist';
 import { Menu, MenuItem } from 'react-native-material-menu';
 import ListEditorModal from '../../components/ListEditorModal';
+import SuccessToast from '../../components/SuccessToast';
+import ErrorToast from '../../components/ErrorToast';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import NovelVolumeList from '../../components/NovelVolumeList';
 import { getRatingColor, getStatusColor, formatScore } from '../../utils/colors';
@@ -217,6 +219,9 @@ export default function MangaDetailsScreen() {
   const [pendingNextChapter, setPendingNextChapter] = useState(false);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('Failed to load manga details');
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   useEffect(() => {
     // Initial fetch
@@ -755,9 +760,20 @@ export default function MangaDetailsScreen() {
           ...prev,
           mediaListEntry: response.data.data.SaveMediaListEntry
         } : null);
+        
+        // Show success toast
+        setToastMessage('List entry updated successfully!');
+        setShowSuccessToast(true);
       }
     } catch (error) {
       console.error('Error updating media list entry:', error);
+      
+      // Show error toast
+      setToastMessage('Failed to update list entry. Please try again.');
+      setShowErrorToast(true);
+      
+      // Re-throw the error so the modal can handle it
+      throw error;
     }
   };
 
@@ -1219,6 +1235,21 @@ export default function MangaDetailsScreen() {
         mangaId={id as string}
         countryOfOrigin={details?.countryOfOrigin}
       />
+
+      {/* Toast Notifications */}
+      {showSuccessToast && (
+        <SuccessToast 
+          message={toastMessage}
+          onDismiss={() => setShowSuccessToast(false)}
+        />
+      )}
+
+      {showErrorToast && (
+        <ErrorToast 
+          message={toastMessage}
+          onDismiss={() => setShowErrorToast(false)}
+        />
+      )}
     </View>
   );
 }

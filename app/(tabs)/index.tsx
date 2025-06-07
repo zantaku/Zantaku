@@ -187,6 +187,11 @@ const MediaCard = memo(({ item, onPress, type }: {
           source={{ uri: item.coverImage.large }}
           style={styles.mediaCover}
         />
+        {item.status === 'PAUSED' && (
+          <View style={styles.pausedIndicator}>
+            <FontAwesome5 name="pause" size={12} color="#fff" />
+          </View>
+        )}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.9)']}
           style={styles.mediaCoverOverlay}
@@ -202,6 +207,14 @@ const MediaCard = memo(({ item, onPress, type }: {
         <Text style={[styles.mediaTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
           {item.title.userPreferred}
         </Text>
+        {item.status === 'PAUSED' && (
+          <View style={styles.pausedStatusContainer}>
+            <FontAwesome5 name="pause-circle" size={10} color="#F39C12" />
+            <Text style={[styles.pausedStatusText, { color: '#F39C12' }]}>
+              Paused
+            </Text>
+          </View>
+        )}
         {item.score !== undefined && item.score > 0 && (
           <View style={styles.scoreContainer}>
             <FontAwesome5 name="star" size={10} color="#FFD700" solid />
@@ -452,7 +465,7 @@ export default function TabsIndex() {
         {
           id: 'watching',
           title: 'Continue Watching',
-          subtitle: 'Currently watching anime',
+          subtitle: 'Currently watching & paused anime',
           icon: 'play-circle',
           visible: true,
           order: 0,
@@ -460,7 +473,7 @@ export default function TabsIndex() {
         {
           id: 'reading',
           title: 'Continue Reading',
-          subtitle: 'Currently reading manga',
+          subtitle: 'Currently reading & paused manga',
           icon: 'book-reader',
           visible: true,
           order: 1,
@@ -539,7 +552,7 @@ export default function TabsIndex() {
         {
           id: 'watching',
           title: 'Continue Watching',
-          subtitle: 'Currently watching anime',
+          subtitle: 'Currently watching & paused anime',
           icon: 'play-circle',
           visible: true,
           order: 0,
@@ -547,7 +560,7 @@ export default function TabsIndex() {
         {
           id: 'reading',
           title: 'Continue Reading',
-          subtitle: 'Currently reading manga',
+          subtitle: 'Currently reading & paused manga',
           icon: 'book-reader',
           visible: true,
           order: 1,
@@ -574,9 +587,9 @@ export default function TabsIndex() {
         const response = await axios.post(
           ANILIST_GRAPHQL_ENDPOINT,
           {
-            query: `
+                          query: `
               query ($userId: Int) {
-                MediaListCollection(userId: $userId, type: ANIME, status_in: [CURRENT]) {
+                MediaListCollection(userId: $userId, type: ANIME, status_in: [CURRENT, PAUSED]) {
                   lists {
                     status
                     entries {
@@ -659,7 +672,7 @@ export default function TabsIndex() {
                     }
                   }
                 }
-                MediaListCollection2: MediaListCollection(userId: $userId, type: MANGA, status: CURRENT) {
+                MediaListCollection2: MediaListCollection(userId: $userId, type: MANGA, status_in: [CURRENT, PAUSED]) {
                   lists {
                     entries {
                       id
@@ -1072,7 +1085,7 @@ export default function TabsIndex() {
     {
       id: 'watching',
       title: 'Continue Watching',
-      subtitle: 'Continue your journey',
+      subtitle: 'Continue your journey & paused anime',
       icon: 'play-circle',
       iconColors: ['#FF6B6B', '#ee5253'],
       items: mediaList.watching,
@@ -1081,7 +1094,7 @@ export default function TabsIndex() {
     {
       id: 'reading',
       title: 'Continue Reading',
-      subtitle: 'Pick up where you left off',
+      subtitle: 'Pick up where you left off & paused manga',
       icon: 'book-reader',
       iconColors: ['#4ECDC4', '#45B7AF'],
       items: mediaList.reading,
@@ -1426,6 +1439,28 @@ const styles = StyleSheet.create({
   },
   scoreText: {
     fontSize: 12,
+    fontWeight: '600',
+  },
+  pausedIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(243, 156, 18, 0.9)',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  pausedStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  pausedStatusText: {
+    fontSize: 11,
     fontWeight: '600',
   },
   newsSection: {

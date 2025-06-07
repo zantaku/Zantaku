@@ -22,6 +22,7 @@ import { useOrientation } from '../hooks/useOrientation';
 import { useIncognito } from '../hooks/useIncognito';
 import { useTheme } from '../hooks/useTheme';
 import ChapterSourcesModal from '../components/ChapterSourcesModal';
+import { debounce, throttle } from 'lodash';
 
 const WINDOW_HEIGHT = Dimensions.get('window').height;
 const WINDOW_WIDTH = Dimensions.get('window').width;
@@ -1357,60 +1358,133 @@ export default function ReaderScreen() {
 
 
 
-  // Load images progressively based on current page
-  const loadImagesAroundCurrentPage = useCallback(async (pageIndex: number) => {
+  // Load ALL images aggressively - no progressive loading
+  const loadAllImages = useCallback(async () => {
     if (images.length === 0) return;
     
     const indicesToLoad: number[] = [];
     
-    // Load current page and buffer around it
-    for (let i = Math.max(0, pageIndex - PRELOAD_BUFFER); 
-         i <= Math.min(images.length - 1, pageIndex + PRELOAD_BUFFER); 
-         i++) {
+    // Load ALL images, not just around current page
+    for (let i = 0; i < images.length; i++) {
       if (!loadedImageIndices.has(i)) {
         indicesToLoad.push(i);
       }
     }
     
     if (indicesToLoad.length > 0) {
-      // Create a local batch loading function to avoid dependency issues
-      const loadBatch = async (indices: number[]) => {
-        console.log(`[Reader] Loading batch of ${indices.length} images:`, indices);
-        
-        const loadPromises = indices.map(async (index) => {
-          if (loadedImageIndices.has(index) || index >= images.length) {
-            return;
-          }
-          
-          try {
-            // Preload the image using ExpoImage prefetch
-            const imageUrl = images[index];
-            const headers = dynamicImageHeaders[index] || imageHeaders;
-            
-            await ExpoImage.prefetch(imageUrl, {
-              headers,
-              cachePolicy: 'memory-disk'
-            });
-            
-            setLoadedImageIndices(prev => new Set([...prev, index]));
-            console.log(`[Reader] Successfully preloaded image ${index + 1}`);
-          } catch (error) {
-            if (error instanceof Error) {
-              console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
-            }
-          }
-        });
-        
-        await Promise.allSettled(loadPromises);
-        
-        // Update loading progress
-        const totalLoaded = loadedImageIndices.size + indices.filter(i => loadedImageIndices.has(i)).length;
-        setLoadingProgress((totalLoaded / images.length) * 100);
-      };
+      console.log(`[Reader] Loading ALL ${indicesToLoad.length} remaining images aggressively`);
       
-      await loadBatch(indicesToLoad);
+      // Load all images in parallel - no batching
+      const loadPromises = indicesToLoad.map(async (index) => {
+        if (loadedImageIndices.has(index) || index >= images.length) {
+          return;
+        }
+        
+        try {
+          // Preload the image using ExpoImage prefetch
+          const imageUrl = images[index];
+          const headers = dynamicImageHeaders[index] || imageHeaders;
+          
+          await ExpoImage.prefetch(imageUrl, {
+            headers,
+            cachePolicy: 'memory-disk'
+          });
+          
+          setLoadedImageIndices(prev => new Set([...prev, index]));
+          console.log(`[Reader] Successfully preloaded image ${index + 1}`);
+        } catch (error) {
+          if (error instanceof Error) {
+            console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
+          }
+        }
+      });
+      
+      await Promise.allSettled(loadPromises);
+      
+      // Update loading progress
+      setLoadingProgress(100);
+      console.log(`[Reader] Finished loading all ${images.length} images`);
     }
   }, [images, dynamicImageHeaders, imageHeaders, loadedImageIndices]);
+
+  // Trigger aggressive loading on any scroll
+  const triggerImageLoading = useCallback(() => {
+    loadAllImages();
+  }, [loadAllImages]);
+
+  // Direct scroll handler for immediate response
+  const directScrollHandler = useCallback((event: any) => {
+      const currentTime = Date.now();
+      const currentOffset = event.nativeEvent.contentOffset.x;
+      const timeDiff = currentTime - lastTimeRef.current;
+      const offsetDiff = Math.abs(currentOffset - lastOffsetRef.current);
+      
+      // Calculate velocity for both normal use and debug info
+      scrollVelocityRef.current = offsetDiff / (timeDiff || 1);
+      const isFast = Math.abs(scrollVelocityRef.current) > (WINDOW_WIDTH * 2) / 1000;
+      setIsScrollingFast(isFast);
+      
+      // Update debug velocity info
+      if (debugMode && debugGestures) {
+        setDebugVelocity({
+          x: scrollVelocityRef.current,
+          y: 0
+        });
+      }
+      
+      lastTimeRef.current = currentTime;
+      lastOffsetRef.current = currentOffset;
+
+      const offset = event.nativeEvent.contentOffset.x;
+      
+      // Calculate the current page based on scroll position
+      let currentIndex = Math.round(offset / WINDOW_WIDTH);
+      
+      // Convert FlatList index to real page number
+      let newPage;
+      if (readingDirection === 'rtl') {
+        // In RTL mode, convert the visual index back to the real index
+        newPage = images.length - currentIndex;
+      } else {
+        // In LTR mode, page 1 is at the beginning
+        newPage = currentIndex + 1;
+      }
+      
+      // Add debug info for page calculation (only in debug mode)
+      if (debugMode && debugLevel >= 2) {
+        console.log(`[Scroll] Offset: ${offset}, Index: ${currentIndex}, Page: ${newPage}, Direction: ${readingDirection}, Velocity: ${scrollVelocityRef.current}`);
+      }
+
+      // Update current page if changed
+      if (newPage !== currentPage && newPage > 0 && newPage <= images.length) {
+        setCurrentPage(newPage);
+        if (Platform.OS === 'ios') {
+          Haptics.selectionAsync();
+        }
+        
+                // Aggressive loading: Load ALL images immediately
+        triggerImageLoading();
+      }
+    }, [
+      currentPage,
+      images.length,
+      readingDirection,
+      debugMode,
+      debugGestures,
+      debugLevel,
+      triggerImageLoading
+    ]);
+
+  // Update the handleScroll function to use direct handler
+  const handleScroll = useCallback((event: any) => {
+    // Remove the excessive console.log that was causing log spam
+    // Only log in debug mode level 3+
+    if (debugMode && debugLevel >= 3) {
+      console.log("📜 Scroll event triggered");
+    }
+    
+    directScrollHandler(event);
+  }, [directScrollHandler, debugMode, debugLevel]);
 
   useEffect(() => {
     // Ensure this runs only once when the component mounts
@@ -1504,10 +1578,16 @@ export default function ReaderScreen() {
           setLoadingProgress((indices.length / imageUrls.length) * 100);
         };
         
+        // Load ALL images immediately, not just initial batch
         setTimeout(async () => {
           await loadInitialBatch(initialIndices);
           setIsInitialLoading(false);
           console.log(`[Reader] Initial loading complete`);
+          
+          // Trigger loading of ALL remaining images
+          setTimeout(() => {
+            loadAllImages();
+          }, 500);
         }, 100);
         
       } catch (err) {
@@ -2821,72 +2901,6 @@ export default function ReaderScreen() {
     router.back();
   }, [router, showNotificationWithAnimation]);
 
-  // Update the handleScroll function to include the new swipe logic
-  const handleScroll = useCallback((event: any) => {
-    console.log("📜 Scroll event triggered"); // Debug log to check if scroll events are firing
-    
-    const currentTime = Date.now();
-    const currentOffset = event.nativeEvent.contentOffset.x;
-    const timeDiff = currentTime - lastTimeRef.current;
-    const offsetDiff = Math.abs(currentOffset - lastOffsetRef.current);
-    
-    // Calculate velocity for both normal use and debug info
-    scrollVelocityRef.current = offsetDiff / (timeDiff || 1);
-    const isFast = Math.abs(scrollVelocityRef.current) > (WINDOW_WIDTH * 2) / 1000;
-    setIsScrollingFast(isFast);
-    
-    // Update debug velocity info
-    if (debugMode && debugGestures) {
-      setDebugVelocity({
-        x: scrollVelocityRef.current,
-        y: 0
-      });
-    }
-    
-    lastTimeRef.current = currentTime;
-    lastOffsetRef.current = currentOffset;
-
-    const offset = event.nativeEvent.contentOffset.x;
-    const maxOffset = (images.length - 1) * WINDOW_WIDTH;
-    
-    // Calculate the current page based on scroll position
-    let currentIndex = Math.round(offset / WINDOW_WIDTH);
-    
-    // Convert FlatList index to real page number
-    let newPage;
-    if (readingDirection === 'rtl') {
-      // In RTL mode, convert the visual index back to the real index
-      newPage = images.length - currentIndex;
-    } else {
-      // In LTR mode, page 1 is at the beginning
-      newPage = currentIndex + 1;
-    }
-    
-    // Add debug info for page calculation
-    if (debugMode && debugLevel >= 2) {
-      console.log(`[Scroll] Offset: ${offset}, Index: ${currentIndex}, Page: ${newPage}, Direction: ${readingDirection}, Velocity: ${scrollVelocityRef.current}`);
-    }
-
-    // Update current page if changed
-    if (newPage !== currentPage && newPage > 0 && newPage <= images.length) {
-      setCurrentPage(newPage);
-      if (Platform.OS === 'ios') {
-        Haptics.selectionAsync();
-      }
-      
-      // Progressive loading: Load images around the current page
-      const pageIndex = newPage - 1; // Convert to 0-based index
-      loadImagesAroundCurrentPage(pageIndex);
-    }
-  }, [
-    currentPage,
-    images.length,
-    readingDirection,
-    debugMode,
-    debugGestures,
-    debugLevel
-  ]);
-
   const handleImageLoadSuccess = useCallback((index: number) => {
     setLoadingStates(prev => ({ ...prev, [index]: false }));
     
@@ -3078,10 +3092,8 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     // Get the specific headers for this image, or use default headers
     const specificHeaders = dynamicImageHeaders[index] || imageHeaders;
     
-    // Check if this image should be loaded based on progressive loading
-    const shouldLoad = loadedImageIndices.has(index) || 
-                      Math.abs(index - (currentPage - 1)) <= PRELOAD_BUFFER ||
-                      index < INITIAL_LOAD_COUNT;
+    // Always load all images - no progressive loading restrictions
+    const shouldLoad = true;
     
     return (
       <View style={styles.pageContainer}>
@@ -3114,6 +3126,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
   }, [
     images.length,
     dynamicImageHeaders,
+    imageHeaders,
     handleZoomToggle,
     handleImageLoadStart,
     handleImageLoadSuccess,
@@ -3222,8 +3235,8 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       const newDirection: 'ltr' | 'rtl' = prev === 'ltr' ? 'rtl' : 'ltr';
       
       // For debugging
-      console.log(`Switching reading direction from ${prev} to ${newDirection}`);
-      console.log(`Current page before switch: ${currentPageBeforeSwitch}/${images.length}`);
+      console.log(`[Reader] Switching reading direction from ${prev} to ${newDirection}`);
+      console.log(`[Reader] Current page before switch: ${currentPageBeforeSwitch}/${images.length}`);
       
       // Calculate the FlatList index to maintain the same visual page
       // In RTL mode, index 0 shows the last page (images.length)
@@ -3240,20 +3253,41 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
         indexToScrollTo = currentPageBeforeSwitch - 1;
       }
       
-      console.log(`New direction: ${newDirection}, Index to scroll to: ${indexToScrollTo}`);
+      console.log(`[Reader] New direction: ${newDirection}, Index to scroll to: ${indexToScrollTo}`);
       
-      // Scroll to the correct index after a small delay to allow state update
+      // Force re-load all images for the new direction
+      console.log(`[Reader] Force reloading all images for ${newDirection} direction`);
+      // Reset loaded image indices to force re-rendering
+      setLoadedImageIndices(new Set());
+      // Trigger aggressive loading
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: indexToScrollTo,
-          animated: false,
-          viewPosition: 0
-        });
-      }, 10);
+        loadAllImages();
+      }, 50);
+      
+      // Scroll to the correct index after a longer delay to allow FlatList re-render
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToIndex({
+            index: Math.max(0, Math.min(indexToScrollTo, images.length - 1)),
+            animated: false,
+            viewPosition: 0
+          });
+          console.log(`[Reader] Scrolled to index ${indexToScrollTo} for ${newDirection} direction`);
+        } catch (error) {
+          console.warn(`[Reader] Failed to scroll to index ${indexToScrollTo}:`, error);
+          // Fallback: scroll to offset
+          const screenWidth = Dimensions.get('window').width;
+          const targetOffset = indexToScrollTo * screenWidth;
+          flatListRef.current?.scrollToOffset({
+            offset: targetOffset,
+            animated: false
+          });
+        }
+      }, 100); // Increased delay to allow FlatList key change to take effect
       
       return newDirection;
     });
-  }, [currentPage, images.length]);
+  }, [currentPage, images.length, loadAllImages]);
 
   useEffect(() => {
     // Unlock orientation when component mounts
@@ -3828,6 +3862,11 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     return readingDirection === 'rtl' ? [...images].reverse() : images;
   }, [images, readingDirection]);
 
+  // Create a unique key for FlatList that includes reading direction to force re-render
+  const flatListKey = useMemo(() => {
+    return `${readingDirection}-${images.length}`;
+  }, [readingDirection, images.length]);
+
   // Add a new function to check for next/previous chapters using Katana API
   const checkKatanaChapterNavigation = useCallback(async () => {
     if (!params.mangaId || !params.chapter) return;
@@ -3950,22 +3989,20 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     // Extract numeric part from current chapter for comparison
     const currentChapterNum = parseFloat(String(params.chapter).replace(/[^\d.]/g, ''));
     
-    // Check if we're on the latest chapter by comparing with chapter list
-    const isOnLatestByCount = !isNaN(currentChapterNum) && 
-                             allChapters.length > 0 && 
-                             currentChapterNum >= allChapters.length;
+    // Simple logic: Show Next if current chapter < total chapters, Show Prev if current chapter > 1
+    // If we have chapter list data, use it. Otherwise, show buttons based on API flags as fallback
+    const shouldShowNextButton = allChapters.length > 0 
+      ? (!isNaN(currentChapterNum) && currentChapterNum < allChapters.length)
+      : (params.isLatestChapter !== 'true'); // Fallback to API flag
     
-    // Use API flags if available, otherwise fall back to existing logic
-    const shouldShowNextButton = params.isLatestChapter !== 'true' && !isOnLatestByCount;
-    const shouldShowPreviousButton = params.isFirstChapter !== 'true';
+    const shouldShowPreviousButton = !isNaN(currentChapterNum) 
+      ? (currentChapterNum > 1)
+      : (params.isFirstChapter !== 'true'); // Fallback to API flag
     
     // DEBUG: Log the navigation button logic
     console.log('[Reader] Navigation button logic:', {
-      'params.isLatestChapter': params.isLatestChapter,
-      'params.isFirstChapter': params.isFirstChapter,
       'currentChapterNum': currentChapterNum,
       'totalChapters': allChapters.length,
-      'isOnLatestByCount': isOnLatestByCount,
       'shouldShowNextButton': shouldShowNextButton,
       'shouldShowPreviousButton': shouldShowPreviousButton,
       'chapter': params.chapter,
@@ -4041,18 +4078,21 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       
       <Reanimated.View style={{ flex: 1, zIndex: 1 }}>
         <FlatList
+          key={flatListKey}
           ref={flatListRef}
           data={displayImages}
           renderItem={renderItem}
-          keyExtractor={(item, index) => `page-${index}`}
+          keyExtractor={(item, index) => `${readingDirection}-${item}-${index}`}
           horizontal
           pagingEnabled={!isZoomed}
           scrollEnabled={!isZoomed}
           showsHorizontalScrollIndicator={false}
           getItemLayout={getItemLayout}
-          initialNumToRender={INITIAL_RENDER_COUNT}
-          maxToRenderPerBatch={2}
-          windowSize={5}
+          initialNumToRender={10}
+          maxToRenderPerBatch={5}
+          windowSize={10}
+          removeClippedSubviews={false}
+          updateCellsBatchingPeriod={50}
           onScroll={isZoomed ? undefined : handleScroll}
           scrollEventThrottle={16}
           onTouchMove={handleTouchMove}
@@ -4062,6 +4102,8 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
             isOverScrolling && styles.overScrolling
           ]}
           onLayout={handleImageLayout}
+          disableIntervalMomentum={true}
+          decelerationRate="fast"
         />
       </Reanimated.View>
 

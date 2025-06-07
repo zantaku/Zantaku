@@ -38,7 +38,7 @@ const DEFAULT_SECTIONS: Section[] = [
   {
     id: 'watching',
     title: 'Continue Watching',
-    subtitle: 'Currently watching anime',
+    subtitle: 'Currently watching & paused anime',
     icon: 'play-circle',
     visible: true,
     order: 0,
@@ -46,7 +46,7 @@ const DEFAULT_SECTIONS: Section[] = [
   {
     id: 'reading',
     title: 'Continue Reading',
-    subtitle: 'Currently reading manga',
+    subtitle: 'Currently reading & paused manga',
     icon: 'book-reader',
     visible: true,
     order: 1,

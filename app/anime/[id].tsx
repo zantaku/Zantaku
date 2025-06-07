@@ -17,6 +17,8 @@ import * as Haptics from 'expo-haptics';
 import WatchTab from '../../components/WatchTab';
 import { Menu, MenuItem } from 'react-native-material-menu';
 import ListEditorModal from '../../components/ListEditorModal';
+import SuccessToast from '../../components/SuccessToast';
+import ErrorToast from '../../components/ErrorToast';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { getRatingColor, getStatusColor } from '../../utils/colors';
 import { WebView } from 'react-native-webview';
@@ -308,6 +310,9 @@ export default function AnimeDetailsScreen() {
   const [watchOrder, setWatchOrder] = useState<WatchOrderItem[]>([]);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   // Add snapPoints for bottom sheet
   const snapPoints = useMemo(() => ['70%'], []);
@@ -1397,9 +1402,20 @@ export default function AnimeDetailsScreen() {
           ...prev,
           mediaListEntry: response.data.data.SaveMediaListEntry
         } : null);
+        
+        // Show success toast
+        setToastMessage('List entry updated successfully!');
+        setShowSuccessToast(true);
       }
     } catch (error) {
       console.error('Error updating media list entry:', error);
+      
+      // Show error toast
+      setToastMessage('Failed to update list entry. Please try again.');
+      setShowErrorToast(true);
+      
+      // Re-throw the error so the modal can handle it
+      throw error;
     }
   };
 
@@ -2322,6 +2338,21 @@ export default function AnimeDetailsScreen() {
             }
           }}
           totalEpisodes={details?.episodes}
+        />
+      )}
+
+      {/* Toast Notifications */}
+      {showSuccessToast && (
+        <SuccessToast 
+          message={toastMessage}
+          onDismiss={() => setShowSuccessToast(false)}
+        />
+      )}
+
+      {showErrorToast && (
+        <ErrorToast 
+          message={toastMessage}
+          onDismiss={() => setShowErrorToast(false)}
         />
       )}
       
