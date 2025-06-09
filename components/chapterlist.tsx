@@ -6,6 +6,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { FontAwesome5 } from '@expo/vector-icons';
 import ChapterSourcesModal from './ChapterSourcesModal';
 import CorrectMangaSearchModal from './CorrectMangaSearchModal';
+import { ChapterManager } from '../utils/ChapterManager';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
 import { Chapter, Provider } from '../api/proxy/providers/manga';
@@ -208,6 +209,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     const [currentMangaTitle, setCurrentMangaTitle] = useState<string>('');
     const [showProviderDropdown, setShowProviderDropdown] = useState(false);
     const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
+    const [chapterManager, setChapterManager] = useState<ChapterManager | undefined>(undefined);
 
     const fetchAniListProgress = useCallback(async () => {
         if (!anilistId || isIncognito) return;
@@ -227,47 +229,72 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         setError(null);
         setChapters([]);
         
-        const titleToSearch = mangaTitle.userPreferred || mangaTitle.english;
+        // Create a list of title variations to try, prioritizing Japanese/romaji titles
+        const titleVariations = [
+            mangaTitle.romaji,
+            mangaTitle.native,
+            mangaTitle.userPreferred,
+            mangaTitle.english
+        ].filter((title): title is string => Boolean(title)); // Remove null/undefined values and ensure type safety
 
-        if (!titleToSearch) {
+        if (titleVariations.length === 0) {
             setError("Manga title is missing.");
             setIsLoading(false);
             return;
         }
 
-        try {
-            logDebug(`Searching for "${titleToSearch}" with preferences:`, prefs);
-            
-            // Step 1: Search for the manga
-            const { results, provider: successfulProvider } = await MangaProviderService.searchManga(titleToSearch, prefs);
-            
-            if (results.length === 0) {
-                throw new Error("No manga found matching the search criteria.");
+        let lastError: Error | null = null;
+
+        // Try each title variation until we find results
+        for (const titleToSearch of titleVariations) {
+            try {
+                logDebug(`Searching for "${titleToSearch}" with preferences:`, prefs);
+                
+                // Step 1: Search for the manga
+                const { results, provider: successfulProvider } = await MangaProviderService.searchManga(titleToSearch, prefs);
+                
+                if (results.length === 0) {
+                    logDebug(`No results found for "${titleToSearch}", trying next variation...`);
+                    continue;
+                }
+
+                // Step 2: Find the best match
+                const bestMatch = results.find(r => r.title.toLowerCase() === titleToSearch.toLowerCase()) || results[0];
+                setInternalMangaId(bestMatch.id);
+                setProvider(successfulProvider);
+                
+                logDebug(`Found manga: ${bestMatch.title} (ID: ${bestMatch.id}) from ${successfulProvider} using title: "${titleToSearch}"`);
+
+                // Step 3: Get chapters for the manga
+                const chapters = await MangaProviderService.getChapters(bestMatch.id, successfulProvider, coverImage);
+                
+                if (chapters.length === 0) {
+                    logDebug(`Manga found but no chapters available for "${titleToSearch}", trying next variation...`);
+                    continue;
+                }
+
+                setChapters(chapters);
+                
+                // Create ChapterManager for navigation
+                const manager = new ChapterManager(chapters, successfulProvider, bestMatch.id);
+                setChapterManager(manager);
+                logDebug(`Created ChapterManager with ${chapters.length} chapters from ${successfulProvider}`);
+                
+                logDebug(`Successfully loaded ${chapters.length} chapters from ${successfulProvider} using title: "${titleToSearch}"`);
+                setIsLoading(false);
+                return; // Success! Exit the function
+
+            } catch (error: any) {
+                logError(`Failed to search for "${titleToSearch}":`, error);
+                lastError = error;
+                continue; // Try next title variation
             }
-
-            // Step 2: Find the best match
-            const bestMatch = results.find(r => r.title.toLowerCase() === titleToSearch.toLowerCase()) || results[0];
-            setInternalMangaId(bestMatch.id);
-            setProvider(successfulProvider);
-            
-            logDebug(`Found manga: ${bestMatch.title} (ID: ${bestMatch.id}) from ${successfulProvider}`);
-
-            // Step 3: Get chapters for the manga
-            const chapters = await MangaProviderService.getChapters(bestMatch.id, successfulProvider, coverImage);
-            
-            if (chapters.length === 0) {
-                throw new Error(`Manga found on ${successfulProvider}, but no chapters are available.`);
-            }
-
-            setChapters(chapters);
-            logDebug(`Successfully loaded ${chapters.length} chapters from ${successfulProvider}`);
-
-        } catch (error: any) {
-            logError('Failed to load chapters:', error);
-            const errorMessage = MangaProviderService.getProviderErrorMessage(prefs.defaultProvider, prefs.autoSelectSource);
-            setError(errorMessage);
         }
 
+        // If we get here, all title variations failed
+        logError('Failed to load chapters with any title variation:', lastError);
+        const errorMessage = `Could not find manga with any of the available titles: ${titleVariations.join(', ')}. ${MangaProviderService.getProviderErrorMessage(prefs.defaultProvider, prefs.autoSelectSource)}`;
+        setError(errorMessage);
         setIsLoading(false);
     }, [mangaTitle, coverImage]);
 
@@ -292,10 +319,23 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     useEffect(() => {
         logDebug(`Processing chapter ranges - chapters.length: ${chapters.length}, isNewestFirst: ${isNewestFirst}, activeTab: ${activeTab}`);
         
-        const sorted = [...chapters].sort((a, b) => (isNewestFirst ? parseFloat(b.number) : parseFloat(a.number)) - (isNewestFirst ? parseFloat(a.number) : parseFloat(b.number)));
+        // First sort chapters by number to create consistent ranges
+        const sortedForRanges = [...chapters].sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
+        
+        // Create ranges of 24 chapters each
         const ranges: Chapter[][] = [];
-        for (let i = 0; i < sorted.length; i += 24) {
-            ranges.push(sorted.slice(i, i + 24));
+        for (let i = 0; i < sortedForRanges.length; i += 24) {
+            const range = sortedForRanges.slice(i, i + 24);
+            // Apply the sort order to each range
+            const sortedRange = isNewestFirst 
+                ? range.sort((a, b) => parseFloat(b.number) - parseFloat(a.number))
+                : range.sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
+            ranges.push(sortedRange);
+        }
+        
+        // If we want newest first, reverse the order of ranges too
+        if (isNewestFirst) {
+            ranges.reverse();
         }
         
         logDebug(`Created ${ranges.length} chapter ranges`);
@@ -544,6 +584,9 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 mangaTitle={mangaTitle}
                 mangaId={internalMangaId || ''}
                 anilistId={anilistId}
+                currentProvider={provider}
+                mangaSlugId={internalMangaId || undefined}
+                chapterManager={chapterManager}
             />
             <CorrectMangaSearchModal
                 isVisible={showCorrectMangaModal}

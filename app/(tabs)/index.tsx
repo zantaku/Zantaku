@@ -15,6 +15,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { format } from 'date-fns';
 import WelcomeSection from '../../components/WelcomeSection';
 import GlobalSearch from '../../components/GlobalSearch';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define welcome section storage key (should be the same as in homesections.tsx)
 const WELCOME_SECTION_STORAGE_KEY = "welcome_section";
@@ -48,6 +49,8 @@ interface MediaItem {
   score?: number;
   scoreFormat?: string;
   episodes?: number;
+  chapters?: number;
+  volumes?: number;
   format?: string;
   nextAiringEpisode?: {
     episode: number;
@@ -473,7 +476,7 @@ export default function TabsIndex() {
         {
           id: 'reading',
           title: 'Continue Reading',
-          subtitle: 'Currently reading & paused manga',
+          subtitle: 'Currently reading manga',
           icon: 'book-reader',
           visible: true,
           order: 1,
@@ -672,8 +675,9 @@ export default function TabsIndex() {
                     }
                   }
                 }
-                MediaListCollection2: MediaListCollection(userId: $userId, type: MANGA, status_in: [CURRENT, PAUSED]) {
+                MediaListCollection2: MediaListCollection(userId: $userId, type: MANGA, status: CURRENT) {
                   lists {
+                    status
                     entries {
                       id
                       progress
@@ -693,7 +697,8 @@ export default function TabsIndex() {
                           large
                         }
                         status
-                        format
+                        chapters
+                        volumes
                       }
                     }
                   }
@@ -719,7 +724,8 @@ export default function TabsIndex() {
                           large
                         }
                         status
-                        format
+                        chapters
+                        volumes
                       }
                     }
                   }
@@ -745,7 +751,8 @@ export default function TabsIndex() {
                           large
                         }
                         status
-                        format
+                        chapters
+                        volumes
                       }
                     }
                   }
@@ -778,7 +785,7 @@ export default function TabsIndex() {
         
         const data = response.data;
         
-        const processEntries = (entries: any[], titleLanguage: string, scoreFormat: string) => {
+        const processEntries = (entries: any[], titleLanguage: string, scoreFormat: string, isManga: boolean = false) => {
           return entries?.map((entry: any) => {
             const title = {
               userPreferred: entry.media.title[titleLanguage.toLowerCase()] || entry.media.title.romaji
@@ -794,9 +801,11 @@ export default function TabsIndex() {
               score: entry.score,
               scoreFormat: scoreFormat,
               episodes: entry.media.episodes,
+              chapters: entry.media.chapters,
+              volumes: entry.media.volumes,
               format: entry.media.format,
               nextAiringEpisode: entry.media.nextAiringEpisode,
-              type: entry.media.type || 'ANIME'
+              type: entry.media.type || (isManga ? 'MANGA' : 'ANIME')
             };
           }) || [];
         };
@@ -805,37 +814,43 @@ export default function TabsIndex() {
         const watching = processEntries(
           data.data.MediaListCollection.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          false
         ).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         const reading = processEntries(
           data.data.MediaListCollection2.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          true
         ).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         const completedAnime = processEntries(
           data.data.CompletedAnime.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          false
         ).sort((a: MediaItem, b: MediaItem) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         const completedManga = processEntries(
           data.data.CompletedManga.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          true
         ).sort((a: MediaItem, b: MediaItem) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         const planningAnime = processEntries(
           data.data.PlannedAnime.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          false
         ).sort((a: MediaItem, b: MediaItem) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         const planningManga = processEntries(
           data.data.PlannedManga.lists?.[0]?.entries || [],
           data.data.Viewer.options.titleLanguage,
-          data.data.Viewer.mediaListOptions.scoreFormat
+          data.data.Viewer.mediaListOptions.scoreFormat,
+          true
         ).sort((a: MediaItem, b: MediaItem) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         console.log('Lists processed successfully:', {

@@ -22,6 +22,8 @@ import { useOrientation } from '../hooks/useOrientation';
 import { useIncognito } from '../hooks/useIncognito';
 import { useTheme } from '../hooks/useTheme';
 import ChapterSourcesModal from '../components/ChapterSourcesModal';
+import { ChapterManager } from '../utils/ChapterManager';
+import { MangaProviderService } from '../api/proxy/providers/manga/MangaProviderService';
 import { debounce, throttle } from 'lodash';
 
 const WINDOW_HEIGHT = Dimensions.get('window').height;
@@ -1237,6 +1239,46 @@ export default function ReaderScreen() {
     
     extractMangaId();
   }, [params]);
+
+  // Extract provider information from navigation parameters and persist it
+  useEffect(() => {
+    if (params.readerCurrentProvider && typeof params.readerCurrentProvider === 'string') {
+      console.log('Setting currentProvider from navigation params:', params.readerCurrentProvider);
+      setCurrentProvider(params.readerCurrentProvider as 'mangadex' | 'katana' | 'mangafire' | 'unknown');
+      // Store provider info persistently for this reading session
+      AsyncStorage.setItem('reader_current_provider', params.readerCurrentProvider);
+    }
+    
+    if (params.readerMangaSlugId && typeof params.readerMangaSlugId === 'string') {
+      console.log('Setting mangaSlugId from navigation params:', params.readerMangaSlugId);
+      setMangaSlugId(params.readerMangaSlugId);
+      // Store manga slug ID persistently for this reading session
+      AsyncStorage.setItem('reader_manga_slug_id', params.readerMangaSlugId);
+    }
+  }, [params.readerCurrentProvider, params.readerMangaSlugId]);
+  
+  // Load provider information from storage if not provided in params
+  useEffect(() => {
+    const loadPersistedProviderInfo = async () => {
+      if (!params.readerCurrentProvider) {
+        const storedProvider = await AsyncStorage.getItem('reader_current_provider');
+        if (storedProvider && storedProvider !== 'unknown') {
+          console.log('Loading persisted currentProvider:', storedProvider);
+          setCurrentProvider(storedProvider as 'mangadex' | 'katana' | 'mangafire' | 'unknown');
+        }
+      }
+      
+      if (!params.readerMangaSlugId) {
+        const storedSlugId = await AsyncStorage.getItem('reader_manga_slug_id');
+        if (storedSlugId) {
+          console.log('Loading persisted mangaSlugId:', storedSlugId);
+          setMangaSlugId(storedSlugId);
+        }
+      }
+    };
+    
+    loadPersistedProviderInfo();
+  }, [params.readerCurrentProvider, params.readerMangaSlugId]);
   
   const [images, setImages] = useState<string[]>([]);
   const [dynamicImageHeaders, setDynamicImageHeaders] = useState<{ [key: number]: any }>({});
@@ -1284,6 +1326,8 @@ export default function ReaderScreen() {
   const [nextChapterId, setNextChapterId] = useState<string | null>(null);
   const [mangaSlugId, setMangaSlugId] = useState<string | null>(null);
   const [mangaTitle, setMangaTitle] = useState<string | null>(null);
+  const [currentProvider, setCurrentProvider] = useState<'mangadex' | 'katana' | 'mangafire' | 'unknown'>('unknown');
+  const [chapterManager, setChapterManager] = useState<ChapterManager | undefined>(undefined);
   
   // Progressive loading state
   const [loadedImageIndices, setLoadedImageIndices] = useState<Set<number>>(new Set());
@@ -1523,6 +1567,18 @@ export default function ReaderScreen() {
         console.log(`Loaded ${imageUrls.length} images`);
         setImages(imageUrls);
         setDynamicImageHeaders(imageHeadersMap);
+        
+        // Detect provider from image URLs or headers
+        if (imageUrls.length > 0) {
+          const firstImageUrl = imageUrls[0];
+          const firstImageHeaders = imageHeadersMap[0];
+          
+          if (firstImageUrl.includes('mfcdn') || (firstImageHeaders && 'Referer' in firstImageHeaders && firstImageHeaders.Referer?.includes('mangafire'))) {
+            console.log('=== DETECTED MANGAFIRE PROVIDER ===');
+            console.log('Setting currentProvider to: mangafire');
+            setCurrentProvider('mangafire');
+          }
+        }
   
         // Initialize loading states for ALL images as NOT loaded initially
         const initialLoadingStates = Object.fromEntries(
@@ -2182,6 +2238,75 @@ export default function ReaderScreen() {
   const fetchChapters = useCallback(async () => {
     try {
       console.log('Fetching chapters for mangaId:', params.mangaId);
+      
+      // First, try using MangaProviderService if we have provider info from params
+      const readerProvider = Array.isArray(params.readerCurrentProvider) 
+        ? params.readerCurrentProvider[0] 
+        : params.readerCurrentProvider;
+      const readerMangaSlugId = Array.isArray(params.readerMangaSlugId) 
+        ? params.readerMangaSlugId[0] 
+        : params.readerMangaSlugId;
+      
+      if (readerProvider && readerMangaSlugId && readerProvider !== 'unknown') {
+        try {
+          console.log('=== USING MANGA PROVIDER SERVICE ===');
+          console.log('Provider:', readerProvider);
+          console.log('Manga ID:', readerMangaSlugId);
+          
+          // Use MangaProviderService to get chapters (same as ChapterList)
+          const chapters = await MangaProviderService.getChapters(readerMangaSlugId, readerProvider as 'mangadex' | 'katana' | 'mangafire');
+          
+          if (chapters && chapters.length > 0) {
+            console.log('=== MANGA PROVIDER SERVICE SUCCESS ===');
+            console.log(`Successfully loaded ${chapters.length} chapters from ${readerProvider}`);
+            
+            // Convert to the Chapter format expected by reader
+            const formattedChapters = chapters.map((ch: any) => ({
+              id: ch.id,
+              number: ch.number,
+              title: ch.title || `Chapter ${ch.number}`,
+              url: ch.url || ch.id
+            }));
+            
+            setAllChapters(formattedChapters);
+            
+            // Create ChapterManager for proper navigation
+            const manager = new ChapterManager(chapters, readerProvider as string, readerMangaSlugId);
+            setChapterManager(manager);
+            console.log(`Created ChapterManager in reader with ${chapters.length} chapters`);
+            
+            // Find current chapter index
+            const currentChapterStr = String(params.chapter);
+            const index = formattedChapters.findIndex((ch: Chapter) => {
+              // Try exact match first
+              if (ch.number === currentChapterStr) return true;
+              // Try partial match (e.g., "5: Good Evening" matches "5")
+              if (ch.number.startsWith(currentChapterStr + ':')) return true;
+              // Try number extraction
+              const chNum = ch.number.match(/^(\d+(\.\d+)?)/);
+              if (chNum && chNum[1] === currentChapterStr) return true;
+              return false;
+            });
+            
+            console.log('Current chapter index:', index, 'for chapter:', currentChapterStr);
+            setCurrentChapterIndex(index);
+            
+            // Set navigation availability
+            const hasNext = index < formattedChapters.length - 1;
+            const hasPrev = index > 0;
+            console.log('Navigation availability - Next:', hasNext, 'Previous:', hasPrev);
+            setHasNextChapter(hasNext);
+            setHasPreviousChapter(hasPrev);
+            
+            return; // Success! Exit early
+          }
+        } catch (providerError) {
+          console.error('MangaProviderService failed:', providerError);
+          // Continue to fallback APIs
+        }
+      }
+      
+      // Fallback: Try the old API endpoints if MangaProviderService failed
       if (params.mangaId) {
         // First try to load from takiapi mangareader endpoint
         const apiUrl = `${BASE_API_URL}/manga/mangareader/info/${params.mangaId}`;
@@ -2235,7 +2360,11 @@ export default function ReaderScreen() {
               const katanaData = await katanaResponse.json();
               
               if (katanaData?.success && katanaData?.data?.chapters && Array.isArray(katanaData.data.chapters)) {
+                console.log('=== KATANA API SUCCESS ===');
                 console.log('Successfully fetched chapters from Katana API');
+                console.log('Setting currentProvider to: katana');
+                console.log('Setting mangaSlugId to:', katanaId);
+                setCurrentProvider('katana');
                 
                 // Format chapters from Katana API response
                 const chaptersArray = katanaData.data.chapters;
@@ -2288,6 +2417,11 @@ export default function ReaderScreen() {
         
         // If we reach here with apiSuccess true, process the original API data
         if (apiSuccess) {
+          console.log('=== MANGAREADER API SUCCESS ===');
+          console.log('Successfully fetched chapters from mangareader API');
+          console.log('Setting currentProvider to: mangareader');
+          setCurrentProvider('mangadex');
+          
           const chaptersArray = data?.chapters || data?.data?.chapters || [];
           console.log(`Found ${chaptersArray.length} chapters in response`);
           
@@ -3982,31 +4116,25 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     return !isNaN(num) && num > 0;
   }, []);
 
-  // Update the renderChapterNavigationButtons to use params.mangaId
+  // Update the renderChapterNavigationButtons to use proper navigation state
   const renderChapterNavigationButtons = useCallback(() => {
     if (!showUI) return null;
     
-    // Extract numeric part from current chapter for comparison
-    const currentChapterNum = parseFloat(String(params.chapter).replace(/[^\d.]/g, ''));
-    
-    // Simple logic: Show Next if current chapter < total chapters, Show Prev if current chapter > 1
-    // If we have chapter list data, use it. Otherwise, show buttons based on API flags as fallback
-    const shouldShowNextButton = allChapters.length > 0 
-      ? (!isNaN(currentChapterNum) && currentChapterNum < allChapters.length)
-      : (params.isLatestChapter !== 'true'); // Fallback to API flag
-    
-    const shouldShowPreviousButton = !isNaN(currentChapterNum) 
-      ? (currentChapterNum > 1)
-      : (params.isFirstChapter !== 'true'); // Fallback to API flag
+    // Use the already calculated navigation state variables
+    const shouldShowNextButton = hasNextChapter;
+    const shouldShowPreviousButton = hasPreviousChapter;
     
     // DEBUG: Log the navigation button logic
     console.log('[Reader] Navigation button logic:', {
-      'currentChapterNum': currentChapterNum,
-      'totalChapters': allChapters.length,
+      'hasNextChapter': hasNextChapter,
+      'hasPreviousChapter': hasPreviousChapter,
       'shouldShowNextButton': shouldShowNextButton,
       'shouldShowPreviousButton': shouldShowPreviousButton,
       'chapter': params.chapter,
-      'title': params.title
+      'currentChapterIndex': currentChapterIndex,
+      'totalChapters': allChapters.length,
+      'isLatestChapter': params.isLatestChapter,
+      'isFirstChapter': params.isFirstChapter
     });
     
     return (
@@ -4056,10 +4184,13 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     );
   }, [
     showUI, 
+    hasNextChapter,
+    hasPreviousChapter,
+    params.chapter,
+    currentChapterIndex,
+    allChapters.length,
     params.isLatestChapter,
     params.isFirstChapter,
-    params.chapter,
-    allChapters.length,
     handleChapterNavigation,
     readingDirection
   ]);
@@ -4184,6 +4315,17 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       )}
 
       {/* Modals */}
+      {showChapterModal && (() => {
+        console.log('=== RENDERING CHAPTER MODAL ===');
+        console.log('Modal props:', {
+          visible: showChapterModal,
+          chapter: selectedChapter,
+          currentProvider: currentProvider,
+          mangaSlugId: mangaSlugId,
+          mangaId: mangaIdRef.current || String(params.mangaId)
+        });
+        return null;
+      })()}
       <ChapterSourcesModal
         visible={showChapterModal}
         onClose={() => {
@@ -4191,15 +4333,16 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
           setNavigationType(null);
           setPendingNextChapter(false);
         }}
-        chapter={selectedChapter}
+        chapter={selectedChapter ? { ...selectedChapter, source: currentProvider } : null}
         mangaTitle={{
           english: typeof params.title === 'string' ? params.title : "",
           userPreferred: typeof params.title === 'string' ? params.title : ""
         }}
         mangaId={mangaIdRef.current || String(params.mangaId)}
-        autoLoad={autoLoadChapter}
-        existingParams={params}
         anilistId={params.anilistId as string}
+        currentProvider={currentProvider}
+        mangaSlugId={mangaSlugId || undefined}
+        chapterManager={chapterManager}
       />
 
       {/* Save progress modal */}

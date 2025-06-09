@@ -7,6 +7,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useIncognito } from '../hooks/useIncognito';
 import { Chapter } from '../api/proxy/providers/manga';
 import { MangaProviderService, PageWithHeaders } from '../api/proxy/providers/manga/MangaProviderService';
+import { ChapterManager, NormalizedChapter } from '../utils/ChapterManager';
 
 interface ChapterSourcesModalProps {
   visible: boolean;
@@ -15,15 +16,32 @@ interface ChapterSourcesModalProps {
   mangaTitle: { english: string; userPreferred: string; };
   mangaId: string;
   anilistId?: string;
+  currentProvider?: 'mangadex' | 'katana' | 'mangafire' | 'unknown';
+  mangaSlugId?: string;
+  chapterManager?: ChapterManager;
 }
 
 const logDebug = (message: string, data?: any) => console.log(`[ChapterModal DEBUG] ${message}`, data || '');
 const logError = (message: string, error?: any) => console.error(`[ChapterModal ERROR] ${message}`, error || '');
 
-export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId }: ChapterSourcesModalProps) {
+const BASE_API_URL = 'https://takiapi.xyz';
+const KATANA_API_URL = 'https://magaapinovel.xyz';
+
+export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId, currentProvider, mangaSlugId, chapterManager }: ChapterSourcesModalProps) {
   const router = useRouter();
   const { currentTheme: theme, isDarkMode } = useTheme();
   const { isIncognito } = useIncognito();
+
+  // Debug props at component level
+  console.log('🚀 MODAL COMPONENT PROPS:', {
+    visible,
+    currentProvider,
+    mangaSlugId,
+    mangaId,
+    chapterId: chapter?.id,
+    chapterNumber: chapter?.number,
+    hasChapterManager: !!chapterManager
+  });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,47 +52,168 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     setError(null);
     setPages([]);
     
-    logDebug("Fetching pages for chapter:", selectedChapter);
+    logDebug("=== STARTING CHAPTER FETCH WITH CHAPTER MANAGER ===");
+    logDebug("Selected chapter:", selectedChapter);
+    logDebug("Has ChapterManager:", !!chapterManager);
     
-    const { id: chapterId, source } = selectedChapter;
+    if (!chapterManager) {
+      logError("No ChapterManager provided - falling back to legacy method");
+      setError("Chapter navigation not properly initialized");
+      setLoading(false);
+      return;
+    }
 
+    const { id: chapterId } = selectedChapter;
+    
     try {
-        logDebug(`Fetching pages for chapter ${chapterId} from ${source}`);
+        // Get the normalized chapter from ChapterManager
+        const normalizedChapter = chapterManager.getChapterById(chapterId);
+        if (!normalizedChapter) {
+            throw new Error(`Chapter ${chapterId} not found in chapter manager`);
+        }
+
+        logDebug("=== CHAPTER MANAGER INFO ===");
+        console.log('🏗️ CHAPTER MANAGER DEBUG:', chapterManager.getDebugInfo());
+        console.log('📖 NORMALIZED CHAPTER:', normalizedChapter);
         
-        const imageUrls = await MangaProviderService.getChapterPages(chapterId, source as any);
+        // Get navigation context
+        const navContext = chapterManager.getNavigationContext(chapterId);
+        if (navContext) {
+            console.log('🧭 NAVIGATION CONTEXT:', {
+                currentIndex: navContext.currentIndex,
+                hasNext: navContext.hasNext,
+                hasPrevious: navContext.hasPrevious,
+                nextChapter: navContext.nextChapter?.number,
+                previousChapter: navContext.previousChapter?.number
+            });
+        }
+
+        // Get the proper API URL using ChapterManager
+        const pagesUrl = chapterManager.getChapterPagesUrl(normalizedChapter, KATANA_API_URL);
+        const provider = chapterManager.getProvider();
+        
+        logDebug(`=== USING ${provider.toUpperCase()} API VIA CHAPTER MANAGER ===`);
+        console.log('🔗 GENERATED API URL:', pagesUrl);
+        console.log('📍 PROVIDER:', provider);
+        
+        // Fetch the pages
+        let imageUrls: PageWithHeaders[] = [];
+        
+        if (provider === 'katana') {
+            const response = await fetch(pagesUrl);
+            logDebug('Response status:', response.status);
+            
+            const data = await response.json();
+            logDebug('=== API RESPONSE RECEIVED ===');
+
+            if (data?.error) {
+                logError('API returned error:', data.error);
+                throw new Error(`${data.error}. ${data.message || ''}`);
+            }
+
+            if (data?.success && data?.data?.imageUrls && Array.isArray(data.data.imageUrls)) {
+                imageUrls = data.data.imageUrls.map((img: any, index: number) => {
+                    const imageUrl = `${KATANA_API_URL}${img.proxyUrl}`;
+                    return { url: imageUrl, headers: {} } as PageWithHeaders;
+                });
+                logDebug(`Successfully processed ${imageUrls.length} pages from Katana API.`);
+            } else {
+                throw new Error("Invalid Katana API response format.");
+            }
+            
+        } else if (provider === 'mangafire' || provider === 'mangadex') {
+            const response = await fetch(pagesUrl);
+            logDebug('Response status:', response.status);
+            
+            const data = await response.json();
+            logDebug('=== API RESPONSE RECEIVED ===');
+
+            if (data?.error) {
+                logError('API returned error:', data.error);
+                throw new Error(`${data.error}. ${data.message || ''}`);
+            }
+
+            if (data?.pages && Array.isArray(data.pages)) {
+                imageUrls = data.pages.map((page: any, index: number) => {
+                    const imageUrl = page.url;
+                    const headers = page.headers || 
+                        (provider === 'mangafire' ? { 'Referer': 'https://mangafire.to' } : {});
+                    return { url: imageUrl, headers } as PageWithHeaders;
+                });
+                logDebug(`Successfully processed ${imageUrls.length} pages from ${provider} API.`);
+            } else {
+                throw new Error(`Invalid ${provider} API response format.`);
+            }
+            
+        } else {
+            // Fallback to MangaProviderService
+            logDebug('=== USING MANGA PROVIDER SERVICE FALLBACK ===');
+            imageUrls = await MangaProviderService.getChapterPages(chapterId, provider as any);
+            logDebug(`MangaProviderService returned: ${imageUrls.length} pages`);
+        }
+
+        logDebug('=== FINAL RESULT ===');
+        logDebug('Total image URLs found:', imageUrls.length);
         
         if (imageUrls.length === 0) {
             throw new Error("No pages found for this chapter.");
         }
-
-        logDebug(`Successfully fetched ${imageUrls.length} pages.`);
+        
+        logDebug(`Setting pages state with ${imageUrls.length} images`);
         setPages(imageUrls);
 
     } catch (err: any) {
-        logError("Failed to fetch chapter pages:", err);
-        setError(err.message || `Could not load chapter from ${source}.`);
+        logError("=== ERROR OCCURRED ===");
+        logError("Error details:", err);
+        
+        const errorMsg = err.message || `Could not load chapter ${selectedChapter.number}.`;
+        logError('Setting error:', errorMsg);
+        setError(errorMsg);
     } finally {
+        logDebug('=== FETCH COMPLETE ===');
         setLoading(false);
     }
-  }, []);
+  }, [chapterManager]);
 
   useEffect(() => {
     if (visible && chapter) {
+      logDebug("Modal opened with chapter:", chapter);
+      logDebug("Current provider:", currentProvider);
+      logDebug("Manga slug ID:", mangaSlugId);
+      logDebug("Manga ID:", mangaId);
+      logDebug("AniList ID:", anilistId);
+      console.log('🎯 PROVIDER DEBUG:', {
+        currentProvider,
+        mangaSlugId,
+        mangaId,
+        anilistId,
+        chapterId: chapter.id,
+        chapterNumber: chapter.number
+      });
       fetchChapterPages(chapter);
+    } else if (visible && !chapter) {
+      logError("Modal opened without chapter data");
+      setError("No chapter data available");
+      setLoading(false);
     }
-  }, [visible, chapter, fetchChapterPages]);
+  }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId]);
 
   const navigateToReader = () => {
     if (pages.length === 0 || !chapter) return;
+    
+    // Always pass the fetched pages to the reader, regardless of chapter type
     const params: Record<string, any> = {
-        title: chapter.title,
-        chapter: chapter.number,
-        mangaId,
-        anilistId,
-        shouldSaveProgress: !isIncognito,
+      title: chapter.title,
+      chapter: chapter.number,
+      mangaId,
+      anilistId,
+      shouldSaveProgress: !isIncognito,
+      // Pass provider information to ensure reader maintains context
+      readerCurrentProvider: currentProvider,
+      readerMangaSlugId: mangaSlugId,
     };
     
-    // Add image URLs and headers
+    // Add the already-fetched image URLs and headers
     pages.forEach((page, i) => {
       params[`image${i + 1}`] = page.url;
       if (page.headers) {
@@ -82,6 +221,16 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       }
     });
 
+    logDebug('Navigating to reader with fetched pages:', {
+      chapterTitle: chapter.title,
+      chapterNumber: chapter.number,
+      totalPages: pages.length,
+      currentProvider,
+      mangaSlugId,
+      firstPageUrl: pages[0]?.url,
+      hasHeaders: pages.some(p => p.headers && Object.keys(p.headers).length > 0)
+    });
+    
     router.replace({ pathname: '/reader', params });
     onClose();
   };
