@@ -1,31 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  Image,
-  ActivityIndicator,
-} from 'react-native';
-import axios from 'axios';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import Modal from 'react-native-modal';
+import { useRouter } from 'expo-router';
+import { useTheme } from '../hooks/useTheme';
+import { animePaheProvider, zoroProvider } from '../api/proxy/providers/anime';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface CorrectAnimeSearchModalProps {
   visible: boolean;
   onClose: () => void;
-  onSelectAnime: (animeId: string, poster: string) => void;
+  onSelectAnime: (animeId: string, poster: string, provider: string) => void;
   initialQuery?: string;
+  currentProvider?: string;
+  onProviderChange?: (provider: string) => void;
 }
 
-interface AnimeResult {
+interface AnimeSearchResult {
   id: string;
   title: string;
   image: string;
-  releaseDate: string | null;
-  type: string;
+  releaseDate?: string;
+  type?: string;
 }
 
 export default function CorrectAnimeSearchModal({
@@ -33,256 +29,272 @@ export default function CorrectAnimeSearchModal({
   onClose,
   onSelectAnime,
   initialQuery = '',
+  currentProvider = 'animepahe',
+  onProviderChange,
 }: CorrectAnimeSearchModalProps) {
-  const [searchText, setSearchText] = useState(initialQuery);
-  const [results, setResults] = useState<AnimeResult[]>([]);
+  const { isDarkMode, currentTheme } = useTheme();
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [results, setResults] = useState<AnimeSearchResult[]>([]);
+  const [provider, setProvider] = useState(currentProvider);
+  const router = useRouter();
 
-  const searchAnime = async (query: string) => {
-    if (!query.trim()) {
+  useEffect(() => {
+    const loadProviderSettings = async () => {
+      try {
+        const settings = await AsyncStorage.getItem('animeProviderSettings');
+        if (settings) {
+          const parsed = JSON.parse(settings);
+          setProvider(parsed.defaultProvider || 'animepahe');
+        }
+      } catch (error) {
+        console.error('Error loading provider settings:', error);
+      }
+    };
+    loadProviderSettings();
+  }, []);
+
+  useEffect(() => {
+    console.log('Modal visibility changed:', visible);
+    if (visible) {
+      setSearchQuery(initialQuery);
+      if (initialQuery.trim()) {
+        searchAnime();
+      }
+    }
+  }, [visible, initialQuery]);
+
+  const searchAnime = async () => {
+    if (!searchQuery.trim()) {
       setResults([]);
       return;
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
-      setError('');
+      console.log('Searching for anime:', searchQuery, 'with provider:', provider);
       
-      console.log('Searching for anime with query:', query);
-      const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query.trim())}&sfw=true&limit=15`;
-      console.log('Search URL:', searchUrl);
-
-      const { data } = await axios.get(searchUrl);
-
-      console.log('Search response:', JSON.stringify(data, null, 2));
-
-      if (!data?.data || data.data.length === 0) {
-        console.log('No results found for query:', query);
-        setError('No results found');
-      } else {
-        console.log('Found results:', data.data.length);
-        const mappedResults = data.data.map((item: any) => ({
-          id: item.mal_id.toString(),
+      let searchResults: any[] = [];
+      
+      // Use the specific provider's search method
+      if (provider === 'animepahe') {
+        console.log(`[CorrectAnimeSearchModal] Using AnimePahe search route: anime/animepahe/${encodeURIComponent(searchQuery)}`);
+        searchResults = await animePaheProvider.searchAnime(searchQuery);
+      } else if (provider === 'zoro') {
+        console.log(`[CorrectAnimeSearchModal] Using Zoro search route: anime/zoro/${encodeURIComponent(searchQuery)}?type=1`);
+        searchResults = await zoroProvider.searchAnime(searchQuery);
+      }
+      
+      console.log('Search results:', searchResults);
+      
+      if (searchResults && searchResults.length > 0) {
+        const mappedResults = searchResults.map((item: any) => ({
+          id: item.id,
           title: item.title,
-          image: item.images.jpg.image_url,
-          releaseDate: item.aired?.from ? new Date(item.aired.from).getFullYear().toString() : null,
-          type: item.type || 'Unknown'
+          image: item.image || item.poster || '',
+          releaseDate: item.releaseDate || item.year,
+          type: item.type || 'TV'
         }));
         setResults(mappedResults);
+      } else {
+        console.log('No results found for query:', searchQuery);
+        setResults([]);
       }
-    } catch (err: any) {
-      console.error('Search error details:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-        headers: err.response?.headers
-      });
-      setError('Failed to search anime: ' + (err.message || 'Unknown error'));
+    } catch (error: any) {
+      console.error('Search error:', error);
+      setResults([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (searchText) {
-        searchAnime(searchText);
-      }
-    }, 500);
+  const handleAnimeSelect = (anime: AnimeSearchResult) => {
+    onSelectAnime(anime.id, anime.image, provider);
+    onClose();
+  };
 
-    return () => clearTimeout(timeoutId);
-  }, [searchText]);
-
-  const renderItem = ({ item }: { item: AnimeResult }) => (
-    <TouchableOpacity
-      style={styles.resultItem}
-      onPress={() => onSelectAnime(item.id, item.image)}
+  const renderItem = ({ item }: { item: AnimeSearchResult }) => (
+    <TouchableOpacity 
+      style={[styles.resultItem, { backgroundColor: currentTheme.colors.surface, borderBottomColor: currentTheme.colors.border }]} 
+      onPress={() => handleAnimeSelect(item)}
     >
-      <Image 
-        source={{ uri: item.image }} 
-        style={styles.posterImage}
-        resizeMode="cover"
+      <ExpoImage
+        source={{ uri: item.image }}
+        style={styles.thumbnail}
+        contentFit="cover"
       />
       <View style={styles.infoContainer}>
-        <Text style={styles.titleText} numberOfLines={2}>
+        <Text style={[styles.title, { color: currentTheme.colors.text }]} numberOfLines={2}>
           {item.title}
         </Text>
-        <View style={styles.detailsContainer}>
-          <View style={styles.tagContainer}>
-            <Text style={styles.statusTag}>
-              {item.type}
-            </Text>
+        {(item.releaseDate || item.type) && (
+          <View style={styles.metaContainer}>
+            {item.type && (
+              <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
+                {item.type}
+              </Text>
+            )}
             {item.releaseDate && (
-              <Text style={styles.formatTag}>
+              <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
                 {item.releaseDate}
               </Text>
             )}
           </View>
-        </View>
+        )}
       </View>
     </TouchableOpacity>
   );
 
   return (
     <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
+      isVisible={visible}
+      onBackdropPress={onClose}
+      onBackButtonPress={onClose}
+      style={styles.modal}
+      animationIn="slideInUp"
+      animationOut="slideOutDown"
+      backdropTransitionOutTiming={0}
+      propagateSwipe={true}
+      swipeDirection={['down']}
+      onSwipeComplete={onClose}
+      hideModalContentWhileAnimating={true}
+      useNativeDriver={true}
     >
-      <View style={styles.modalContainer}>
-        <View style={styles.contentContainer}>
-          <View style={styles.header}>
-            <View style={styles.searchInputContainer}>
-              <FontAwesome5 name="search" size={16} color="#666" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search correct anime..."
-                value={searchText}
-                onChangeText={setSearchText}
-                autoFocus
-                placeholderTextColor="#666"
-              />
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <FontAwesome5 name="times" size={20} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <ActivityIndicator size="large" color="#02A9FF" style={styles.loader} />
-          ) : error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : (
-            <FlatList
-              data={results}
-              renderItem={renderItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.resultsList}
-              showsVerticalScrollIndicator={false}
-              removeClippedSubviews={true}
-              initialNumToRender={6}
-              maxToRenderPerBatch={10}
-              windowSize={5}
-            />
-          )}
+      <View style={[styles.container, { backgroundColor: currentTheme.colors.background }]}>
+        <View style={[styles.dragIndicator, { backgroundColor: currentTheme.colors.textSecondary }]} />
+        <View style={styles.header}>
+          <Text style={[styles.headerText, { color: currentTheme.colors.text }]}>
+            Search Correct Anime
+          </Text>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={[styles.closeButton, { color: currentTheme.colors.text }]}>×</Text>
+          </TouchableOpacity>
         </View>
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={[
+              styles.searchInput, 
+              { 
+                backgroundColor: currentTheme.colors.surface, 
+                color: currentTheme.colors.text,
+                borderColor: currentTheme.colors.border
+              }
+            ]}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search anime..."
+            placeholderTextColor={currentTheme.colors.textSecondary}
+            onSubmitEditing={searchAnime}
+          />
+          <TouchableOpacity style={[styles.searchButton, { backgroundColor: currentTheme.colors.primary }]} onPress={searchAnime}>
+            <Text style={styles.searchButtonText}>Search</Text>
+          </TouchableOpacity>
+        </View>
+        {loading ? (
+          <ActivityIndicator style={styles.loader} color={currentTheme.colors.primary} />
+        ) : (
+          <FlatList
+            data={results}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            style={styles.list}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  modal: {
+    margin: 0,
     justifyContent: 'flex-end',
+    zIndex: 1000,
   },
-  contentContainer: {
-    backgroundColor: '#fff',
+  container: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    height: '90%',
-    overflow: 'hidden',
+    height: '80%',
+    padding: 20,
+    zIndex: 1001,
+  },
+  dragIndicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 10,
   },
   header: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    backgroundColor: '#fff',
+    marginBottom: 20,
   },
-  searchInputContainer: {
-    flex: 1,
+  headerText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    fontSize: 24,
+    padding: 5,
+  },
+  searchContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    marginRight: 12,
+    marginBottom: 20,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    fontSize: 16,
-    color: '#000',
+    borderRadius: 8,
+    padding: 12,
+    marginRight: 10,
+    borderWidth: 1,
   },
-  closeButton: {
-    padding: 4,
+  searchButton: {
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    justifyContent: 'center',
   },
-  resultsList: {
-    padding: 16,
+  searchButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  loader: {
+    marginTop: 20,
+  },
+  list: {
+    flex: 1,
   },
   resultItem: {
     flexDirection: 'row',
-    marginBottom: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  posterImage: {
-    width: 100,
-    height: 140,
+    padding: 12,
+    borderBottomWidth: 1,
+    alignItems: 'center',
     borderRadius: 8,
+    marginBottom: 8,
+  },
+  thumbnail: {
+    width: 60,
+    height: 85,
+    borderRadius: 6,
+    marginRight: 12,
   },
   infoContainer: {
     flex: 1,
-    marginLeft: 12,
-    justifyContent: 'space-between',
   },
-  titleText: {
+  title: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000',
+    fontWeight: '600',
     marginBottom: 4,
   },
-  detailsContainer: {
+  metaContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 4,
+    gap: 8,
   },
-  tagContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  statusTag: {
-    backgroundColor: '#02A9FF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+  metaText: {
     fontSize: 12,
-    color: '#fff',
-  },
-  formatTag: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    fontSize: 12,
-    color: '#666',
-  },
-  releaseDate: {
-    fontSize: 12,
-    color: '#666',
-  },
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorText: {
-    textAlign: 'center',
-    color: '#ff0000',
-    padding: 16,
+    fontWeight: '500',
   },
 }); 

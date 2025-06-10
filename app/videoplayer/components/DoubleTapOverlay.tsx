@@ -119,6 +119,7 @@ const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
     flexDirection: 'row',
+    zIndex: 50,
   },
   leftArea: {
     width: SCREEN_WIDTH / 2,

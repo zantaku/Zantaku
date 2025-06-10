@@ -20,10 +20,42 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { ScrollView } from 'react-native';
+import { animeProviderManager } from '../../api/proxy/providers/anime';
 
 const ShimmerPlaceholder = createShimmerPlaceholder(ExpoLinearGradient);
 const AnimatedLinearGradient = Reanimated.createAnimatedComponent(ExpoLinearGradient);
 const ReanimatedTouchableOpacity = Reanimated.createAnimatedComponent(TouchableOpacity);
+
+// Hook to load source settings
+const useSourceSettings = () => {
+  const [sourceSettings, setSourceSettings] = useState({
+    preferredType: 'sub' as 'sub' | 'dub',
+    autoTryAlternateVersion: true,
+    preferHLSStreams: true,
+    logSourceDetails: true,
+    defaultProvider: 'animepahe' as 'animepahe' | 'zoro',
+    autoSelectSource: true,
+    providerPriority: ['animepahe', 'zoro'] as ('animepahe' | 'zoro')[],
+  });
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const sourceData = await AsyncStorage.getItem('sourceSettings');
+        if (sourceData) {
+          const parsedSettings = JSON.parse(sourceData);
+          setSourceSettings(prev => ({ ...prev, ...parsedSettings }));
+        }
+      } catch (error) {
+        console.error('Failed to load source settings:', error);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  return sourceSettings;
+};
 
 // Add this new component for the auto-select mode pill indicator
 const AutoSelectPill = ({ visible, message = "Loading video..." }: { visible: boolean; message?: string }) => {
@@ -306,33 +338,7 @@ const AutoLoadingMessage = ({
   );
 };
 
-const CONSUMET_API_URL = 'https://takiapi.xyz';
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
-
-const API_ENDPOINTS = {
-  anilistMeta: {
-    episodes: (anilistId: string, dub?: boolean) => 
-      `${CONSUMET_API_URL}/meta/anilist/episodes/${anilistId}?provider=zoro${dub ? '&dub=true' : ''}`,
-    watch: (episodeId: string, dub?: boolean) => 
-      `${CONSUMET_API_URL}/meta/anilist/watch/${episodeId}?provider=zoro${dub ? '&dub=true' : ''}`
-  },
-  // Keep legacy endpoints as fallback
-  zoro: {
-    search: (query: string) => `${CONSUMET_API_URL}/anime/zoro/${encodeURIComponent(query)}?type=1`,
-    info: (id: string) => `${CONSUMET_API_URL}/anime/zoro/info?id=${id}`,
-    watch: (episodeId: string) => {
-      // Always use the new format: animeId/episodeNumber
-      if (episodeId.includes('/')) {
-        // Already in new format
-        return `${CONSUMET_API_URL}/anime/zoro/watch/${episodeId}`;
-      } else {
-        // Convert legacy format to new format
-        const [animeId, episodeNumber] = episodeId.split('$episode$');
-        return `${CONSUMET_API_URL}/anime/zoro/watch/${animeId}/${episodeNumber}`;
-      }
-    }
-  }
-};
 
 interface Source {
   quality: string;
@@ -445,6 +451,8 @@ export default function EpisodeSourcesModal({
   autoSelectSource?: boolean;
   mangaTitle?: string;
 }) {
+  // Load source settings
+  const sourceSettings = useSourceSettings();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -527,13 +535,10 @@ export default function EpisodeSourcesModal({
         try {
           console.log('\n=== EPISODE SOURCES MODAL USER SETTINGS ===');
           console.log('Modal visible with preferred type:', preferredType);
-          console.log('Auto-selection mode:', autoSelectSource ? 'ON' : 'OFF');
+          console.log('Auto-selection mode:', sourceSettings.autoSelectSource ? 'ON' : 'OFF');
           
-          // Fetch anime settings from AsyncStorage
-          const sourceSettingsData = await AsyncStorage.getItem('sourceSettings');
-          if (sourceSettingsData) {
-            console.log('Source Settings:', JSON.parse(sourceSettingsData));
-          }
+                      // Source settings are now loaded via hook at component level
+            console.log('Source Settings:', sourceSettings);
           
           const episodeListSettingsData = await AsyncStorage.getItem('episodeListSettings');
           if (episodeListSettingsData) {
@@ -554,8 +559,17 @@ export default function EpisodeSourcesModal({
 
       // Always fetch sources for the preferred type when modal opens
       setLoading(true);
-      const initialType = preferredType || 'sub';
+      // Use source settings to determine initial type and auto-select behavior
+      const initialType = sourceSettings.preferredType || preferredType || 'sub';
+      const shouldAutoSelect = sourceSettings.autoSelectSource;
+      
       setType(initialType);
+      setPillVisible(shouldAutoSelect);
+      
+      if (shouldAutoSelect) {
+        setPillMessage(`Loading ${initialType} version...`);
+      }
+      
       fetchSources(episodeId, initialType);
     } else {
       fadeAnim.setValue(0);
@@ -648,12 +662,16 @@ export default function EpisodeSourcesModal({
   };
 
   const fetchSources = async (episodeId: string, type: 'sub' | 'dub') => {
+    // Use source settings for auto-select behavior
+    const shouldAutoSelect = sourceSettings.autoSelectSource;
+    
     try {
-      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (AniList Meta) ===`);
+      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (Provider Manager) ===`);
       console.log(`📡 Fetching ${type.toUpperCase()} sources for episode ${episodeId}`);
       console.log(`📺 Anime title:`, animeTitle);
       console.log(`🆔 AniList ID:`, anilistId);
-      console.log(`🔄 Auto-select mode: ${autoSelectSource ? 'ON' : 'OFF'}`);
+      console.log(`🔄 Auto-select mode: ${shouldAutoSelect ? 'ON' : 'OFF'} (from settings)`);
+      console.log(`🎯 Provider priority: ${sourceSettings.providerPriority.join(' → ')}`);
       
       setError(null);
       setLoading(true);
@@ -676,280 +694,159 @@ export default function EpisodeSourcesModal({
         throw new Error('AniList ID is required for fetching sources');
       }
       
-      // Use AniList meta endpoint to get episodes
-      const isDub = type === 'dub';
-      const episodesUrl = API_ENDPOINTS.anilistMeta.episodes(anilistId, isDub);
-      console.log(`🔍 Fetching episodes from AniList meta:`, episodesUrl);
+      // Use the provider manager to get watch data with fallback
+      const watchResult = await animeProviderManager.getWatchDataWithFallback(
+        episodeId,
+        anilistId,
+        animeTitle,
+        parseInt(episodeNum),
+        type,
+        shouldAutoSelect,
+        shouldAutoSelect ? undefined : sourceSettings.defaultProvider
+      );
       
-      const episodesResponse = await axios.get(episodesUrl);
-      console.log(`✅ EPISODES RESPONSE STATUS:`, episodesResponse.status);
-      console.log(`📊 EPISODES RESPONSE HEADERS:`, JSON.stringify(episodesResponse.headers, null, 2));
-      console.log(`📊 FULL EPISODES RESPONSE JSON:`, JSON.stringify(episodesResponse.data, null, 2));
-      
-      if (!episodesResponse?.data || episodesResponse.data.length === 0) {
-        console.log(`❌ No ${type.toUpperCase()} episodes found for AniList ID ${anilistId}`);
+      if (!watchResult || !watchResult.success) {
+        console.log(`❌ No sources found from any provider`);
         
         // If we're looking for dub and auto-select is enabled, automatically try sub
-        if (type === 'dub' && autoSelectSource) {
+        if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion) {
           console.log(`🔄 Auto-fallback: Trying SUB version instead...`);
           setPillMessage('Dub not available, loading sub version...');
           return fetchSources(episodeId, 'sub');
         }
         
-        throw new Error(`No ${type.toUpperCase()} episodes found for this anime`);
+        throw new Error(watchResult?.error || `No ${type.toUpperCase()} sources found`);
       }
       
-      console.log(`📊 Episodes available:`, episodesResponse.data.length);
+      console.log(`✅ Found sources from provider: ${watchResult.provider}`);
+      console.log(`�� Sources available: ${watchResult.data.sources.length}`);
+      console.log(`📊 Subtitles available: ${watchResult.data.subtitles.length}`);
       
-      // Find the specific episode
-      const targetEpisode = episodesResponse.data.find((ep: any) => 
-        ep.number === parseInt(episodeNum)
-      );
-      
-      if (!targetEpisode) {
-        console.log(`❌ Episode ${episodeNum} not found in ${type.toUpperCase()} format`);
-        console.log(`📋 Available episodes:`, episodesResponse.data.map((ep: any) => ep.number).slice(0, 10));
+      // Create direct references to API data
+      let directTimings: VideoTimings | undefined = undefined;
+      if (watchResult.data.intro || watchResult.data.outro) {
+        console.log(`✅ Video timings available:`, {
+          intro: watchResult.data.intro ? `${watchResult.data.intro.start}s - ${watchResult.data.intro.end}s` : 'None',
+          outro: watchResult.data.outro ? `${watchResult.data.outro.start}s - ${watchResult.data.outro.end}s` : 'None'
+        });
         
-        // If we're looking for dub and auto-select is enabled, automatically try sub
-        if (type === 'dub' && autoSelectSource) {
-          console.log(`🔄 Auto-fallback: Episode ${episodeNum} not found in DUB, trying SUB...`);
-          setPillMessage(`Episode ${episodeNum} not available in dub, loading sub...`);
-          return fetchSources(episodeId, 'sub');
+        directTimings = {
+          intro: watchResult.data.intro,
+          outro: watchResult.data.outro
+        };
+        
+        // Update state variables for UI display
+        setTimings(directTimings);
+        if (watchResult.data.intro) {
+          setIntroStartTime(watchResult.data.intro.start);
+          setIntroEndTime(watchResult.data.intro.end);
         }
-        
-        throw new Error(`Episode ${episodeNum} not found in ${type.toUpperCase()} format`);
+        if (watchResult.data.outro) {
+          setOutroStartTime(watchResult.data.outro.start);
+          setOutroEndTime(watchResult.data.outro.end);
+        }
       }
-      
-      console.log(`🎯 Target episode found:`, {
-        id: targetEpisode.id,
-        number: targetEpisode.number,
-        title: targetEpisode.title || 'No title'
-      });
-      
-      // Get watch data for the episode using the episode ID
-      const watchUrl = API_ENDPOINTS.anilistMeta.watch(targetEpisode.id, isDub);
-      console.log(`🎬 WATCH URL:`, watchUrl);
-      
-      const response = await axios.get(watchUrl);
-      console.log(`✅ WATCH RESPONSE STATUS:`, response.status);
-      console.log(`📊 WATCH RESPONSE HEADERS:`, JSON.stringify(response.headers, null, 2));
-      console.log(`📊 FULL WATCH RESPONSE JSON:`, JSON.stringify(response.data, null, 2));
-      
-      // Debug log the raw response structure
-      console.log(`📋 Source response structure:`, {
-        hasData: Boolean(response?.data),
-        hasSources: Boolean(response?.data?.sources),
-        hasSubtitles: Boolean(response?.data?.subtitles),
-        hasTimings: Boolean(response?.data?.intro || response?.data?.outro),
-        sourceCount: response?.data?.sources?.length || 0,
-        subtitleCount: response?.data?.subtitles?.length || 0
-      });
-      
-      if (response?.data) {
-        // --------- IMPORTANT: Create direct references to API data ---------
+
+      // Process sources
+      const allSources = watchResult.data.sources || [];
+      console.log(`📊 RAW SOURCES:`, allSources.length);
+
+      if (allSources.length > 0) {
+        // Format sources with headers
+        const formattedSources = allSources.map((source: any) => 
+          formatSourceWithHeaders(source, watchResult.data.headers || {}, type)
+        );
         
-        // Create timings object directly from API response
-        let directTimings: VideoTimings | undefined = undefined;
-        if (response.data.intro || response.data.outro) {
-          console.log(`✅ Video timings available:`, {
-            intro: response.data.intro ? `${response.data.intro.start}s - ${response.data.intro.end}s` : 'None',
-            outro: response.data.outro ? `${response.data.outro.start}s - ${response.data.outro.end}s` : 'None'
-          });
-          
-          // Create timings object directly from API data
-          directTimings = {
-            intro: response.data.intro,
-            outro: response.data.outro
-          };
-          
-          console.log(`🔒 Created direct timings object:`, JSON.stringify(directTimings, null, 2));
-          
-          // Still update state variables for UI display
-          setTimings(directTimings);
-          if (response.data.intro) {
-            setIntroStartTime(response.data.intro.start);
-            setIntroEndTime(response.data.intro.end);
-          }
-          if (response.data.outro) {
-            setOutroStartTime(response.data.outro.start);
-            setOutroEndTime(response.data.outro.end);
-          }
+        console.log(`✅ Found ${type.toUpperCase()} sources: ${formattedSources.length}`);
+        
+        // Create direct subtitles array from API response
+        let directSubtitles: Subtitle[] = watchResult.data.subtitles || [];
+        
+        if (directSubtitles.length > 0) {
+          const subLangs = directSubtitles.map((sub: any) => sub.lang).join(', ');
+          console.log(`✅ Subtitles available: ${directSubtitles.length} - Languages: ${subLangs}`);
+          setSubtitles(directSubtitles);
         } else {
-          console.log(`ℹ️ No video timings available in response`);
+          console.log(`ℹ️ No subtitles available`);
+          setSubtitles([]);
         }
-
-        // Process sources
-        const allSources = response.data.sources || [];
-        console.log(`📊 Total sources available: ${allSources.length}`);
-        console.log(`📊 RAW SOURCES JSON:`, JSON.stringify(allSources, null, 2));
-
-        if (allSources.length) {
-          // Filter out Google sources and format the remaining ones
-          const filteredSources = allSources.filter((source: any) => !source.url.includes('m3u8.google'));
-          console.log(`📊 Sources after filtering: ${filteredSources.length}`);
-          console.log(`📊 FILTERED SOURCES JSON:`, JSON.stringify(filteredSources, null, 2));
+        
+        // Update sources state for UI
+        setSources(formattedSources);
+        
+        // If auto-select, proceed with automatic selection
+        if (shouldAutoSelect) {
+          // Update pill message to show successful loading
+          setPillMessage(`Loading ${type} version from ${watchResult.provider}...`);
           
-          // Check available qualities
-          const qualities = filteredSources.map((s: any) => s.quality).filter(Boolean);
-          console.log(`📊 Available qualities: ${qualities.join(', ') || 'default'}`);
-          
-          // Format sources with headers
-          const formattedSources = filteredSources.map((source: any) => 
-            formatSourceWithHeaders(source, response.data.headers || {}, type)
-          );
-          
-          console.log(`📊 FORMATTED SOURCES JSON:`, JSON.stringify(formattedSources, null, 2));
-          
-          if (formattedSources.length > 0) {
-            console.log(`✅ Found ${type.toUpperCase()} sources: ${formattedSources.length}`);
-            
-            // Create direct subtitles array from API response
-            let directSubtitles: Subtitle[] = [];
-            
-            // Check for subtitles
-            if (response.data.subtitles?.length) {
-              const subLangs = response.data.subtitles.map((sub: any) => sub.lang).join(', ');
-              console.log(`✅ Subtitles available: ${response.data.subtitles.length} - Languages: ${subLangs}`);
-              console.log(`📊 RAW SUBTITLES JSON:`, JSON.stringify(response.data.subtitles, null, 2));
-              
-              // Log raw subtitles for debugging
-              console.log(`📋 Raw subtitles from API:`, response.data.subtitles.map((sub: any) => ({
-                lang: sub.lang,
-                hasUrl: Boolean(sub.url),
-                urlPreview: sub.url ? sub.url.substring(0, 30) + '...' : 'none'
-              })));
-              
-              // Process subtitles correctly, ensuring they have proper URLs and languages
-              directSubtitles = response.data.subtitles
-                .filter((sub: any) => sub.url && sub.lang) // Filter out any invalid subtitles
-                .map((sub: any) => ({
-                  url: sub.url,
-                  lang: sub.lang
-                }));
-              
-              console.log(`✅ Processed ${directSubtitles.length} valid subtitles`);
-              console.log(`🔒 Created direct subtitles array with ${directSubtitles.length} items`);
-              console.log(`📊 PROCESSED SUBTITLES JSON:`, JSON.stringify(directSubtitles, null, 2));
-              console.log(`📋 First direct subtitle:`, directSubtitles[0] ? {
-                lang: directSubtitles[0].lang,
-                urlPreview: directSubtitles[0].url.substring(0, 50) + '...'
-              } : 'none');
-              
-              // Still update state for UI consistency
-              setSubtitles(directSubtitles);
-            } else {
-              console.log(`ℹ️ No subtitles available in API response`);
-              setSubtitles([]);
-            }
-            
-            // Update sources state for UI
-            setSources(formattedSources);
-            
-            // If auto-select, proceed with automatic selection
-            if (autoSelectSource) {
-              // Update pill message to show successful loading
-              setPillMessage(`Loading ${type} version...`);
-              
-              // Check for m3u8 source
-              const m3u8Source = formattedSources.find((source: Source) => source.isM3U8);
-              if (m3u8Source) {
-                console.log(`✅ Found HLS (m3u8) stream for ${type}`);
-                console.log(`📊 SELECTED M3U8 SOURCE:`, JSON.stringify(m3u8Source, null, 2));
-                handleDirectSourceSelect(m3u8Source, directSubtitles, directTimings, anilistId);
-                return;
-              } else {
-                console.log(`ℹ️ No HLS stream found, using direct source`);
-                const firstSource = formattedSources[0];
-                if (firstSource) {
-                  console.log(`📊 SELECTED FIRST SOURCE:`, JSON.stringify(firstSource, null, 2));
-                  handleDirectSourceSelect(firstSource, directSubtitles, directTimings, anilistId);
-                  return;
-                }
-              }
-            } else {
-              // For manual selection, prepare quality options
-              const qualityOptions = formattedSources.map((source: Source) => ({
-                quality: source.quality || 'default',
-                url: source.url,
-                isDefault: source.quality === 'default' || source.quality === '1080p',
-                headers: source.headers
-              }));
-              
-              // Sort qualities in descending order (highest first)
-              qualityOptions.sort((a: typeof qualityOptions[0], b: typeof qualityOptions[0]) => {
-                const getQualityNumber = (q: string) => {
-                  const match = q.match(/(\d+)p/);
-                  return match ? parseInt(match[1], 10) : 0;
-                };
-                return getQualityNumber(b.quality) - getQualityNumber(a.quality);
-              });
-              
-              console.log(`📊 QUALITY OPTIONS JSON:`, JSON.stringify(qualityOptions, null, 2));
-              
-              setAvailableQualities(qualityOptions);
-              setShowQualitySelection(true);
-              setLoading(false);
-              
-              // Store subtitles and timings for later use
-              setSubtitles(directSubtitles);
-              setTimings(directTimings || null);
-              
-              console.log(`📊 Prepared ${qualityOptions.length} quality options for selection`);
+          // Check for m3u8 source
+          const m3u8Source = formattedSources.find((source: Source) => source.isM3U8);
+          if (m3u8Source) {
+            console.log(`✅ Found HLS (m3u8) stream for ${type} from ${watchResult.provider}`);
+            handleDirectSourceSelect(m3u8Source, directSubtitles, directTimings, anilistId);
+            return;
+          } else {
+            console.log(`ℹ️ No HLS stream found, using direct source from ${watchResult.provider}`);
+            const firstSource = formattedSources[0];
+            if (firstSource) {
+              handleDirectSourceSelect(firstSource, directSubtitles, directTimings, anilistId);
               return;
             }
-          } else {
-            console.log(`❌ No ${type.toUpperCase()} sources available`);
-            setSources([]);
-            
-            // If we're looking for dub and auto-select is enabled, automatically try sub
-            if (type === 'dub' && autoSelectSource) {
-              console.log(`🔄 Auto-fallback: No DUB sources available, trying SUB...`);
-              setPillMessage('Dub sources not available, loading sub...');
-              return fetchSources(episodeId, 'sub');
-            }
-            
-            // Try to determine if the other type might be available
-            const oppositeType = type === 'sub' ? 'dub' : 'sub';
-            console.log(`ℹ️ ${type.toUpperCase()} not available, user may want to try ${oppositeType.toUpperCase()} instead`);
-            
-            throw new Error(`No ${type} version available. Try ${oppositeType} instead.`);
           }
         } else {
-          console.log(`❌ No sources returned from API`);
+          // For manual selection, prepare quality options
+          const qualityOptions = formattedSources.map((source: Source) => ({
+            quality: source.quality || 'default',
+            url: source.url,
+            isDefault: source.quality === 'default' || source.quality === '1080p',
+            headers: source.headers
+          }));
           
-          // If we're looking for dub and auto-select is enabled, automatically try sub
-          if (type === 'dub' && autoSelectSource) {
-            console.log(`🔄 Auto-fallback: No DUB sources in API response, trying SUB...`);
-            setPillMessage('Dub not found, loading sub version...');
-            return fetchSources(episodeId, 'sub');
-          }
+          // Sort qualities in descending order (highest first)
+          qualityOptions.sort((a: typeof qualityOptions[0], b: typeof qualityOptions[0]) => {
+            const getQualityNumber = (q: string) => {
+              const match = q.match(/(\d+)p/);
+              return match ? parseInt(match[1], 10) : 0;
+            };
+            return getQualityNumber(b.quality) - getQualityNumber(a.quality);
+          });
           
-          throw new Error('No video sources available');
+          setAvailableQualities(qualityOptions);
+          setShowQualitySelection(true);
+          setLoading(false);
+          
+          // Store subtitles and timings for later use
+          setSubtitles(directSubtitles);
+          setTimings(directTimings || null);
+          
+          console.log(`📊 Prepared ${qualityOptions.length} quality options for selection`);
+          return;
         }
       } else {
-        console.log(`❌ Empty response data`);
+        console.log(`❌ No sources available from any provider`);
         
         // If we're looking for dub and auto-select is enabled, automatically try sub
-        if (type === 'dub' && autoSelectSource) {
-          console.log(`🔄 Auto-fallback: Empty response for DUB, trying SUB...`);
-          setPillMessage('Dub request failed, loading sub...');
+        if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion) {
+          console.log(`🔄 Auto-fallback: No DUB sources available, trying SUB...`);
+          setPillMessage('Dub sources not available, loading sub...');
           return fetchSources(episodeId, 'sub');
         }
         
-        throw new Error('No data returned from source');
+        throw new Error(`No ${type} version available from any provider`);
       }
+      
       console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
 
       // Update pill message to reflect current status
-      if (autoSelectSource) {
-        setPillMessage(`Found episode ${episodeNum}...`);
+      if (shouldAutoSelect) {
+        setPillMessage(`Found episode ${episodeNum} from ${watchResult.provider}...`);
       }
     } catch (error) {
       console.error(`❌ Error:`, error);
       console.error(`❌ ERROR STACK TRACE:`, error instanceof Error ? error.stack : 'No stack trace');
       
       // If we're looking for dub and auto-select is enabled, automatically try sub as last resort
-      if (type === 'dub' && autoSelectSource && !error?.toString().includes('SUB')) {
+      if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion && !error?.toString().includes('SUB')) {
         console.log(`🔄 Final auto-fallback: DUB failed with error, trying SUB as last resort...`);
         setPillMessage('Dub failed, trying sub...');
         return fetchSources(episodeId, 'sub');
@@ -959,14 +856,14 @@ export default function EpisodeSourcesModal({
       console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
       
       // Update pill message for errors
-      if (autoSelectSource) {
+      if (shouldAutoSelect) {
         setPillMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load'}`);
         // Auto-hide pill after error is shown
         setTimeout(() => setPillVisible(false), 3000);
       }
       
       // If we're in auto-select mode and encounter an error, close the modal
-      if (autoSelectSource) {
+      if (shouldAutoSelect) {
         onClose();
       }
     } finally {
@@ -1199,28 +1096,26 @@ export default function EpisodeSourcesModal({
       
       console.log(`🔍 Checking SUB/DUB availability for episode ${episodeNum}`);
       
-      // Check both sub and dub availability in parallel
-      const [subCheck, dubCheck] = await Promise.allSettled([
-        axios.get(API_ENDPOINTS.anilistMeta.episodes(anilistId, false)),
-        axios.get(API_ENDPOINTS.anilistMeta.episodes(anilistId, true))
-      ]);
+      // Use provider manager to check availability
+      const availability = await animeProviderManager.checkEpisodeAvailability(
+        anilistId,
+        animeTitle,
+        parseInt(episodeNum)
+      );
       
-      const subAvailable = subCheck.status === 'fulfilled' && 
-        subCheck.value?.data?.length > 0 &&
-        subCheck.value.data.some((ep: any) => ep.number === parseInt(episodeNum));
-        
-      const dubAvailable = dubCheck.status === 'fulfilled' && 
-        dubCheck.value?.data?.length > 0 &&
-        dubCheck.value.data.some((ep: any) => ep.number === parseInt(episodeNum));
+      // Check if any provider has sub/dub available
+      const subAvailable = Object.values(availability).some(available => available);
+      const dubAvailable = Object.values(availability).some(available => available);
       
       console.log(`📊 Availability check: SUB=${subAvailable}, DUB=${dubAvailable}`);
+      console.log(`📊 Provider availability:`, availability);
       
       return { sub: subAvailable, dub: dubAvailable };
     } catch (error) {
       console.error('Error checking availability:', error);
       return { sub: true, dub: true }; // Assume both available if check fails
     }
-  }, []);
+  }, [animeTitle]);
 
   // Now replace the return statement entirely
   return (

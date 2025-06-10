@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import type { Subtitle } from '../types';
 
@@ -25,73 +25,109 @@ const SubtitleOptions: React.FC<SubtitleOptionsProps> = ({
     : ['English']; // Default if no subtitles available
   
   return (
-    <View style={styles.subtitleOptionsContainer}>
-      <Text style={styles.settingsTitle}>Subtitle Language</Text>
-      <ScrollView style={styles.subtitleOptionsList}>
-        {availableLanguages.map((lang) => (
+    <Modal
+      visible={showSubtitleOptions}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity 
+          style={styles.modalBackdrop} 
+          activeOpacity={1} 
+          onPress={onClose}
+        />
+        <View style={styles.subtitleOptionsContainer}>
+          <Text style={styles.settingsTitle}>Subtitle Language</Text>
+          <ScrollView style={styles.subtitleOptionsList}>
+            {availableLanguages.map((lang) => (
+              <TouchableOpacity
+                key={lang}
+                style={[
+                  styles.subtitleOption,
+                  selectedSubtitleLanguage === lang && styles.selectedSubtitleOption
+                ]}
+                onPress={() => onSelectLanguage(lang)}
+              >
+                <Text style={[
+                  styles.subtitleOptionText,
+                  selectedSubtitleLanguage === lang && styles.selectedSubtitleOptionText
+                ]}>
+                  {lang}
+                </Text>
+                {selectedSubtitleLanguage === lang && (
+                  <FontAwesome5 name="check" size={16} color="#FF6B00" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
           <TouchableOpacity
-            key={lang}
-            style={[
-              styles.subtitleOption,
-              selectedSubtitleLanguage === lang && styles.selectedSubtitleOption
-            ]}
-            onPress={() => onSelectLanguage(lang)}
+            style={styles.closeButton}
+            onPress={onClose}
           >
-            <Text style={[
-              styles.subtitleOptionText,
-              selectedSubtitleLanguage === lang && styles.selectedSubtitleOptionText
-            ]}>
-              {lang}
-            </Text>
-            {selectedSubtitleLanguage === lang && (
-              <FontAwesome5 name="check" size={16} color="#FF6B00" />
-            )}
+            <Text style={styles.closeButtonText}>Close</Text>
           </TouchableOpacity>
-        ))}
-      </ScrollView>
-      <TouchableOpacity
-        style={styles.closeButton}
-        onPress={onClose}
-      >
-        <Text style={styles.closeButtonText}>Close</Text>
-      </TouchableOpacity>
-    </View>
+        </View>
+      </View>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  subtitleOptionsContainer: {
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalBackdrop: {
     position: 'absolute',
-    bottom: 100,
-    right: 20,
-    width: 250,
-    maxHeight: 300,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    borderRadius: 10,
-    padding: 15,
-    zIndex: 10,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  subtitleOptionsContainer: {
+    width: 280,
+    maxHeight: 400,
+    backgroundColor: 'rgba(20, 20, 20, 0.95)',
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
   },
   settingsTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 16,
+    textAlign: 'center',
   },
   subtitleOptionsList: {
-    maxHeight: 200,
+    maxHeight: 250,
   },
   subtitleOption: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 6,
+    marginBottom: 2,
   },
   selectedSubtitleOption: {
     backgroundColor: 'rgba(255, 107, 0, 0.2)',
-    borderRadius: 5,
+    borderColor: 'rgba(255, 107, 0, 0.3)',
   },
   subtitleOptionText: {
     color: 'white',
@@ -102,16 +138,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   closeButton: {
-    marginTop: 10,
-    paddingVertical: 8,
+    marginTop: 16,
+    paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 8,
   },
   closeButtonText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

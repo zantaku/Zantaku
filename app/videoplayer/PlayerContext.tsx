@@ -26,9 +26,24 @@ export interface PlayerPreferences {
   };
 }
 
+export interface AniListUser {
+  userId: number;
+  username: string;
+  token: string;
+  avatar?: string;
+}
+
 interface PlayerContextType {
   preferences: PlayerPreferences;
   setPreferences: React.Dispatch<React.SetStateAction<PlayerPreferences>>;
+  anilistUser: AniListUser | null;
+  setAnilistUser: React.Dispatch<React.SetStateAction<AniListUser | null>>;
+  onSaveToAniList?: (episodeData: {
+    anilistId: string;
+    episodeNumber: number;
+    currentTime: number;
+    duration: number;
+  }) => Promise<boolean>;
 }
 
 const defaultPreferences: PlayerPreferences = {
@@ -58,16 +73,35 @@ const defaultPreferences: PlayerPreferences = {
 
 export const PlayerContext = createContext<PlayerContextType>({
   preferences: defaultPreferences,
-  setPreferences: () => {}
+  setPreferences: () => {},
+  anilistUser: null,
+  setAnilistUser: () => {},
+  onSaveToAniList: undefined
 });
 
 export const usePlayerContext = () => useContext(PlayerContext);
 
-export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const PlayerProvider: React.FC<{ 
+  children: React.ReactNode;
+  anilistUser?: AniListUser | null;
+  onSaveToAniList?: (episodeData: {
+    anilistId: string;
+    episodeNumber: number;
+    currentTime: number;
+    duration: number;
+  }) => Promise<boolean>;
+}> = ({ children, anilistUser: initialAnilistUser, onSaveToAniList }) => {
   const [preferences, setPreferences] = useState<PlayerPreferences>(defaultPreferences);
+  const [anilistUser, setAnilistUser] = useState<AniListUser | null>(initialAnilistUser || null);
 
   return (
-    <PlayerContext.Provider value={{ preferences, setPreferences }}>
+    <PlayerContext.Provider value={{ 
+      preferences, 
+      setPreferences, 
+      anilistUser, 
+      setAnilistUser,
+      onSaveToAniList
+    }}>
       {children}
     </PlayerContext.Provider>
   );

@@ -22,6 +22,12 @@ interface VideoControlsProps {
   onSubtitlePress?: () => void;
   onQualityPress?: () => void;
   onSpeedPress?: () => void;
+  bufferProgress?: number;
+  onSeekStart?: () => void;
+  onSeekEnd?: () => void;
+  animeTitle?: string;
+  episodeNumber?: number;
+  onBackPress?: () => void;
 }
 
 const VideoControls = ({
@@ -39,7 +45,13 @@ const VideoControls = ({
   onSettingsPress,
   onSubtitlePress,
   onQualityPress,
-  onSpeedPress
+  onSpeedPress,
+  bufferProgress = 0,
+  onSeekStart,
+  onSeekEnd,
+  animeTitle,
+  episodeNumber,
+  onBackPress
 }: VideoControlsProps) => {
   const { preferences } = usePlayerContext();
   const [showControls, setShowControls] = useState(true);
@@ -116,6 +128,7 @@ const VideoControls = ({
   const handleSeekStart = () => {
     setIsSeeking(true);
     setSeekValue(currentTime);
+    onSeekStart?.();
   };
   
   const handleSeekChange = (value: number) => {
@@ -125,6 +138,7 @@ const VideoControls = ({
   const handleSeekComplete = () => {
     onSeek(seekValue);
     setIsSeeking(false);
+    onSeekEnd?.();
     resetHideTimeout();
   };
   
@@ -140,18 +154,21 @@ const VideoControls = ({
           ]}
         >
           <View style={styles.topControlsInner}>
-            <TouchableOpacity onPress={onToggleFullscreen} style={styles.iconButton}>
-              <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
+            <TouchableOpacity onPress={onBackPress} style={styles.topButton}>
+              <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
             </TouchableOpacity>
             
             <View style={styles.titleContainer}>
               <Text style={styles.titleText} numberOfLines={1}>
-                Current Episode
+                {animeTitle && episodeNumber 
+                  ? `${animeTitle} - Episode ${episodeNumber}`
+                  : animeTitle || 'Current Episode'
+                }
               </Text>
             </View>
             
-            <TouchableOpacity style={styles.iconButton} onPress={onSettingsPress}>
-              <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
+            <TouchableOpacity style={styles.topButton} onPress={onSettingsPress}>
+              <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -209,49 +226,88 @@ const VideoControls = ({
             !showControls && styles.hidden
           ]}
         >
-          <View style={styles.timeControls}>
-            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+          {/* Progress Bar - Full Width */}
+          <View style={styles.progressBarContainer}>
+            {/* Buffer progress background */}
+            <View style={styles.bufferProgressContainer}>
+              <View 
+                style={[
+                  styles.bufferProgress, 
+                  { 
+                    width: duration > 0 ? `${(progress.playableDuration / duration) * 100}%` : '0%' 
+                  }
+                ]} 
+              />
+            </View>
             
             <Slider
-              style={styles.slider}
+              style={styles.progressSlider}
               minimumValue={0}
               maximumValue={duration}
               value={isSeeking ? seekValue : currentTime}
               minimumTrackTintColor={PLAYER_COLORS.PRIMARY}
-              maximumTrackTintColor={PLAYER_COLORS.SLIDER_TRACK}
+              maximumTrackTintColor="transparent"
               thumbTintColor={PLAYER_COLORS.PRIMARY}
               onSlidingStart={handleSeekStart}
               onValueChange={handleSeekChange}
               onSlidingComplete={handleSeekComplete}
             />
-            
-            <Text style={styles.timeText}>{formatTime(duration)}</Text>
           </View>
           
-          <View style={styles.bottomButtonsRow}>
-            <TouchableOpacity style={styles.iconButton} onPress={onSpeedPress}>
-              <MaterialIcons name="speed" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
-            </TouchableOpacity>
+          {/* Bottom Row - Time and Controls */}
+          <View style={styles.bottomRow}>
+            {/* Time Display - Left Side */}
+            <View style={styles.timeContainer}>
+              <Text style={styles.timeText}>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </Text>
+            </View>
             
-            <TouchableOpacity style={styles.iconButton} onPress={onQualityPress}>
-              <Ionicons name="layers-outline" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[
-                styles.iconButton,
-                preferences?.subtitlesEnabled && styles.activeIconButton
-              ]} 
-              onPress={onSubtitlePress}
-              accessibilityLabel="Toggle subtitles"
-              accessibilityHint="Press 'c' key to toggle subtitles from keyboard"
-            >
-              <Ionicons name="text" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={preferences?.subtitlesEnabled ? '#FF6B00' : PLAYER_COLORS.TEXT_LIGHT} />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.iconButton} onPress={onToggleFullscreen}>
-              <Ionicons name="expand" size={PLAYER_UI.ICON_SIZE.MEDIUM} color={PLAYER_COLORS.TEXT_LIGHT} />
-            </TouchableOpacity>
+          {/* Control Buttons - Right Side */}
+<View style={styles.controlButtonsContainer}>
+                {/* Subtitles */}
+              <TouchableOpacity 
+                style={[
+                  styles.controlButton,
+                  preferences?.subtitlesEnabled && styles.activeControlButton
+                ]} 
+                onPress={onSubtitlePress}
+                accessibilityLabel="Subtitles"
+              >
+                                  <Ionicons 
+                    name="chatbubble" 
+                    size={24} 
+                    color={preferences?.subtitlesEnabled ? PLAYER_COLORS.PRIMARY : PLAYER_COLORS.TEXT_LIGHT} 
+                  />
+              </TouchableOpacity>
+              
+              {/* Playback Speed */}
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={onSpeedPress}
+                accessibilityLabel="Speed"
+              >
+                                  <Ionicons 
+                    name="speedometer" 
+                    size={24} 
+                    color={PLAYER_COLORS.TEXT_LIGHT} 
+                  />
+              </TouchableOpacity>
+              
+              {/* Fullscreen Toggle */}
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={onToggleFullscreen}
+                accessibilityLabel="Fullscreen"
+              >
+                                  <Ionicons 
+                    name="resize-outline" 
+                    size={24} 
+                    color={PLAYER_COLORS.TEXT_LIGHT} 
+                  />
+              </TouchableOpacity>
+</View>
+
           </View>
         </Animated.View>
       </View>
@@ -263,6 +319,7 @@ const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
+    zIndex: 100,
   },
   hidden: {
     display: 'none',
@@ -280,6 +337,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  topButton: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  topRightButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   titleContainer: {
     flex: 1,
@@ -341,6 +408,74 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
   },
+  progressBarContainer: {
+    width: '100%',
+    marginBottom: 12,
+    position: 'relative',
+  },
+  bufferProgressContainer: {
+    position: 'absolute',
+    top: 18,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: PLAYER_COLORS.SLIDER_TRACK,
+    borderRadius: 2,
+    zIndex: 1,
+  },
+  bufferProgress: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    borderRadius: 2,
+  },
+  progressSlider: {
+    width: '100%',
+    height: 40,
+    zIndex: 2,
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timeContainer: {
+    flex: 1,
+  },
+  timeText: {
+    color: PLAYER_COLORS.TEXT_LIGHT,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  controlButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  controlButton: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    marginHorizontal: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  activeControlButton: {
+    backgroundColor: `rgba(255, 102, 196, 0.3)`,
+    borderWidth: 1,
+    borderColor: PLAYER_COLORS.PRIMARY,
+  },
+  subtitleIcon: {
+    // Additional styling for subtitle icon if needed
+  },
+  // Legacy styles for compatibility
   timeControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -350,10 +485,6 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 40,
     marginHorizontal: 10,
-  },
-  timeText: {
-    color: PLAYER_COLORS.TEXT_LIGHT,
-    fontSize: 12,
   },
   bottomButtonsRow: {
     flexDirection: 'row',

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet, StatusBar, BackHandler } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
 import VideoPlayer from './videoplayer/PlayerScreen';
 import { useTheme } from '../hooks/useTheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { STORAGE_KEY, ANILIST_GRAPHQL_ENDPOINT } from '../constants/auth';
 
 // Player component that forces landscape orientation
 export default function Player() {
@@ -15,6 +17,115 @@ export default function Player() {
   const [isReady, setIsReady] = useState(false);
   const params = useLocalSearchParams();
   const router = useRouter();
+  
+  // Add AniList user state
+  const [anilistUser, setAnilistUser] = useState<{
+    userId: number;
+    username: string;
+    token: string;
+    avatar?: string;
+  } | null>(null);
+
+  // Load AniList user data
+  useEffect(() => {
+    const loadAnilistUser = async () => {
+      try {
+        const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+        const userData = await SecureStore.getItemAsync(STORAGE_KEY.USER_DATA);
+        
+        if (token && userData) {
+          const user = JSON.parse(userData);
+          setAnilistUser({
+            userId: user.id,
+            username: user.name,
+            token: token,
+            avatar: user.avatar?.large
+          });
+          console.log('[PLAYER] 👤 AniList user loaded:', user.name);
+        } else {
+          console.log('[PLAYER] 👤 No AniList user found');
+        }
+      } catch (error) {
+        console.error('[PLAYER] ❌ Error loading AniList user:', error);
+      }
+    };
+
+    loadAnilistUser();
+  }, []);
+
+  // Handle AniList progress save
+  const handleSaveToAniList = async (episodeData: {
+    anilistId: string;
+    episodeNumber: number;
+    currentTime: number;
+    duration: number;
+  }) => {
+    if (!anilistUser || !episodeData.anilistId) {
+      console.log('[PLAYER] ⚠️ Cannot save to AniList: missing user or anime ID');
+      return false;
+    }
+
+    try {
+      console.log('[PLAYER] 💾 Saving progress to AniList...', {
+        anilistId: episodeData.anilistId,
+        episode: episodeData.episodeNumber,
+        progress: Math.round((episodeData.currentTime / episodeData.duration) * 100)
+      });
+
+      const mutation = `
+        mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
+          SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) {
+            id
+            progress
+            status
+            media {
+              title {
+                userPreferred
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await fetch(ANILIST_GRAPHQL_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${anilistUser.token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          query: mutation,
+          variables: {
+            mediaId: parseInt(episodeData.anilistId),
+            progress: episodeData.episodeNumber,
+            status: 'CURRENT'
+          }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.errors) {
+        console.error('[PLAYER] ❌ AniList API errors:', data.errors);
+        throw new Error(data.errors[0]?.message || 'Failed to save to AniList');
+      }
+
+      if (data.data?.SaveMediaListEntry) {
+        console.log('[PLAYER] ✅ Successfully saved to AniList:', {
+          progress: data.data.SaveMediaListEntry.progress,
+          status: data.data.SaveMediaListEntry.status,
+          title: data.data.SaveMediaListEntry.media?.title?.userPreferred
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('[PLAYER] ❌ Error saving to AniList:', error);
+      throw error;
+    }
+  };
 
   // Log all route parameters and data when component mounts
   useEffect(() => {
@@ -230,7 +341,10 @@ export default function Player() {
   return (
     <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
       <StatusBar hidden={true} />
-      <PlayerProvider>
+      <PlayerProvider 
+        anilistUser={anilistUser}
+        onSaveToAniList={handleSaveToAniList}
+      >
         <VideoPlayer />
       </PlayerProvider>
     </View>

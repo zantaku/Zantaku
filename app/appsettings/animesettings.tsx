@@ -10,8 +10,8 @@ import { BlurView } from 'expo-blur';
 import Slider from '@react-native-community/slider';
 
 // Add this type definition at the top of the file after imports
-// Define a local copy of PlayerPreferences interface to use in this file
-interface PlayerPreferences {
+// Extended PlayerPreferences interface for local use
+interface ExtendedPlayerPreferences {
   volume: number;
   playbackRate: number;
   subtitlesEnabled: boolean;
@@ -19,15 +19,15 @@ interface PlayerPreferences {
   autoplayNext: boolean;
   rememberPosition: boolean;
   selectedSubtitleLanguage: string;
-  debugOverlayEnabled: boolean;
-  subtitleStyle: {
+  debugOverlayEnabled?: boolean;
+  subtitleStyle?: {
     fontSize: number;
     backgroundColor: string;
     textColor: string;
     backgroundOpacity: number;
     boldText: boolean;
   };
-  markerSettings: {
+  markerSettings?: {
     showMarkers: boolean;
     autoSkipIntro: boolean;
     autoSkipOutro: boolean;
@@ -52,9 +52,13 @@ export default function AnimeSettingsPage() {
   // Local state for source settings
   const [sourceSettings, setSourceSettings] = useState({
     preferredType: 'sub' as 'sub' | 'dub',
-    autoTryAlternateVersion: false,
+    autoTryAlternateVersion: true,
     preferHLSStreams: true,
     logSourceDetails: true,
+    // Provider settings
+    defaultProvider: 'animepahe' as 'animepahe' | 'zoro',
+    autoSelectSource: true,
+    providerPriority: ['animepahe', 'zoro'] as ('animepahe' | 'zoro')[],
   });
 
   // Add sample subtitle text
@@ -196,18 +200,18 @@ export default function AnimeSettingsPage() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Show Intro/Outro Markers</Text>
               <Switch
-                value={preferences.markerSettings?.showMarkers || false}
-                onValueChange={(value) => {
-                  savePlayerPreferences({
-                    ...preferences,
-                    markerSettings: {
-                      ...preferences.markerSettings,
-                      showMarkers: value
-                    }
-                  });
-                }}
+                              value={(preferences as any).markerSettings?.showMarkers ?? false}
+              onValueChange={(value) => {
+                savePlayerPreferences({
+                  ...preferences,
+                  markerSettings: {
+                    ...(preferences as any).markerSettings,
+                    showMarkers: value
+                  }
+                });
+              }}
                 trackColor={{ false: '#767577', true: '#4CAF50' }}
-                thumbColor={preferences.markerSettings?.showMarkers ? '#fff' : '#f4f3f4'}
+                thumbColor={(preferences as any).markerSettings?.showMarkers ? '#fff' : '#f4f3f4'}
               />
             </View>
             <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
@@ -446,6 +450,84 @@ export default function AnimeSettingsPage() {
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
+          <FontAwesome5 name="server" size={20} color="#4CAF50" />
+          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Anime Providers</Text>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Select Best Source</Text>
+              <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
+                Automatically try AnimePahe first, then fallback to Zoro if needed
+              </Text>
+            </View>
+            <Switch
+              value={sourceSettings.autoSelectSource}
+              onValueChange={(value) => {
+                saveSourceSettings({
+                  ...sourceSettings,
+                  autoSelectSource: value
+                });
+              }}
+              trackColor={{ false: '#767577', true: '#4CAF50' }}
+              thumbColor={sourceSettings.autoSelectSource ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ marginBottom: 12 }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Default Provider</Text>
+            {sourceSettings.autoSelectSource && (
+              <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
+                Used when auto-select is disabled
+              </Text>
+            )}
+          </View>
+          <View style={styles.providerOptions}>
+            {[
+              { id: 'animepahe', name: 'AnimePahe', color: '#4CAF50' },
+              { id: 'zoro', name: 'Zoro (HiAnime)', color: '#2196F3' }
+            ].map(provider => (
+              <TouchableOpacity
+                key={`provider-${provider.id}`}
+                style={[
+                  styles.providerOption,
+                  sourceSettings.defaultProvider === provider.id && styles.providerOptionSelected,
+                  { borderColor: provider.color },
+                  sourceSettings.autoSelectSource && styles.providerOptionDisabled
+                ]}
+                onPress={() => {
+                  if (!sourceSettings.autoSelectSource) {
+                    saveSourceSettings({
+                      ...sourceSettings,
+                      defaultProvider: provider.id as 'animepahe' | 'zoro'
+                    });
+                  }
+                }}
+              >
+                <Text style={[
+                  styles.providerOptionText,
+                  { 
+                    color: sourceSettings.defaultProvider === provider.id 
+                      ? '#fff' 
+                      : sourceSettings.autoSelectSource
+                      ? '#666'
+                      : currentTheme.colors.text 
+                  }
+                ]}>
+                  {provider.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
           <FontAwesome5 name="cogs" size={20} color="#9C27B0" />
           <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Advanced</Text>
         </View>
@@ -503,6 +585,9 @@ export default function AnimeSettingsPage() {
               autoTryAlternateVersion: true,
               preferHLSStreams: true,
               logSourceDetails: true,
+              defaultProvider: 'animepahe',
+              autoSelectSource: true,
+              providerPriority: ['animepahe', 'zoro'],
             });
             
             alert('All settings reset to default');
@@ -845,5 +930,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '400',
     marginTop: 4,
+  },
+  providerOptions: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  providerOption: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 2,
+    alignItems: 'center',
+    minWidth: 120,
+  },
+  providerOptionSelected: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  providerOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  providerOptionDisabled: {
+    opacity: 0.5,
+    borderColor: '#666',
   },
 }); 

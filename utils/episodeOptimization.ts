@@ -15,6 +15,13 @@ export interface Episode {
   description?: string;
   duration?: number;
   provider?: string;
+  // Provider-specific episode IDs
+  providerIds?: {
+    zoro?: string;
+    animepahe?: string;
+  };
+  isSubbed?: boolean;
+  isDubbed?: boolean;
 }
 
 // Constants

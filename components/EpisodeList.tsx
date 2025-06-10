@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import EpisodeSourcesModal from '../app/components/EpisodeSourcesModal';
+import CorrectAnimeSearchModal from './CorrectAnimeSearchModal';
 import { requestNotificationPermissions, toggleNotifications, isNotificationEnabled } from '../utils/notifications';
 import axios from 'axios';
 import { JIKAN_API_ENDPOINT } from '../app/constants/api';
@@ -16,12 +17,42 @@ import {
   MAX_INITIAL_EPISODES,
   saveEpisodesToCache,
 } from '../utils/episodeOptimization';
+import { animeProviderManager } from '../api/proxy/providers/anime';
+
+// Hook to load source settings
+const useSourceSettings = () => {
+  const [sourceSettings, setSourceSettings] = useState({
+    preferredType: 'sub' as 'sub' | 'dub',
+    autoTryAlternateVersion: true,
+    preferHLSStreams: true,
+    logSourceDetails: true,
+    defaultProvider: 'animepahe' as 'animepahe' | 'zoro',
+    autoSelectSource: true,
+    providerPriority: ['animepahe', 'zoro'] as ('animepahe' | 'zoro')[],
+  });
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const sourceData = await AsyncStorage.getItem('sourceSettings');
+        if (sourceData) {
+          const parsedSettings = JSON.parse(sourceData);
+          setSourceSettings(prev => ({ ...prev, ...parsedSettings }));
+        }
+      } catch (error) {
+        console.error('Failed to load source settings:', error);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  return sourceSettings;
+};
 
 // #region Constants & Interfaces
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
 const MAL_API_ENDPOINT = 'https://api.myanimelist.net/v2';
-const CONSUMET_API_URL = 'https://takiapi.xyz';
-const CONSUMET_API_BASE = `${CONSUMET_API_URL}/anime/zoro`;
 
 const PLACEHOLDER_BLUR_HASH = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
 
@@ -242,6 +273,9 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     // #region State and Hooks
     const { isDarkMode, currentTheme } = useTheme();
     const router = useRouter();
+    
+    // Load source settings
+    const sourceSettings = useSourceSettings();
   
     const [episodes, setEpisodes] = useState<Episode[]>(initialEpisodes || []);
     const [isLoading, setIsLoading] = useState(initialLoading);
@@ -255,10 +289,16 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     const [columnCount, setColumnCount] = useState<number>(1);
     const [isNewestFirst, setIsNewestFirst] = useState(true);
     const [latestEpisodeInfo, setLatestEpisodeInfo] = useState<{ number: number; date: string; source: string; } | null>(null);
-    const [sourceSettings, setSourceSettings] = useState({ preferredType: 'sub' as 'sub' | 'dub' });
+
     const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState<boolean>(false);
     const [episodeRanges, setEpisodeRanges] = useState<Episode[][]>([]);
     const [hiAnimeEpisodesLoaded, setHiAnimeEpisodesLoaded] = useState<boolean>(false);
+    
+    // Provider and search modal state
+    const [currentProvider, setCurrentProvider] = useState<string>('animepahe');
+    const [showCorrectAnimeModal, setShowCorrectAnimeModal] = useState(false);
+    const [currentAnimeTitle, setCurrentAnimeTitle] = useState<string>('');
+    const [showProviderDropdown, setShowProviderDropdown] = useState(false);
 
     const flashListRef = useRef<FlashList<any>>(null);
     const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -304,11 +344,14 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
     const fetchEpisodeAvailability = useCallback(async (animeId: string): Promise<{sub: Episode[], dub: Episode[]}> => {
         try {
-            const [subResponse, dubResponse] = await Promise.all([
-                axios.get(`${CONSUMET_API_URL}/meta/anilist/episodes/${animeId}?provider=zoro`),
-                axios.get(`${CONSUMET_API_URL}/meta/anilist/episodes/${animeId}?provider=zoro&dub=true`)
+            const [subResult, dubResult] = await Promise.all([
+                animeProviderManager.getEpisodesFromProvider('zoro', animeId, undefined, false),
+                animeProviderManager.getEpisodesFromProvider('zoro', animeId, undefined, true)
             ]);
-            return { sub: subResponse.data || [], dub: dubResponse.data || [] };
+            return { 
+                sub: subResult.success ? subResult.episodes : [], 
+                dub: dubResult.success ? dubResult.episodes : [] 
+            };
         } catch (error) {
             console.error('Error fetching episode availability:', error);
             return { sub: [], dub: [] };
@@ -323,42 +366,39 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
         setIsBackgroundRefreshing(true);
         try {
-            const searchUrl = `${CONSUMET_API_BASE}/${encodeURIComponent(searchTitle)}`;
-            const searchResponse = await fetchWithRetry(searchUrl);
-            const results = searchResponse.data.results || [];
-            if (!results.length) {
-                setHiAnimeEpisodesLoaded(true); // Mark as loaded even if no results to prevent retries
-                return;
-            }
+            console.log(`[EpisodeList] Fetching episodes from multiple providers for: ${searchTitle}`);
+            
+            // Get episodes from all available providers
+            const providerResults = await animeProviderManager.getEpisodesFromAllProviders(
+                anilistId, 
+                animeTitle, 
+                mangaTitle
+            );
 
-            const matchedAnime = results.find((a: any) => a.title.toLowerCase().trim() === searchTitle.toLowerCase().trim()) || results[0];
-            const infoUrl = `${CONSUMET_API_BASE}/info?id=${matchedAnime.id}`;
-            const infoResponse = await axios.get(infoUrl);
-            const zoroEpisodes = infoResponse.data?.episodes;
+            console.log(`[EpisodeList] Provider results:`, providerResults.map(r => ({
+                provider: r.provider,
+                success: r.success,
+                episodeCount: r.episodes.length,
+                error: r.error
+            })));
 
-            if (zoroEpisodes && zoroEpisodes.length > 0) {
-                const availability = await fetchEpisodeAvailability(anilistId);
-                const subMap = new Map(availability.sub.map(ep => [ep.number, true]));
-                const dubMap = new Map(availability.dub.map(ep => [ep.number, true]));
+            // Merge episodes from all providers
+            const newEpisodes = animeProviderManager.mergeEpisodesFromProviders(providerResults, coverImage);
 
-                const newEpisodes = mergeEpisodes(episodes, zoroEpisodes).map(ep => ({
-                    ...ep,
-                    isSubbed: subMap.has(ep.number) || false,
-                    isDubbed: dubMap.has(ep.number) || false,
-                }));
-
+            if (newEpisodes.length > 0) {
+                console.log(`[EpisodeList] Merged ${newEpisodes.length} episodes from providers`);
                 setEpisodes(newEpisodes);
                 await saveEpisodesToCache(newEpisodes, anilistId, malId, animeTitle);
             }
             
             setHiAnimeEpisodesLoaded(true); // Always mark as loaded after attempt
         } catch (error) {
-            console.error('Error fetching HiAnime episodes:', error);
+            console.error('Error fetching episodes from providers:', error);
             setHiAnimeEpisodesLoaded(true); // Mark as loaded even on error to prevent infinite retries
         } finally {
             setIsBackgroundRefreshing(false);
         }
-    }, [mangaTitle, animeTitle, anilistId, malId, episodes, coverImage, mergeEpisodes, fetchEpisodeAvailability, hiAnimeEpisodesLoaded, isBackgroundRefreshing]);
+    }, [mangaTitle, animeTitle, anilistId, malId, episodes, coverImage, hiAnimeEpisodesLoaded, isBackgroundRefreshing]);
 
     const fetchAiringSchedule = useCallback(async () => {
         if (!anilistId) return;
@@ -398,8 +438,16 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         AsyncStorage.getItem('episodeColumnCount').then(val => {
             if (val) setColumnCount(Number(val));
         });
+        // Load provider settings
+        AsyncStorage.getItem('animeProviderSettings').then(val => {
+            if (val) {
+                const settings = JSON.parse(val);
+                setCurrentProvider(settings.defaultProvider || 'animepahe');
+            }
+        });
         // Reset HiAnime episodes loaded flag when anime changes
         setHiAnimeEpisodesLoaded(false);
+        setCurrentAnimeTitle(animeTitle);
     }, [fetchUserProgress, fetchAiringSchedule, anilistId]);
 
     useEffect(() => {
@@ -494,6 +542,27 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         }
     }, [anilistId, animeTitle, episodes]);
 
+    const handleProviderChange = useCallback((newProvider: string) => {
+        setCurrentProvider(newProvider);
+        const settings = { defaultProvider: newProvider };
+        AsyncStorage.setItem('animeProviderSettings', JSON.stringify(settings));
+        // Trigger re-fetch with new provider
+        setHiAnimeEpisodesLoaded(false);
+        fetchHiAnimeEpisodes();
+    }, [fetchHiAnimeEpisodes]);
+
+    const handleAnimeChange = useCallback(() => {
+        setShowCorrectAnimeModal(true);
+    }, []);
+
+    const handleAnimeSelect = useCallback((animeId: string, poster: string, provider: string) => {
+        setCurrentProvider(provider);
+        setShowCorrectAnimeModal(false);
+        // Here you could implement logic to switch to the selected anime
+        // For now, we'll just update the provider and re-fetch
+        handleProviderChange(provider);
+    }, [handleProviderChange]);
+
     const renderItem = useCallback(({ item }: { item: Episode }) => (
         <View style={styles.cardWrapper}>
             {columnCount === 1 ? (
@@ -513,6 +582,102 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         const label = (typeof first === 'number' && typeof last === 'number') ? (first === last ? String(first) : `${first}-${last}`) : `Range ${index + 1}`;
         return <Text style={[styles.rangeButtonText, activeTab === index && styles.activeRangeButtonText]} numberOfLines={1}>{label}</Text>;
     }, [activeTab]);
+
+    const getProviderColor = (provider: string) => {
+        switch (provider) {
+            case 'animepahe': return '#02A9FF';
+            case 'zoro': return '#4CAF50';
+            case 'gogoanime': return '#FF6740';
+            default: return '#02A9FF';
+        }
+    };
+
+    const getProviderName = (provider: string) => {
+        switch (provider) {
+            case 'animepahe': return 'AnimePahe';
+            case 'zoro': return 'Zoro/HiAnime';
+            case 'gogoanime': return 'GogoAnime';
+            default: return 'Unknown';
+        }
+    };
+
+    const renderProviderChanger = () => (
+        <View style={[styles.providerChanger, { backgroundColor: currentTheme.colors.surface }]}>
+            <View style={styles.providerInfo}>
+                <View style={styles.providerRow}>
+                    <TouchableOpacity 
+                        style={[styles.providerBadge, { backgroundColor: getProviderColor(currentProvider) }]}
+                        onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+                    >
+                        <Text style={styles.providerBadgeText}>{getProviderName(currentProvider)}</Text>
+                        <FontAwesome5 
+                            name={showProviderDropdown ? "chevron-up" : "chevron-down"} 
+                            size={10} 
+                            color="#fff" 
+                            style={{ marginLeft: 6 }}
+                        />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.changeProviderButton}
+                        onPress={() => {
+                            // Cycle through providers
+                            const providers = ['animepahe', 'zoro', 'gogoanime'];
+                            const currentIndex = providers.indexOf(currentProvider);
+                            const nextProvider = providers[(currentIndex + 1) % providers.length];
+                            handleProviderChange(nextProvider);
+                        }}
+                    >
+                        <FontAwesome5 name="sync-alt" size={14} color={currentTheme.colors.text} />
+                    </TouchableOpacity>
+                </View>
+                
+                {showProviderDropdown && (
+                    <View style={[styles.providerDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
+                        {[
+                            { id: 'animepahe', name: 'AnimePahe', color: '#02A9FF' },
+                            { id: 'zoro', name: 'Zoro/HiAnime', color: '#4CAF50' },
+                            { id: 'gogoanime', name: 'GogoAnime', color: '#FF6740' }
+                        ].map((providerOption) => (
+                            <TouchableOpacity
+                                key={providerOption.id}
+                                style={[
+                                    styles.providerDropdownItem,
+                                    currentProvider === providerOption.id && styles.providerDropdownItemActive,
+                                    { borderBottomColor: currentTheme.colors.border }
+                                ]}
+                                onPress={() => {
+                                    handleProviderChange(providerOption.id);
+                                    setShowProviderDropdown(false);
+                                }}
+                            >
+                                <View style={[styles.providerDropdownBadge, { backgroundColor: providerOption.color }]} />
+                                <Text style={[
+                                    styles.providerDropdownText, 
+                                    { color: currentTheme.colors.text },
+                                    currentProvider === providerOption.id && styles.providerDropdownTextActive
+                                ]}>
+                                    {providerOption.name}
+                                </Text>
+                                {currentProvider === providerOption.id && (
+                                    <FontAwesome5 name="check" size={14} color={providerOption.color} />
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+                
+                <TouchableOpacity 
+                    style={styles.animeTitleContainer}
+                    onPress={handleAnimeChange}
+                >
+                    <Text style={[styles.animeTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
+                        {currentAnimeTitle}
+                    </Text>
+                    <FontAwesome5 name="edit" size={12} color={currentTheme.colors.textSecondary} />
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
 
     const renderHeader = () => {
         const formatBannerDate = (dateInput: string | number) => safeFormatDate(String(dateInput), { month: 'short', day: 'numeric' }) || 'a recent date';
@@ -576,6 +741,14 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
     return (
         <View style={styles.container}>
+            {showProviderDropdown && (
+                <TouchableOpacity 
+                    style={styles.dropdownOverlay}
+                    activeOpacity={1}
+                    onPress={() => setShowProviderDropdown(false)}
+                />
+            )}
+            {renderProviderChanger()}
             <View style={styles.headerWrapper}>
                 <View style={styles.header}>
                     <Text style={[styles.titleText, { color: currentTheme.colors.text }]}>Episodes</Text>
@@ -610,6 +783,15 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 anilistId={anilistId}
                 malId={malId}
                 mangaTitle={mangaTitle}
+            />
+
+            <CorrectAnimeSearchModal
+                visible={showCorrectAnimeModal}
+                onClose={() => setShowCorrectAnimeModal(false)}
+                onSelectAnime={handleAnimeSelect}
+                initialQuery={currentAnimeTitle}
+                currentProvider={currentProvider}
+                onProviderChange={handleProviderChange}
             />
         </View>
     );
@@ -689,4 +871,107 @@ const styles = StyleSheet.create({
     listRewatchButton: { backgroundColor: '#01579B' },
     listWatchButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
     watchedListCard: { backgroundColor: '#2c2c2e' },
+    
+    // Provider changer styles
+    providerChanger: {
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 12,
+        padding: 16,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        zIndex: 10000,
+        position: 'relative',
+    },
+    providerInfo: {
+        gap: 12,
+    },
+    providerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    providerBadge: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    providerBadgeText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    changeProviderButton: {
+        padding: 8,
+        borderRadius: 20,
+        backgroundColor: 'rgba(128,128,128,0.2)',
+        width: 36,
+        height: 36,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    animeTitleContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 4,
+    },
+    animeTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        flex: 1,
+        marginRight: 8,
+    },
+    // Provider dropdown styles
+    providerDropdown: {
+        position: 'absolute',
+        top: 50,
+        left: 0,
+        right: 0,
+        borderRadius: 8,
+        borderWidth: 1,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        zIndex: 9999,
+    },
+    providerDropdownItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+    },
+    providerDropdownItemActive: {
+        backgroundColor: 'rgba(128,128,128,0.1)',
+    },
+    providerDropdownBadge: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        marginRight: 12,
+    },
+    providerDropdownText: {
+        fontSize: 14,
+        fontWeight: '500',
+        flex: 1,
+    },
+    providerDropdownTextActive: {
+        fontWeight: '600',
+    },
+    dropdownOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9998,
+    },
 });
