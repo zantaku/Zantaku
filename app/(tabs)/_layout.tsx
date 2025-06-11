@@ -199,12 +199,32 @@ export default function TabsLayout() {
       console.log('[TabsLayout] Setting anime search visible for genre:', genre);
     });
 
+    // Listen for anime format search requests
+    const openAnimeFormatSearchListener = DeviceEventEmitter.addListener('openAnimeFormatSearch', (format) => {
+      console.log('[TabsLayout] Anime format search requested for:', format);
+      
+      // Directly show the search modal
+      setIsSearchVisible(true);
+      console.log('[TabsLayout] Setting anime search visible for format:', format);
+    });
+
+    // Listen for manga format search requests
+    const openMangaFormatSearchListener = DeviceEventEmitter.addListener('openMangaFormatSearch', (format) => {
+      console.log('[TabsLayout] Manga format search requested for:', format);
+      
+      // Directly show the search modal
+      setIsSearchVisible(true);
+      console.log('[TabsLayout] Setting manga search visible for format:', format);
+    });
+
     return () => {
       showSettingsListener.remove();
       showSettingsModalListener.remove();
       showSearchListener.remove();
       openGenreSearchListener.remove();
       openAnimeGenreSearchListener.remove();
+      openAnimeFormatSearchListener.remove();
+      openMangaFormatSearchListener.remove();
     };
   }, []);
 

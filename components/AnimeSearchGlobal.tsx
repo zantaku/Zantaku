@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 1000,
+    zIndex: 9999,
   },
   content: {
     flex: 1,
@@ -753,7 +753,7 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
     searchAnime('');
   }, []);
 
-  // Add useEffect to listen for genre search events
+  // Add useEffect to listen for genre and format search events
   useEffect(() => {
     // Listen for anime genre search events
     const genreSearchSubscription = DeviceEventEmitter.addListener(
@@ -785,8 +785,39 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
       }
     );
 
+    // Listen for anime format search events
+    const formatSearchSubscription = DeviceEventEmitter.addListener(
+      'openAnimeFormatSearch',
+      (format: string) => {
+        console.log('AnimeSearchGlobal: Format search triggered for:', format);
+        
+        // Ensure the format is properly formatted
+        const formattedFormat = format.trim();
+        console.log('Using formatted format for anime search:', formattedFormat);
+        
+        // Set the format filter and clear other filters
+        setFilters({
+          format: [formattedFormat],
+          status: [],
+          year: null,
+          sort: { 'TRENDING_DESC': 'DESC' }, // Default to trending
+          genres: [],
+          season: ''
+        });
+        
+        setQuery(''); // Clear any existing query
+        
+        // Add a delay before making the API call to avoid rate limiting
+        setTimeout(() => {
+          console.log('Making API call for anime format search...');
+          searchAnime('');
+        }, 1000);
+      }
+    );
+
     return () => {
       genreSearchSubscription.remove();
+      formatSearchSubscription.remove();
     };
   }, []);
 
@@ -980,7 +1011,7 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
           </View>
           {result.description && (
             <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
-              {result.description.replace(/<[^>]*>/g, '')}
+              {result.description?.replace(/<[^>]*>/g, '') || ''}
             </Text>
           )}
         </View>
@@ -997,6 +1028,8 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
         transparent={true}
         onRequestClose={onClose}
         animationType="fade"
+        statusBarTranslucent={true}
+        presentationStyle="overFullScreen"
       >
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.8)' }]}>
           <View style={styles.content}>
@@ -1047,30 +1080,51 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
               </TouchableOpacity>
             </View>
 
-            {/* Show active genre filter if any */}
-            {filters.genres.length > 0 && (
+            {/* Show active filters if any */}
+            {(filters.genres.length > 0 || filters.format.length > 0) && (
               <View style={styles.activeFilterContainer}>
                 <Text style={[styles.activeFilterLabel, { color: currentTheme.colors.textSecondary }]}>
-                  Active Filter:
+                  Active Filters:
                 </Text>
                 <View style={styles.activeFilterChips}>
-                  <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
-                    <Text style={styles.activeGenreChipText}>
-                      {filters.genres[0]}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setFilters(prev => ({
-                          ...prev,
-                          genres: []
-                        }));
-                        setTimeout(() => searchAnime(query), 100);
-                      }}
-                      style={styles.clearGenreButton}
-                    >
-                      <FontAwesome5 name="times" size={12} color="#FFFFFF" />
-                    </TouchableOpacity>
-                  </View>
+                  {filters.genres.length > 0 && (
+                    <View style={[styles.activeGenreChip, { backgroundColor: '#02A9FF' }]}>
+                      <Text style={styles.activeGenreChipText}>
+                        {filters.genres[0]}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setFilters(prev => ({
+                            ...prev,
+                            genres: []
+                          }));
+                          setTimeout(() => searchAnime(query), 100);
+                        }}
+                        style={styles.clearGenreButton}
+                      >
+                        <FontAwesome5 name="times" size={12} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {filters.format.length > 0 && (
+                    <View style={[styles.activeGenreChip, { backgroundColor: '#FF6B35' }]}>
+                      <Text style={styles.activeGenreChipText}>
+                        {filters.format[0]}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setFilters(prev => ({
+                            ...prev,
+                            format: []
+                          }));
+                          setTimeout(() => searchAnime(query), 100);
+                        }}
+                        style={styles.clearGenreButton}
+                      >
+                        <FontAwesome5 name="times" size={12} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               </View>
             )}

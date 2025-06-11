@@ -295,6 +295,14 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
+          name="appsettings/newssettings"
+          options={{
+            headerShown: false,
+            presentation: 'modal',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="settings"
           options={{
             headerShown: false,

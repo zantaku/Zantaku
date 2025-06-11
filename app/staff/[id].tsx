@@ -23,7 +23,7 @@ interface StaffDetails {
   image: {
     large: string;
   };
-  description: string;
+  description: string | null;
   primaryOccupations: string[];
   gender: string;
   dateOfBirth: {
@@ -494,9 +494,9 @@ const StaffDetailsScreen = () => {
                   style={[styles.description, { color: currentTheme.colors.text }]}
                   numberOfLines={expandedDescription ? undefined : 5}
                 >
-                  {staffDetails.description.replace(/<[^>]*>?/gm, '')}
+                  {staffDetails.description?.replace(/<[^>]*>?/gm, '') || ''}
                 </Text>
-                {staffDetails.description.length > 200 && (
+                {staffDetails.description && staffDetails.description.length > 200 && (
                   <TouchableOpacity onPress={() => setExpandedDescription(!expandedDescription)}>
                     <Text style={[styles.readMore, { color: "#02A9FF" }]}>
                       {expandedDescription ? 'Show Less' : 'Read More'}

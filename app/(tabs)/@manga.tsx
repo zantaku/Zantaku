@@ -29,7 +29,7 @@ interface Manga {
     color: string;
   };
   bannerImage: string;
-  description: string;
+  description: string | null;
   chapters: number;
   averageScore: number;
   trending: number;

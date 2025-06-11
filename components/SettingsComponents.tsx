@@ -30,7 +30,7 @@
  */
 
 import React, { ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, Switch, Animated, ViewStyle, TextStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Switch, Animated, ViewStyle, TextStyle, ScrollView } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { DeviceEventEmitter } from 'react-native';
@@ -42,6 +42,7 @@ interface SettingsLayoutProps {
   title: string;
   children: ReactNode;
   onBack?: () => void;
+  hideHeader?: boolean;
 }
 
 interface SettingsSectionProps {
@@ -127,9 +128,13 @@ export const SettingsLayout = ({ title, children, onBack }: SettingsLayoutProps)
       </View>
 
       {/* Content */}
-      <View style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {children}
-      </View>
+      </ScrollView>
     </View>
   );
 };
@@ -416,7 +421,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
     padding: 16,
+    paddingBottom: 32,
   },
   section: {
     borderRadius: 16,

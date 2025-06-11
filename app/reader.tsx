@@ -1852,8 +1852,8 @@ export default function ReaderScreen() {
     return () => clearTimeout(timer);
   }, [notificationOpacity, notificationOffset]);
 
-  // Replace setShowNotification(true) calls with showNotificationWithAnimation()
-  const handleNextChapterConfirmed = useCallback(async () => {
+  // Add function to save progress and show toast
+  const saveProgressWithToast = useCallback(async (showToast: boolean = true) => {
     try {
       // Save progress locally regardless of incognito mode
       const key = `reading_progress_${params.mangaId}_${params.chapter}`;
@@ -1946,15 +1946,56 @@ export default function ReaderScreen() {
             throw new Error(data.errors[0].message);
           }
           
-          // Show success notification with manga title if available
-          const mangaTitle = data?.data?.SaveMediaListEntry?.media?.title?.userPreferred || params.title;
-          setNotificationMessage(`✓ Updated ${mangaTitle} to Chapter ${chapterNumber} on AniList`);
-          showNotificationWithAnimation();
+          // Show success notification with manga title if available and requested
+          if (showToast) {
+            const mangaTitle = data?.data?.SaveMediaListEntry?.media?.title?.userPreferred || params.title;
+            setNotificationMessage(`✓ Saved Chapter ${chapterNumber} progress to AniList`);
+            showNotificationWithAnimation();
+          }
+          
+          // Emit events to refresh other parts of the app
+          DeviceEventEmitter.emit('refreshMediaLists');
+          DeviceEventEmitter.emit('refreshReadlist');
         }
+      } else if (showToast) {
+        // Show local save confirmation even in incognito mode
+        setNotificationMessage(`✓ Progress saved locally (Chapter ${params.chapter})`);
+        showNotificationWithAnimation();
       }
       
       // Mark progress as updated
       setHasUpdatedProgress(true);
+      return true;
+    } catch (err) {
+      console.error('Error saving progress:', err);
+      if (showToast) {
+        setNotificationMessage('❌ Failed to save progress' + (isIncognito ? '' : ' to AniList'));
+        showNotificationWithAnimation();
+      }
+      return false;
+    }
+  }, [
+    isIncognito,
+    currentPage,
+    images.length,
+    params.mangaId,
+    params.chapter,
+    params.title,
+    params.anilistId,
+    searchMangaOnAniList,
+    showNotificationWithAnimation
+  ]);
+
+  // Replace setShowNotification(true) calls with showNotificationWithAnimation()
+  const handleNextChapterConfirmed = useCallback(async () => {
+    try {
+      // Use the new saveProgressWithToast function
+      const saveSuccess = await saveProgressWithToast(true);
+      
+      if (!saveSuccess) {
+        // If save failed, still continue with navigation
+        console.warn('Save failed but continuing with navigation');
+      }
 
       // Update the "do not show again" preference if selected
       if (shouldSaveProgress) {
@@ -1969,9 +2010,7 @@ export default function ReaderScreen() {
         setShowChapterModal(true);
       }
     } catch (err) {
-      console.error('Error saving progress:', err);
-      setNotificationMessage('❌ Failed to save progress' + (isIncognito ? '' : ' to AniList'));
-      showNotificationWithAnimation();
+      console.error('Error in handleNextChapterConfirmed:', err);
       
       setShowSaveModal(false);
       setPendingNextChapter(false);
@@ -1982,17 +2021,9 @@ export default function ReaderScreen() {
       }
     }
   }, [
-    isIncognito,
-    currentPage,
-    images.length,
-    params.mangaId,
-    params.chapter,
-    params.title,
-    params.anilistId,
     shouldSaveProgress,
     navigationType,
-    searchMangaOnAniList,
-    showNotificationWithAnimation
+    saveProgressWithToast
   ]);
 
   // Add a new helper function to ensure proper navigation
@@ -2083,10 +2114,14 @@ export default function ReaderScreen() {
           return;
         }
 
-        // Check auto-save preference
+        // Check auto-save preference and common settings
         const shouldAutoSave = await AsyncStorage.getItem('autoSaveOnExit');
+        const showProgressModalPref = await AsyncStorage.getItem('showProgressModal');
+        const shouldShowProgressModal = showProgressModalPref !== 'false'; // Default to true if not set
+        
         console.log('Preferences loaded:', {
           shouldAutoSave,
+          shouldShowProgressModal,
           isIncognito,
           hasAnilistId: !!params.anilistId,
           hasToken: !!token
@@ -2096,7 +2131,7 @@ export default function ReaderScreen() {
         if (shouldAutoSave === 'true' && !isIncognito && params.anilistId && token) {
           console.log('Auto-save is enabled, saving progress before exit');
           // Wait for save to complete
-          await handleNextChapterConfirmed();
+          await saveProgressWithToast(true);
           
           // Short delay to ensure the save notification is visible
           setTimeout(() => {
@@ -2106,11 +2141,24 @@ export default function ReaderScreen() {
           return;
         }
 
-        // If we can't auto-save or it's disabled, show the exit modal only if logged in
-        if (!isIncognito && !hasUpdatedProgress && token) {
+        // If progress modal is disabled in common settings, auto-save and exit
+        if (!shouldShowProgressModal && !isIncognito && !hasUpdatedProgress && token && params.anilistId) {
+          console.log('Progress modal disabled in settings, auto-saving before exit');
+          await saveProgressWithToast(true);
+          
+          // Short delay to ensure the save notification is visible
+          setTimeout(() => {
+            DeviceEventEmitter.emit('refreshMangaDetails');
+            navigateToMangaDetails(getCurrentMangaId());
+          }, 1000);
+          return;
+        }
+
+        // If we can't auto-save or it's disabled, show the exit modal only if logged in and modal is enabled
+        if (!isIncognito && !hasUpdatedProgress && token && shouldShowProgressModal) {
           setShowExitModal(true);
         } else {
-          // Just exit if we're in incognito, have no progress to save, or not logged in
+          // Just exit if we're in incognito, have no progress to save, not logged in, or modal disabled
           DeviceEventEmitter.emit('refreshMangaDetails');
           navigateToMangaDetails(mangaId);
         }
@@ -2134,7 +2182,7 @@ export default function ReaderScreen() {
       }
       
       // Wait for the save operation to complete
-      await handleNextChapterConfirmed();
+      await saveProgressWithToast(true);
       
       // Only proceed with cleanup and navigation after save is complete
       setNavigationType(null);
@@ -2150,8 +2198,6 @@ export default function ReaderScreen() {
       }, 1000); // 1 second delay
     } catch (error) {
       console.error('Error saving progress before exit:', error);
-      setNotificationMessage('❌ Failed to save progress to AniList');
-      showNotificationWithAnimation();
       // Give user a chance to see the error before exiting
       setTimeout(() => {
         navigateToMangaDetails(getCurrentMangaId());
@@ -2530,12 +2576,14 @@ export default function ReaderScreen() {
     
     // IMPROVED CHAPTER NAVIGATION:
     // 1. First try to use the indexed approach if we have the correct current chapter index
+    // NOTE: Chapters are stored in reverse order (newest first), so we need to reverse the logic
     if (allChapters && allChapters.length > 0 && currentChapterIndex !== -1) {
       const targetIndex = type === 'next' 
-        ? currentChapterIndex + 1  // Next chapter is index + 1
-        : currentChapterIndex - 1; // Previous chapter is index - 1
+        ? currentChapterIndex - 1  // Next chapter (higher number) is at lower index
+        : currentChapterIndex + 1; // Previous chapter (lower number) is at higher index
       
-      console.log('Target chapter index (using index):', targetIndex);
+      console.log('Target chapter index (using index, reversed logic):', targetIndex);
+      console.log('Chapters are in reverse order - newest first');
       
       if (targetIndex >= 0 && targetIndex < allChapters.length) {
         const chapter = allChapters[targetIndex];
@@ -2818,7 +2866,7 @@ export default function ReaderScreen() {
   }, [mangaSlugId, params, router]);
 
   // Update handleChapterNavigation to use params.mangaId
-  const handleChapterNavigation = useCallback((type: 'next' | 'previous') => {
+  const handleChapterNavigation = useCallback(async (type: 'next' | 'previous') => {
     // Use API flags to determine if navigation should be blocked
     if (type === 'next' && params.isLatestChapter === 'true') {
       setNotificationMessage("📖 You're on the latest chapter!");
@@ -2854,29 +2902,61 @@ export default function ReaderScreen() {
     
     setSelectedChapter(targetChapter);
     
-    // Check if user is logged in to AniList
-    SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN).then(token => {
-      // Skip save modal if no token (not logged in), in incognito mode, or auto-save enabled
-      if (!token || isIncognito || shouldAutoSave) {
+    try {
+      // Check if user is logged in to AniList
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      // Check the common settings preference for showing progress modal
+      const showProgressModalPref = await AsyncStorage.getItem('showProgressModal');
+      const shouldShowProgressModal = showProgressModalPref !== 'false'; // Default to true if not set
+      
+      console.log('[Navigation] Settings check:', {
+        hasToken: !!token,
+        isIncognito,
+        shouldAutoSave,
+        hasUpdatedProgress,
+        shouldShowProgressModal,
+        navigationType: type
+      });
+      
+      // Skip save modal if:
+      // 1. No token (not logged in)
+      // 2. In incognito mode
+      // 3. Auto-save enabled
+      // 4. Progress already updated
+      // 5. User disabled progress modal in common settings
+      if (!token || isIncognito || shouldAutoSave || hasUpdatedProgress || !shouldShowProgressModal) {
+        console.log('[Navigation] Skipping save modal, going directly to chapter modal');
+        
+        // If we're going to next chapter and haven't saved progress yet, auto-save with toast
+        if (type === 'next' && !hasUpdatedProgress && token && !isIncognito) {
+          console.log('[Navigation] Auto-saving progress before next chapter');
+          await saveProgressWithToast(true);
+        }
+        
         setAutoLoadChapter(true);
         setShowChapterModal(true);
         return;
       }
 
-      if (!hasUpdatedProgress && type === 'next') {
+      // If we reach here and it's a next chapter navigation, show save modal
+      if (type === 'next') {
+        console.log('[Navigation] Showing save modal for next chapter');
         setShowSaveModal(true);
         setPendingNextChapter(true);
         setAutoLoadChapter(true);
       } else {
+        // For previous chapter, go directly to chapter modal
+        console.log('[Navigation] Going directly to chapter modal for previous chapter');
         setAutoLoadChapter(true);
         setShowChapterModal(true);
       }
-    }).catch(err => {
-      console.error('Error checking auth token:', err);
+    } catch (err) {
+      console.error('Error checking settings:', err);
       // On error, just show the chapter modal directly
       setAutoLoadChapter(true);
       setShowChapterModal(true);
-    });
+    }
   }, [
     isIncognito, 
     shouldAutoSave, 
@@ -2973,12 +3053,23 @@ export default function ReaderScreen() {
         const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
         const isLoggedIn = !!token;
 
-        // If we haven't saved progress and going to next chapter, show save modal
-        if (direction === 'next' && !hasUpdatedProgress && isLoggedIn && !isIncognito) {
+        // Check the common settings preference for showing progress modal
+        const showProgressModalPref = await AsyncStorage.getItem('showProgressModal');
+        const shouldShowProgressModal = showProgressModalPref !== 'false'; // Default to true if not set
+
+        // If we haven't saved progress and going to next chapter, check if we should show save modal
+        if (direction === 'next' && !hasUpdatedProgress && isLoggedIn && !isIncognito && shouldShowProgressModal) {
           console.log('[Swipe] Showing save modal before next chapter');
           setShowSaveModal(true);
           setPendingNextChapter(true);
           setSelectedChapter(targetChapter); // Store chapter for navigation after saving
+        } else if (direction === 'next' && !hasUpdatedProgress && isLoggedIn && !isIncognito && !shouldShowProgressModal) {
+          // Auto-save when progress modal is disabled but user is logged in
+          console.log('[Swipe] Auto-saving progress before next chapter (modal disabled)');
+          await saveProgressWithToast(true);
+          setNavigationType(direction);
+          setSelectedChapter(targetChapter);
+          setShowChapterModal(true);
         } else {
           // Otherwise show chapter modal directly
           console.log('[Swipe] Showing chapter modal directly');
@@ -4139,46 +4230,105 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     
     return (
       <View style={styles.cornerNavContainer}>
-        {/* Previous Chapter Button - position changes based on reading direction */}
-        {shouldShowPreviousButton && (
-          <TouchableOpacity
-            style={[styles.chapterNavPill, 
-              readingDirection === 'rtl' 
-                ? { right: 16 }  // In RTL, Prev goes on the right
-                : { left: 16 }   // In LTR, Prev goes on the left
-            ]}
-            onPress={() => handleChapterNavigation('previous')}
-            activeOpacity={0.7}
-          >
-            <FontAwesome5 
-              name={readingDirection === 'rtl' ? "chevron-right" : "chevron-left"} 
-              size={14} 
-              color="#FFFFFF" 
-              style={styles.chapterNavIcon} 
-            />
-            <Text style={styles.chapterNavPillText}>Prev</Text>
-          </TouchableOpacity>
+        {/* In RTL: Next button on left, Previous button on right */}
+        {/* In LTR: Previous button on left, Next button on right */}
+        
+        {/* Left side button */}
+        {readingDirection === 'rtl' ? (
+          // RTL: Next button on left
+          shouldShowNextButton && (
+            <TouchableOpacity
+              style={[styles.chapterNavPill, { left: 16 }]}
+              onPress={() => {
+                console.log('[RTL] Next button pressed - should go to NEXT chapter (higher number)');
+                console.log('Current chapter:', params.chapter);
+                const nextChapter = getChapterByType('next');
+                console.log('Next chapter found:', nextChapter);
+                handleChapterNavigation('next');
+              }}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5 
+                name="chevron-left" 
+                size={14} 
+                color="#FFFFFF" 
+                style={styles.chapterNavIcon} 
+              />
+              <Text style={styles.chapterNavPillText}>Next</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          // LTR: Previous button on left
+          shouldShowPreviousButton && (
+            <TouchableOpacity
+              style={[styles.chapterNavPill, { left: 16 }]}
+              onPress={() => {
+                console.log('[LTR] Previous button pressed - should go to PREVIOUS chapter (lower number)');
+                console.log('Current chapter:', params.chapter);
+                const prevChapter = getChapterByType('previous');
+                console.log('Previous chapter found:', prevChapter);
+                handleChapterNavigation('previous');
+              }}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5 
+                name="chevron-left" 
+                size={14} 
+                color="#FFFFFF" 
+                style={styles.chapterNavIcon} 
+              />
+              <Text style={styles.chapterNavPillText}>Prev</Text>
+            </TouchableOpacity>
+          )
         )}
         
-        {/* Next Chapter Button - position changes based on reading direction */}
-        {shouldShowNextButton && (
-          <TouchableOpacity
-            style={[styles.chapterNavPill, 
-              readingDirection === 'rtl' 
-                ? { left: 16 }   // In RTL, Next goes on the left
-                : { right: 16 }  // In LTR, Next goes on the right
-            ]}
-            onPress={() => handleChapterNavigation('next')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.chapterNavPillText}>Next</Text>
-            <FontAwesome5 
-              name={readingDirection === 'rtl' ? "chevron-left" : "chevron-right"} 
-              size={14} 
-              color="#FFFFFF" 
-              style={styles.chapterNavIcon} 
-            />
-          </TouchableOpacity>
+        {/* Right side button */}
+        {readingDirection === 'rtl' ? (
+          // RTL: Previous button on right
+          shouldShowPreviousButton && (
+            <TouchableOpacity
+              style={[styles.chapterNavPill, { right: 16 }]}
+              onPress={() => {
+                console.log('[RTL] Previous button pressed - should go to PREVIOUS chapter (lower number)');
+                console.log('Current chapter:', params.chapter);
+                const prevChapter = getChapterByType('previous');
+                console.log('Previous chapter found:', prevChapter);
+                handleChapterNavigation('previous');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.chapterNavPillText}>Prev</Text>
+              <FontAwesome5 
+                name="chevron-right" 
+                size={14} 
+                color="#FFFFFF" 
+                style={styles.chapterNavIcon} 
+              />
+            </TouchableOpacity>
+          )
+        ) : (
+          // LTR: Next button on right
+          shouldShowNextButton && (
+            <TouchableOpacity
+              style={[styles.chapterNavPill, { right: 16 }]}
+              onPress={() => {
+                console.log('[LTR] Next button pressed - should go to NEXT chapter (higher number)');
+                console.log('Current chapter:', params.chapter);
+                const nextChapter = getChapterByType('next');
+                console.log('Next chapter found:', nextChapter);
+                handleChapterNavigation('next');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.chapterNavPillText}>Next</Text>
+              <FontAwesome5 
+                name="chevron-right" 
+                size={14} 
+                color="#FFFFFF" 
+                style={styles.chapterNavIcon} 
+              />
+            </TouchableOpacity>
+          )
         )}
       </View>
     );

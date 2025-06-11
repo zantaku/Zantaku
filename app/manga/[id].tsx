@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions, Platform, StatusBar, ActivityIndicator, Animated, Pressable, Share, Linking, DeviceEventEmitter, BackHandler } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions, Platform, StatusBar, ActivityIndicator, Animated, Pressable, Share, Linking, DeviceEventEmitter, BackHandler, Modal } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -39,7 +39,7 @@ interface MangaDetails {
     color: string;
   };
   bannerImage: string;
-  description: string;
+  description: string | null;
   chapters: number;
   volumes: number;
   status: string;
@@ -222,6 +222,7 @@ export default function MangaDetailsScreen() {
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showErrorToast, setShowErrorToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [showTrendingModal, setShowTrendingModal] = useState(false);
 
   useEffect(() => {
     // Initial fetch
@@ -646,6 +647,10 @@ export default function MangaDetailsScreen() {
     </View>
   );
 
+  const handleTrendingPress = () => {
+    setShowTrendingModal(true);
+  };
+
   const handleSaveListEdit = async (data: {
     status: string;
     progress: number;
@@ -760,6 +765,11 @@ export default function MangaDetailsScreen() {
           ...prev,
           mediaListEntry: response.data.data.SaveMediaListEntry
         } : null);
+        
+        // Emit events to refresh other parts of the app
+        DeviceEventEmitter.emit('refreshMediaLists');
+        DeviceEventEmitter.emit('refreshWatchlist');
+        DeviceEventEmitter.emit('refreshReadlist');
         
         // Show success toast
         setToastMessage('List entry updated successfully!');
@@ -946,22 +956,28 @@ export default function MangaDetailsScreen() {
                     </View>
                   )}
                   {details?.trending > 0 && (
-                    <View style={styles.trendingContainer}>
+                    <TouchableOpacity style={styles.trendingContainer} onPress={handleTrendingPress}>
                       <FontAwesome5 name="fire" size={14} color="#FF4B4B" style={styles.metaIcon} />
                       <Text style={styles.trendingText}>#{details?.trending}</Text>
-                    </View>
+                    </TouchableOpacity>
                   )}
                 </View>
               </View>
 
               <View style={styles.infoRow}>
-                <View style={styles.infoColumn}>
-                  <Text style={[styles.infoLabel, { color: currentTheme.colors.textSecondary }]}>TYPE</Text>
-                  <View style={[styles.typeBadge, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : '#1f1f1f' }]}>
-                    <FontAwesome5 name="book" size={12} color="#fff" style={{ marginRight: 6 }} />
-                    <Text style={styles.typeBadgeText}>{details.format || 'MANGA'}</Text>
-                  </View>
-                </View>
+                                    <View style={styles.infoColumn}>
+                      <Text style={[styles.infoLabel, { color: currentTheme.colors.textSecondary }]}>TYPE</Text>
+                      <TouchableOpacity 
+                        style={[styles.typeBadge, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : '#1f1f1f' }]}
+                        onPress={() => {
+                          console.log(`Manga format selected: ${details.format}`);
+                          DeviceEventEmitter.emit('openMangaFormatSearch', details.format);
+                        }}
+                      >
+                        <FontAwesome5 name="book" size={12} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.typeBadgeText}>{details.format || 'MANGA'}</Text>
+                      </TouchableOpacity>
+                    </View>
                 <View style={styles.infoColumn}>
                   <Text style={[styles.infoLabel, { color: currentTheme.colors.textSecondary }]}>RELEASE DATE</Text>
                   <Text style={[styles.infoText, { color: currentTheme.colors.text }]}>
@@ -1031,7 +1047,7 @@ export default function MangaDetailsScreen() {
                   style={[styles.synopsis, { color: currentTheme.colors.text }]} 
                   numberOfLines={expandedSynopsis ? undefined : 3}
                 >
-                  {details?.description.replace(/<[^>]*>/g, '')}
+                  {details?.description?.replace(/<[^>]*>/g, '') || 'No description available.'}
                 </Text>
                 <TouchableOpacity onPress={() => setExpandedSynopsis(!expandedSynopsis)}>
                   <Text style={styles.readMore}>
@@ -1250,6 +1266,76 @@ export default function MangaDetailsScreen() {
           onDismiss={() => setShowErrorToast(false)}
         />
       )}
+
+      {/* Trending Modal */}
+      <Modal
+        visible={showTrendingModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowTrendingModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowTrendingModal(false)}
+        >
+          <View style={[styles.trendingModal, { backgroundColor: currentTheme.colors.surface }]}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowTrendingModal(false)}
+            >
+              <FontAwesome5 name="times" size={20} color={currentTheme.colors.textSecondary} />
+            </TouchableOpacity>
+            
+            <View style={styles.modalHeader}>
+              <FontAwesome5 name="fire" size={24} color="#FF4B4B" />
+              <Text style={[styles.modalTitle, { color: currentTheme.colors.text }]}>
+                Trending #{details?.trending}
+              </Text>
+            </View>
+
+            <Text style={[styles.modalSubtitle, { color: currentTheme.colors.textSecondary }]}>
+              {details?.title.userPreferred} is currently trending
+            </Text>
+
+            {details?.rankings && details.rankings.length > 0 && (
+              <View style={styles.rankingsContainer}>
+                <Text style={[styles.rankingsTitle, { color: currentTheme.colors.text }]}>
+                  Rankings
+                </Text>
+                {details.rankings.map((ranking, index) => (
+                  <View key={index} style={[styles.rankingItem, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)' }]}>
+                    <View style={styles.rankingLeft}>
+                      <Text style={[styles.rankingRank, { color: currentTheme.colors.primary }]}>
+                        #{ranking.rank}
+                      </Text>
+                      <View>
+                        <Text style={[styles.rankingType, { color: currentTheme.colors.text }]}>
+                          {ranking.type.replace(/_/g, ' ')}
+                        </Text>
+                        <Text style={[styles.rankingContext, { color: currentTheme.colors.textSecondary }]}>
+                          {ranking.context}
+                        </Text>
+                      </View>
+                    </View>
+                    <FontAwesome5 
+                      name={ranking.type.includes('POPULAR') ? 'heart' : ranking.type.includes('RATED') ? 'star' : 'fire'} 
+                      size={16} 
+                      color={ranking.type.includes('POPULAR') ? '#FF6B6B' : ranking.type.includes('RATED') ? '#FFD700' : '#FF4B4B'} 
+                    />
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.trendingInfo}>
+              <Text style={[styles.trendingInfoText, { color: currentTheme.colors.textSecondary }]}>
+                Trending rankings are updated in real-time based on user activity and engagement.
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1788,5 +1874,97 @@ const styles = StyleSheet.create({
   genresSection: {
     marginHorizontal: 16,
     marginBottom: 20,
+  },
+  // Trending Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  trendingModal: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  rankingsContainer: {
+    marginBottom: 20,
+  },
+  rankingsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  rankingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  rankingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  rankingRank: {
+    fontSize: 20,
+    fontWeight: '700',
+    minWidth: 40,
+  },
+  rankingType: {
+    fontSize: 16,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  rankingContext: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  trendingInfo: {
+    backgroundColor: 'rgba(2, 169, 255, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+  },
+  trendingInfoText: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

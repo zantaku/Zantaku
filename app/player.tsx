@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, StatusBar, BackHandler } from 'react-native';
+import { View, StyleSheet, StatusBar, BackHandler, DeviceEventEmitter } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
 import VideoPlayer from './videoplayer/PlayerScreen';
@@ -110,6 +110,10 @@ export default function Player() {
         console.error('[PLAYER] ❌ AniList API errors:', data.errors);
         throw new Error(data.errors[0]?.message || 'Failed to save to AniList');
       }
+
+      // Emit events to refresh other parts of the app
+      DeviceEventEmitter.emit('refreshMediaLists');
+      DeviceEventEmitter.emit('refreshWatchlist');
 
       if (data.data?.SaveMediaListEntry) {
         console.log('[PLAYER] ✅ Successfully saved to AniList:', {

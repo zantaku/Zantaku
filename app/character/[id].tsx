@@ -23,7 +23,7 @@ interface CharacterDetails {
   image: {
     large: string;
   };
-  description: string;
+  description: string | null;
   gender?: string;
   dateOfBirth?: {
     year?: number;
@@ -603,9 +603,9 @@ const CharacterDetailsScreen = () => {
                   style={[styles.description, { color: currentTheme.colors.text }]}
                   numberOfLines={expandedDescription ? undefined : 5}
                 >
-                  {details.description.replace(/<[^>]*>?/gm, '')}
+                  {details.description?.replace(/<[^>]*>?/gm, '') || ''}
                 </Text>
-                {details.description.length > 200 && (
+                {details.description && details.description.length > 200 && (
                   <TouchableOpacity onPress={() => setExpandedDescription(!expandedDescription)}>
                     <Text style={[styles.readMore, { color: "#02A9FF" }]}>
                       {expandedDescription ? 'Show Less' : 'Read More'}

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -116,6 +117,10 @@ export const useReadingProgress = () => {
           if (data.errors) {
             throw new Error(data.errors[0].message);
           }
+          
+          // Emit events to refresh other parts of the app
+          DeviceEventEmitter.emit('refreshMediaLists');
+          DeviceEventEmitter.emit('refreshReadlist');
           
           return `Progress saved to AniList: Chapter ${chapterNumber}`;
         }

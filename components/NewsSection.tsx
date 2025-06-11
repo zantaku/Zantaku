@@ -1,22 +1,43 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, Linking, ActivityIndicator, Alert } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useCallback, useEffect } from 'react';
 import { useTheme, lightTheme, darkTheme } from '../hooks/useTheme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { NewsSettings } from '../app/appsettings/newssettings';
+
+// Helper function to check if settings are still basic (same as in newssettings.tsx)
+const isBasicSettings = (settings: NewsSettings): boolean => {
+  // Check if only AniList and ANN are enabled (basic setup)
+  const basicSources = settings.enableAniList && settings.enableANN && 
+    !settings.enableCrunchyrollNews && !settings.enableMyAnimeListNews &&
+    !settings.enableJapanTimes && !settings.enableNHKWorld && 
+    !settings.enableSoraNews24 && !settings.enableTokyoReporter;
+  
+  // Check if only basic categories are enabled
+  const basicCategories = settings.enableAnimeNews && settings.enableMangaNews && 
+    settings.enableLightNovelNews && !settings.enableJapanCulture &&
+    !settings.enableTechnology && !settings.enableGaming && 
+    !settings.enableEntertainment && !settings.enableLifestyle;
+  
+  return basicSources && basicCategories;
+};
 
 interface NewsItem {
   id: string;
   title: string;
-  source: 'AniList' | 'ANN';
+  source: string;
   timestamp: string;
   url: string;
   thumbnail?: string | null;
-  category: 'Trending' | 'New' | 'News';
+  category: string;
   isInternalLink: boolean;
   nextEpisode?: number;
   score?: number;
   scoreFormat?: string;
+  description?: string;
+  author?: string;
 }
 
 const ITEMS_PER_PAGE = 5;
@@ -25,6 +46,8 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
   const router = useRouter();
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [isLoading, setIsLoading] = useState(false);
+  const [newsSettings, setNewsSettings] = useState<NewsSettings | null>(null);
+  const [hasReachedEnd, setHasReachedEnd] = useState(false);
   const { isDarkMode } = useTheme();
   const currentTheme = isDarkMode ? darkTheme : lightTheme;
 
@@ -55,22 +78,46 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
     }
   }, [router]);
 
+  // Load news settings
+  useEffect(() => {
+    const loadNewsSettings = async () => {
+      try {
+        const savedSettings = await AsyncStorage.getItem('newsSettings');
+        if (savedSettings) {
+          setNewsSettings(JSON.parse(savedSettings));
+        }
+      } catch (error) {
+        console.error('Error loading news settings:', error);
+      }
+    };
+    loadNewsSettings();
+  }, []);
+
   const loadMore = useCallback(() => {
-    if (isLoading || displayCount >= news.length) return;
+    if (isLoading || displayCount >= news.length || hasReachedEnd) return;
     
     setIsLoading(true);
     setTimeout(() => {
-      setDisplayCount(prev => Math.min(prev + ITEMS_PER_PAGE, news.length));
+      const newCount = Math.min(displayCount + ITEMS_PER_PAGE, news.length);
+      setDisplayCount(newCount);
+      
+      // Check if we've reached the maximum items setting
+      const maxItems = newsSettings?.maxNewsItems || 50;
+      if (newCount >= maxItems || newCount >= news.length) {
+        setHasReachedEnd(true);
+      }
+      
       setIsLoading(false);
     }, 500);
-  }, [displayCount, news.length, isLoading]);
+  }, [displayCount, news.length, isLoading, hasReachedEnd, newsSettings]);
 
-  // Auto load more when reaching the end
+  // Auto load more when reaching the end (only if endless loading is enabled)
   useEffect(() => {
-    if (!isLoading && displayCount < news.length) {
+    const shouldAutoLoad = newsSettings?.enableEndlessLoading !== false; // Default to true
+    if (!isLoading && displayCount < news.length && !hasReachedEnd && shouldAutoLoad) {
       loadMore();
     }
-  }, [displayCount, news.length, isLoading, loadMore]);
+  }, [displayCount, news.length, isLoading, hasReachedEnd, newsSettings, loadMore]);
 
   if (!news || news.length === 0) return null;
 
@@ -121,12 +168,35 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
               color="#fff"
             />
           </LinearGradient>
-          <View>
+          <View style={styles.titleTextContainer}>
             <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>News Feed</Text>
             <Text style={[styles.sectionSubtitle, { color: currentTheme.colors.textSecondary }]}>Stay up to date with the latest</Text>
           </View>
         </View>
       </View>
+      
+      {/* Customization Note - Only show if settings are still basic */}
+      {(!newsSettings || isBasicSettings(newsSettings)) && (
+        <View style={[styles.customizationNote, { 
+          backgroundColor: currentTheme.colors.surface,
+          borderColor: currentTheme.colors.border
+        }]}>
+          <View style={styles.noteContent}>
+            <FontAwesome5 name="info-circle" size={14} color="#02A9FF" />
+            <Text style={[styles.noteText, { color: currentTheme.colors.textSecondary }]}>
+              Currently showing basic AniList & ANN news. 
+            </Text>
+          </View>
+          <TouchableOpacity 
+            style={[styles.customizeLink, { backgroundColor: '#02A9FF' }]}
+            onPress={() => router.push('/appsettings/newssettings')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.customizeLinkText}>Customize</Text>
+            <FontAwesome5 name="arrow-right" size={12} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={[styles.newsContainer, { 
         backgroundColor: currentTheme.colors.surface,
         shadowColor: isDarkMode ? '#000' : '#666'
@@ -205,6 +275,36 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
         {isLoading && displayCount < news.length && (
           <View style={[styles.loadingContainer, { borderTopColor: currentTheme.colors.border }]}>
             <ActivityIndicator size="small" color="#02A9FF" />
+            <Text style={[styles.loadingText, { color: currentTheme.colors.textSecondary }]}>
+              Loading more news...
+            </Text>
+          </View>
+        )}
+        
+        {/* Load More Button (when endless loading is disabled) */}
+        {!isLoading && displayCount < news.length && !hasReachedEnd && newsSettings?.enableEndlessLoading === false && (
+          <View style={[styles.loadMoreContainer, { borderTopColor: currentTheme.colors.border }]}>
+            <TouchableOpacity 
+              style={[styles.loadMoreButton, { backgroundColor: '#02A9FF' }]}
+              onPress={loadMore}
+              activeOpacity={0.8}
+            >
+              <FontAwesome5 name="plus" size={14} color="#fff" />
+              <Text style={styles.loadMoreText}>Load More News</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {/* End of Feed Message */}
+        {hasReachedEnd && (
+          <View style={[styles.endOfFeedContainer, { borderTopColor: currentTheme.colors.border }]}>
+            <FontAwesome5 name="check-circle" size={16} color={currentTheme.colors.textSecondary} />
+            <Text style={[styles.endOfFeedText, { color: currentTheme.colors.textSecondary }]}>
+              You've reached the end of your news feed
+            </Text>
+            <Text style={[styles.endOfFeedSubtext, { color: currentTheme.colors.textSecondary }]}>
+              Customize your sources for more content
+            </Text>
           </View>
         )}
       </View>
@@ -362,5 +462,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
+  },
+  titleTextContainer: {
+    flex: 1,
+  },
+  customizeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginLeft: 8,
+  },
+  customizationNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  noteContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  noteText: {
+    fontSize: 13,
+    color: '#666',
+    flex: 1,
+  },
+  customizeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#02A9FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+  },
+  customizeLinkText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#666',
+  },
+  loadMoreContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  loadMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#02A9FF',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  loadMoreText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  endOfFeedContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    gap: 4,
+  },
+  endOfFeedText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 8,
+  },
+  endOfFeedSubtext: {
+    fontSize: 12,
+    opacity: 0.7,
   },
 }); 

@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 9999,
+    zIndex: 10000,
   },
   modalOverlay: {
     flex: 1,
@@ -687,7 +687,7 @@ export default function GlobalSearch({ visible, onClose }: Props) {
         </Text>
         {item.description && (
           <Text style={[styles.description, { color: currentTheme.colors.textSecondary }]} numberOfLines={2}>
-            {item.description.replace(/<[^>]*>/g, '')}
+            {item.description?.replace(/<[^>]*>/g, '') || ''}
           </Text>
         )}
       </View>
@@ -719,6 +719,8 @@ export default function GlobalSearch({ visible, onClose }: Props) {
         transparent={true}
         onRequestClose={onClose}
         animationType="fade"
+        statusBarTranslucent={true}
+        presentationStyle="overFullScreen"
       >
         <TouchableOpacity
           style={StyleSheet.absoluteFill}

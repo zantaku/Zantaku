@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, Modal, ScrollView, TextInput, Platform, StatusBar } from 'react-native';
+import { StyleSheet, View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, Modal, ScrollView, TextInput, Platform, StatusBar, DeviceEventEmitter } from 'react-native';
 import { useEffect, useState, memo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
@@ -131,6 +131,18 @@ export default function WatchlistScreen() {
   useEffect(() => {
     applyFilters();
   }, [filters, entries, searchQuery]);
+
+  // Add event listener for refreshing watchlist when List Editor saves data
+  useEffect(() => {
+    const refreshWatchlistListener = DeviceEventEmitter.addListener('refreshWatchlist', () => {
+      console.log('[Watchlist] Received refreshWatchlist event, refreshing data...');
+      fetchWatchlist();
+    });
+
+    return () => {
+      refreshWatchlistListener.remove();
+    };
+  }, [targetUserId]);
 
   const fetchWatchlist = async () => {
     try {
@@ -471,6 +483,12 @@ const styles = StyleSheet.create({
   },
   progress: {
     fontSize: 14,
+  },
+  badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
   },
   statusBadge: {
     alignSelf: 'flex-start',

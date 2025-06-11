@@ -51,6 +51,9 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
     } else if (id === 'novel') {
       onClose();
       router.push('/appsettings/novelsettings');
+    } else if (id === 'news') {
+      onClose();
+      router.push('/appsettings/newssettings');
     }
   };
 
@@ -119,6 +122,14 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
       iconBgColor: '#8BC34A',
       requiresAuth: false,
     },
+    {
+      id: 'news',
+      icon: 'newspaper',
+      title: 'News Feed',
+      description: 'Customize your news sources and preferences',
+      iconBgColor: '#FF6B35',
+      requiresAuth: false,
+    },
     // {
     //   id: 'sources',
     //   icon: 'puzzle-piece',
@@ -144,7 +155,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
 
   // Sort settings to ensure consistent order
   settings.sort((a, b) => {
-    const order = ['commons', 'theme', 'anime', 'manga', 'novel'];
+    const order = ['commons', 'theme', 'news', 'anime', 'manga', 'novel'];
     return order.indexOf(a.id) - order.indexOf(b.id);
   });
 

@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, Modal, ScrollView, TextInput, Platform, StatusBar } from 'react-native';
+import { StyleSheet, View, Text, FlatList, Image, TouchableOpacity, ActivityIndicator, Modal, ScrollView, TextInput, Platform, StatusBar, DeviceEventEmitter } from 'react-native';
 import { useEffect, useState, memo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
@@ -128,6 +128,18 @@ export default function ReadlistScreen() {
   useEffect(() => {
     applyFilters();
   }, [filters, entries, searchQuery]);
+
+  // Add event listener for refreshing readlist when List Editor saves data
+  useEffect(() => {
+    const refreshReadlistListener = DeviceEventEmitter.addListener('refreshReadlist', () => {
+      console.log('[Readlist] Received refreshReadlist event, refreshing data...');
+      fetchReadlist();
+    });
+
+    return () => {
+      refreshReadlistListener.remove();
+    };
+  }, [targetUserId]);
 
   const fetchReadlist = async () => {
     try {

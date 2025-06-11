@@ -84,14 +84,17 @@ interface Section {
 interface NewsItem {
   id: string;
   title: string;
-  source: 'AniList' | 'ANN';
+  source: string;
   timestamp: string;
   url: string;
   thumbnail?: string | null;
-  category: 'Trending' | 'New' | 'News';
+  category: string;
   isInternalLink: boolean;
   nextEpisode?: number;
   score?: number;
+  scoreFormat?: string;
+  description?: string;
+  author?: string;
 }
 
 // Add these new interfaces before the MediaCard component
@@ -426,6 +429,18 @@ export default function TabsIndex() {
     };
     
     loadWelcomeSectionPreference();
+  }, []);
+
+  // Add event listener for refreshing media lists when List Editor saves data
+  useEffect(() => {
+    const refreshMediaListsListener = DeviceEventEmitter.addListener('refreshMediaLists', () => {
+      console.log('[Home] Received refreshMediaLists event, refreshing data...');
+      fetchMediaLists();
+    });
+
+    return () => {
+      refreshMediaListsListener.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -903,117 +918,20 @@ export default function TabsIndex() {
   // Fetch news
   const fetchNews = async () => {
     try {
-      const [anilistNews, annNews] = await Promise.all([
-        fetchAniListNews(),
-        fetchANNNews()
-      ]);
-
-      const combinedNews = [...anilistNews, ...annNews];
-      setNewsItems(combinedNews.sort(() => Math.random() - 0.5).slice(0, 10));
-    } catch (error) {
-      console.error('Error fetching news:', error);
-    }
-  };
-
-  const fetchAniListNews = async () => {
-    try {
-      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      console.log('🔍 Fetching news using NewsService...');
+      const { NewsService } = require('../../api/proxy/providers/news');
+      const newsItems = await NewsService.fetchNews();
       
-      const { data } = await axios.post(
-        ANILIST_GRAPHQL_ENDPOINT,
-        {
-          query: `
-            query {
-              Page(page: 1, perPage: 10) {
-                media(type: ANIME, sort: TRENDING_DESC, status: RELEASING) {
-                  id
-                  title {
-                    userPreferred
-                    romaji
-                    english
-                    native
-                  }
-                  coverImage {
-                    medium
-                  }
-                  meanScore
-                  nextAiringEpisode {
-                    episode
-                    timeUntilAiring
-                  }
-                }
-              }
-              Viewer {
-                options {
-                  titleLanguage
-                }
-                mediaListOptions {
-                  scoreFormat
-                }
-              }
-            }
-          `
-        },
-        {
-          headers: {
-            'Authorization': token ? `Bearer ${token}` : '',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          }
-        }
-      );
-
-      return data.data.Page.media.map((anime: any) => ({
-        id: `trending-${anime.id}`,
-        title: anime.title[data.data.Viewer?.options?.titleLanguage?.toLowerCase()] || anime.title.romaji,
-        timestamp: formatAiringTime(anime.nextAiringEpisode?.timeUntilAiring),
-        url: `/anime/${anime.id}`,
-        thumbnail: anime.coverImage.medium,
-        category: 'Trending',
-        isInternalLink: true,
-        nextEpisode: anime.nextAiringEpisode?.episode,
-        score: anime.meanScore,
-        scoreFormat: data.data.Viewer?.mediaListOptions?.scoreFormat
-      }));
+      console.log(`✅ Received ${newsItems.length} news items from NewsService`);
+      setNewsItems(newsItems);
     } catch (error) {
-      console.error('Error fetching AniList news:', error);
-      return [];
+      console.error('❌ Error fetching news:', error);
+      // Fallback to empty array
+      setNewsItems([]);
     }
   };
 
-  const fetchANNNews = async () => {
-    try {
-      const response = await axios.get('https://www.animenewsnetwork.com/all/rss.xml?ann-edition=w');
-      const parser = new XMLParser({
-        ignoreAttributes: false,
-        attributeNamePrefix: "@_"
-      });
-      
-      const feed = parser.parse(response.data);
-      const items = feed.rss.channel.item;
 
-      return items.slice(0, 5).map((item: any, index: number) => ({
-        id: `ann-${Date.now()}-${index}`,
-        title: item.title,
-        source: 'ANN',
-        timestamp: new Date(item.pubDate).toISOString(),
-        url: item.link,
-        thumbnail: item.description?.match(/src="([^"]+)"/)?.pop() || null,
-        category: 'News',
-        isInternalLink: false
-      }));
-    } catch (error) {
-      console.error('Error fetching ANN news:', error);
-      return [];
-    }
-  };
-
-  const formatAiringTime = (seconds?: number) => {
-    if (!seconds) return 'TBA';
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    return days > 0 ? `${days}d` : `${hours}h`;
-  };
 
   const fetchTrendingMedia = async () => {
     try {
