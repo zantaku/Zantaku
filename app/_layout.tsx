@@ -5,7 +5,7 @@ import { ThemeProvider, useTheme } from '../hooks/useTheme';
 import { IncognitoProvider, useIncognito } from '../hooks/useIncognito';
 import { OrientationProvider } from '../hooks/useOrientation';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, Component } from 'react';
@@ -17,6 +17,7 @@ import { PortalProvider } from '@gorhom/portal';
 import { Slot } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DiscordRPCProvider } from '../contexts/DiscordRPCContext';
+import * as Font from 'expo-font';
 
 // Incognito mode indicator component
 function IncognitoIndicator() {
@@ -516,11 +517,29 @@ const queryClient = new QueryClient();
 
 export default function RootLayout() {
   const [showSplash, setShowSplash] = useState(true);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
 
   useEffect(() => {
     if (__DEV__) {
       console.log('App started in development mode');
     }
+
+    // Load fonts
+    const loadFonts = async () => {
+      try {
+        await Font.loadAsync({
+          ...Ionicons.font,
+          ...FontAwesome5.font,
+        });
+        console.log('✅ Vector icon fonts loaded successfully');
+        setFontsLoaded(true);
+      } catch (error) {
+        console.error('❌ Error loading fonts:', error);
+        setFontsLoaded(true); // Continue anyway
+      }
+    };
+
+    loadFonts();
 
     const errorHandler = (error: Error) => {
       console.error('Global error:', error);
@@ -533,6 +552,15 @@ export default function RootLayout() {
       errorSubscription.remove();
     };
   }, []);
+
+  // Don't render until fonts are loaded
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <Text style={{ color: '#fff', fontSize: 16 }}>Loading fonts...</Text>
+      </View>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>

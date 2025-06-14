@@ -361,21 +361,22 @@ const PlayerScreen: React.FC = () => {
         clearTimeout(seekTimeoutRef.current);
       }
       
-      // Debounce the actual seek operation
+      // Reduced debounce for more responsive seeking
       seekTimeoutRef.current = setTimeout(() => {
         setIsBuffering(true);
         
-        // Use toleranceAfter and toleranceBefore for smoother seeking
+        // Optimized tolerance values for HLS streams - allow seeking anywhere
         videoRef.current?.setPositionAsync(time * 1000, {
-          toleranceMillisBefore: 1000,
-          toleranceMillisAfter: 1000,
+          toleranceMillisBefore: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
+          toleranceMillisAfter: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
         }).then(() => {
           setIsBuffering(false);
+          console.log(`📍 Seeked to ${time.toFixed(1)}s - HLS will buffer from this position`);
         }).catch((error) => {
           console.error('Seek error:', error);
           setIsBuffering(false);
         });
-      }, 150); // 150ms debounce
+      }, PLAYER_BEHAVIOR.SEEK_DEBOUNCE_MS); // Configurable debounce for responsive seeking
     }
   }, []);
 

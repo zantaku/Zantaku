@@ -31,6 +31,8 @@ interface ChapterListProps {
   anilistId?: string;
   coverImage?: string;
   mangaId?: string;
+  format?: string;
+  countryOfOrigin?: string;
 }
 
 // #endregion
@@ -188,7 +190,7 @@ const ListChapterCard = memo(({
 });
 // #endregion
 
-export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId }: ChapterListProps) {
+export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId, format, countryOfOrigin }: ChapterListProps) {
     const { isDarkMode, currentTheme } = useTheme();
     const { isIncognito } = useIncognito();
 
@@ -587,6 +589,8 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 currentProvider={provider}
                 mangaSlugId={internalMangaId || undefined}
                 chapterManager={chapterManager}
+                format={format}
+                countryOfOrigin={countryOfOrigin}
             />
             <CorrectMangaSearchModal
                 isVisible={showCorrectMangaModal}

@@ -13,12 +13,14 @@ interface ChapterSourcesModalProps {
   visible: boolean;
   onClose: () => void;
   chapter: Chapter | null;
-  mangaTitle: { english: string; userPreferred: string; };
+  mangaTitle: { english: string; userPreferred: string; romaji?: string; native?: string; };
   mangaId: string;
   anilistId?: string;
   currentProvider?: 'mangadex' | 'katana' | 'mangafire' | 'unknown';
   mangaSlugId?: string;
   chapterManager?: ChapterManager;
+  format?: string;
+  countryOfOrigin?: string;
 }
 
 const logDebug = (message: string, data?: any) => console.log(`[ChapterModal DEBUG] ${message}`, data || '');
@@ -27,10 +29,67 @@ const logError = (message: string, error?: any) => console.error(`[ChapterModal 
 const BASE_API_URL = 'https://takiapi.xyz';
 const KATANA_API_URL = 'https://magaapinovel.xyz';
 
-export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId, currentProvider, mangaSlugId, chapterManager }: ChapterSourcesModalProps) {
+export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId, currentProvider, mangaSlugId, chapterManager, format, countryOfOrigin }: ChapterSourcesModalProps) {
   const router = useRouter();
   const { currentTheme: theme, isDarkMode } = useTheme();
   const { isIncognito } = useIncognito();
+
+  // Determine if content should use webnovel reader
+  const shouldUseWebnovelReader = useCallback(() => {
+    // Check if we have AniList data first
+    if (format && countryOfOrigin) {
+      // Use webnovel reader for:
+      // - Korean content (manhwa)
+      // - Chinese content (manhua) 
+      // - Taiwan content (manhua)
+      // - Any webtoon format
+      return (
+        format === 'WEBTOON' || 
+        countryOfOrigin === 'KR' || 
+        countryOfOrigin === 'CN' || 
+        countryOfOrigin === 'TW'
+      );
+    }
+    
+    // Fallback logic when AniList data is not available
+    // Check manga title for common indicators
+    if (mangaTitle) {
+      const titleToCheck = (
+        mangaTitle.english || 
+        mangaTitle.userPreferred || 
+        mangaTitle.romaji || 
+        ''
+      ).toLowerCase();
+      
+      // Common patterns that indicate vertical reading content
+      const verticalReadingIndicators = [
+        'manhwa', 'manhua', 'webtoon', 'webcomic',
+        // Korean indicators
+        '한국', 'korean',
+        // Chinese indicators  
+        '中国', '中文', 'chinese', 'manhua',
+        // Common webtoon/vertical format indicators
+        'full color', 'colored', 'vertical'
+      ];
+      
+      const hasVerticalIndicator = verticalReadingIndicators.some(indicator => 
+        titleToCheck.includes(indicator)
+      );
+      
+      if (hasVerticalIndicator) {
+        return true;
+      }
+    }
+    
+    // Additional fallback: check provider patterns
+    // Some providers are known to host primarily vertical content
+    if (currentProvider === 'katana') {
+      // Katana often hosts manhwa/manhua content
+      return true;
+    }
+    
+    return false;
+  }, [format, countryOfOrigin, mangaTitle, currentProvider]);
 
   // Debug props at component level
   console.log('🚀 MODAL COMPONENT PROPS:', {
@@ -40,7 +99,10 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     mangaId,
     chapterId: chapter?.id,
     chapterNumber: chapter?.number,
-    hasChapterManager: !!chapterManager
+    hasChapterManager: !!chapterManager,
+    format,
+    countryOfOrigin,
+    shouldUseWebnovelReader: shouldUseWebnovelReader()
   });
 
   const [loading, setLoading] = useState(true);
@@ -182,13 +244,17 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       logDebug("Manga slug ID:", mangaSlugId);
       logDebug("Manga ID:", mangaId);
       logDebug("AniList ID:", anilistId);
+      logDebug("Format:", format);
+      logDebug("Country of Origin:", countryOfOrigin);
       console.log('🎯 PROVIDER DEBUG:', {
         currentProvider,
         mangaSlugId,
         mangaId,
         anilistId,
         chapterId: chapter.id,
-        chapterNumber: chapter.number
+        chapterNumber: chapter.number,
+        format,
+        countryOfOrigin
       });
       fetchChapterPages(chapter);
     } else if (visible && !chapter) {
@@ -196,7 +262,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       setError("No chapter data available");
       setLoading(false);
     }
-  }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId]);
+  }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId, format, countryOfOrigin]);
 
   const navigateToReader = () => {
     if (pages.length === 0 || !chapter) return;
@@ -231,7 +297,9 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       hasHeaders: pages.some(p => p.headers && Object.keys(p.headers).length > 0)
     });
     
-    router.replace({ pathname: '/reader', params });
+    // Determine which reader to use
+    const readerPath = shouldUseWebnovelReader() ? '/webnovelreader' : '/reader';
+    router.replace({ pathname: readerPath, params });
     onClose();
   };
 

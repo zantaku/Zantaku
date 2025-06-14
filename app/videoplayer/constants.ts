@@ -45,6 +45,8 @@ export const PLAYER_BEHAVIOR = {
   CONTROLS_HIDE_DELAY: 4000, // ms
   DOUBLE_TAP_SEEK_TIME: 10, // seconds to seek on double tap
   SKIP_INTRO_DURATION: 90, // default seconds to skip for OP/ED
+  SEEK_DEBOUNCE_MS: 100, // ms to debounce seek operations for HLS
+  SEEK_TOLERANCE_MS: 500, // ms tolerance for HLS seeking
 };
 
 // Constants for video quality options

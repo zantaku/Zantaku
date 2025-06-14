@@ -124,18 +124,22 @@ const VideoControls = ({
     }
   };
   
-  // Handle seeking
+  // Handle seeking with enhanced feedback
   const handleSeekStart = () => {
     setIsSeeking(true);
     setSeekValue(currentTime);
     onSeekStart?.();
+    console.log(`🎯 Started seeking from ${currentTime.toFixed(1)}s`);
   };
   
   const handleSeekChange = (value: number) => {
     setSeekValue(value);
+    // Real-time feedback during seeking - no restrictions on where user can seek
+    console.log(`🎯 Seeking to ${value.toFixed(1)}s (${((value / duration) * 100).toFixed(1)}%)`);
   };
   
   const handleSeekComplete = () => {
+    console.log(`🎯 Seek completed to ${seekValue.toFixed(1)}s - HLS will start buffering from this position`);
     onSeek(seekValue);
     setIsSeeking(false);
     onSeekEnd?.();
@@ -155,7 +159,9 @@ const VideoControls = ({
         >
           <View style={styles.topControlsInner}>
             <TouchableOpacity onPress={onBackPress} style={styles.topButton}>
-              <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+              <View style={styles.iconWrapper}>
+                <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+              </View>
             </TouchableOpacity>
             
             <View style={styles.titleContainer}>
@@ -168,7 +174,9 @@ const VideoControls = ({
             </View>
             
             <TouchableOpacity style={styles.topButton} onPress={onSettingsPress}>
-              <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+              <View style={styles.iconWrapper}>
+                <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+              </View>
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -182,20 +190,26 @@ const VideoControls = ({
           ]}
         >
           <TouchableOpacity onPress={onSkipBackward} style={styles.seekButton}>
-            <Ionicons name="play-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+            <View style={styles.iconWrapper}>
+              <Ionicons name="play-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+            </View>
             <Text style={styles.seekButtonText}>{PLAYER_BEHAVIOR.DOUBLE_TAP_SEEK_TIME}s</Text>
           </TouchableOpacity>
           
           <TouchableOpacity onPress={onPlayPause} style={styles.playPauseButton}>
-            <Ionicons 
-              name={paused ? "play" : "pause"} 
-              size={PLAYER_UI.ICON_SIZE.XLARGE} 
-              color={PLAYER_COLORS.TEXT_LIGHT} 
-            />
+            <View style={styles.iconWrapper}>
+              <Ionicons 
+                name={paused ? "play" : "pause"} 
+                size={PLAYER_UI.ICON_SIZE.XLARGE} 
+                color={PLAYER_COLORS.TEXT_LIGHT} 
+              />
+            </View>
           </TouchableOpacity>
           
           <TouchableOpacity onPress={onSkipForward} style={styles.seekButton}>
-            <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+            <View style={styles.iconWrapper}>
+              <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+            </View>
             <Text style={styles.seekButtonText}>{PLAYER_BEHAVIOR.DOUBLE_TAP_SEEK_TIME}s</Text>
           </TouchableOpacity>
         </Animated.View>
@@ -213,7 +227,9 @@ const VideoControls = ({
               onPress={onSkipIntro}
             >
               <Text style={styles.skipIntroText}>Skip Intro</Text>
-              <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
+              <View style={styles.iconWrapper}>
+                <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
+              </View>
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -228,6 +244,11 @@ const VideoControls = ({
         >
           {/* Progress Bar - Full Width */}
           <View style={styles.progressBarContainer}>
+            {/* Full seekable range background - shows user can seek anywhere */}
+            <View style={styles.seekableRangeContainer}>
+              <View style={styles.seekableRange} />
+            </View>
+            
             {/* Buffer progress background */}
             <View style={styles.bufferProgressContainer}>
               <View 
@@ -246,11 +267,14 @@ const VideoControls = ({
               maximumValue={duration}
               value={isSeeking ? seekValue : currentTime}
               minimumTrackTintColor={PLAYER_COLORS.PRIMARY}
-              maximumTrackTintColor="transparent"
+              maximumTrackTintColor="rgba(255, 255, 255, 0.3)"
               thumbTintColor={PLAYER_COLORS.PRIMARY}
               onSlidingStart={handleSeekStart}
               onValueChange={handleSeekChange}
               onSlidingComplete={handleSeekComplete}
+              // Enhanced seeking properties for better HLS experience
+              step={0.1}  // Allow fine-grained seeking
+              tapToSeek={true}  // Allow tapping anywhere on the slider to seek
             />
           </View>
           
@@ -274,11 +298,13 @@ const VideoControls = ({
                 onPress={onSubtitlePress}
                 accessibilityLabel="Subtitles"
               >
-                                  <Ionicons 
+                <View style={styles.iconWrapper}>
+                  <Ionicons 
                     name="chatbubble" 
                     size={24} 
                     color={preferences?.subtitlesEnabled ? PLAYER_COLORS.PRIMARY : PLAYER_COLORS.TEXT_LIGHT} 
                   />
+                </View>
               </TouchableOpacity>
               
               {/* Playback Speed */}
@@ -287,11 +313,13 @@ const VideoControls = ({
                 onPress={onSpeedPress}
                 accessibilityLabel="Speed"
               >
-                                  <Ionicons 
+                <View style={styles.iconWrapper}>
+                  <Ionicons 
                     name="speedometer" 
                     size={24} 
                     color={PLAYER_COLORS.TEXT_LIGHT} 
                   />
+                </View>
               </TouchableOpacity>
               
               {/* Fullscreen Toggle */}
@@ -300,11 +328,13 @@ const VideoControls = ({
                 onPress={onToggleFullscreen}
                 accessibilityLabel="Fullscreen"
               >
-                                  <Ionicons 
+                <View style={styles.iconWrapper}>
+                  <Ionicons 
                     name="resize-outline" 
                     size={24} 
                     color={PLAYER_COLORS.TEXT_LIGHT} 
                   />
+                </View>
               </TouchableOpacity>
 </View>
 
@@ -331,7 +361,7 @@ const styles = StyleSheet.create({
     right: 0,
     paddingTop: 20,
     paddingHorizontal: 20,
-    zIndex: 10,
+    zIndex: 150,
   },
   topControlsInner: {
     flexDirection: 'row',
@@ -342,6 +372,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    elevation: 4,
+    zIndex: 160,
   },
   topRightButtons: {
     flexDirection: 'row',
@@ -366,6 +398,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     transform: [{ translateY: -25 }],
+    zIndex: 200,
   },
   playPauseButton: {
     backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
@@ -384,7 +417,8 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.5,
     shadowRadius: 10,
-    elevation: 5,
+    elevation: 8,
+    zIndex: 250,
   },
   seekButton: {
     width: PLAYER_UI.SEEK_BUTTON_SIZE,
@@ -393,6 +427,8 @@ const styles = StyleSheet.create({
     borderRadius: PLAYER_UI.SEEK_BUTTON_SIZE / 2,
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 6,
+    zIndex: 220,
   },
   seekButtonText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
@@ -407,11 +443,27 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     paddingHorizontal: 20,
     backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
+    zIndex: 150,
   },
   progressBarContainer: {
     width: '100%',
     marginBottom: 12,
     position: 'relative',
+  },
+  seekableRangeContainer: {
+    position: 'absolute',
+    top: 18,
+    left: 0,
+    right: 0,
+    height: 4,
+    borderRadius: 2,
+    zIndex: 0,
+  },
+  seekableRange: {
+    height: '100%',
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 2,
   },
   bufferProgressContainer: {
     position: 'absolute',
@@ -419,7 +471,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 4,
-    backgroundColor: PLAYER_COLORS.SLIDER_TRACK,
+    backgroundColor: 'transparent',
     borderRadius: 2,
     zIndex: 1,
   },
@@ -458,7 +510,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    elevation: 5,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -466,6 +518,7 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
+    zIndex: 160,
   },
   activeControlButton: {
     backgroundColor: `rgba(255, 102, 196, 0.3)`,
@@ -498,6 +551,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '30%',
     right: 20,
+    zIndex: 180,
   },
   skipIntroButton: {
     flexDirection: 'row',
@@ -515,6 +569,14 @@ const styles = StyleSheet.create({
   activeIconButton: {
     backgroundColor: 'rgba(255, 107, 0, 0.3)',
     borderRadius: 20,
+  },
+  iconWrapper: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 300,
+    // Ensure icons render properly on all platforms
+    overflow: 'visible',
+    backgroundColor: 'transparent',
   },
 });
 

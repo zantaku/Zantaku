@@ -61,8 +61,8 @@ export class AnimePaheProvider {
         description: ep.description,
         duration: ep.duration,
         provider: 'AnimePahe',
-        isSubbed: true, // AnimePahe primarily provides subbed content
-        isDubbed: false,
+        isSubbed: true, // AnimePahe provides subbed content
+        isDubbed: true, // AnimePahe also provides dubbed content
         isFiller: ep.isFiller,
         isRecap: ep.isRecap,
         aired: ep.aired
@@ -76,10 +76,10 @@ export class AnimePaheProvider {
   /**
    * Get watch data for an episode by anime ID and episode number
    */
-  async getWatchData(animeId: string, episodeNumber: number): Promise<WatchResponse> {
+  async getWatchData(animeId: string, episodeNumber: number, isDub: boolean = false): Promise<WatchResponse> {
     try {
       const watchUrl = `${this.baseUrl}/anime/animepahe/watch/${animeId}/episode-${episodeNumber}`;
-      console.log(`[AnimePaheProvider] Getting watch data: ${watchUrl}`);
+      console.log(`[AnimePaheProvider] Getting ${isDub ? 'DUB' : 'SUB'} watch data: ${watchUrl}`);
       
       const response = await axios.get(watchUrl);
       
@@ -92,7 +92,7 @@ export class AnimePaheProvider {
         .map((source: any) => ({
           url: source.url,
           quality: source.quality || 'default',
-          type: 'sub' as const,
+          type: isDub ? 'dub' : 'sub',
           headers: {
             ...response.data.headers,
             Referer: 'https://animepahe.com/',
@@ -126,7 +126,7 @@ export class AnimePaheProvider {
   /**
    * Get watch data for an episode by direct episode ID (legacy method)
    */
-  async getWatchDataById(episodeId: string): Promise<WatchResponse> {
+  async getWatchDataById(episodeId: string, isDub: boolean = false): Promise<WatchResponse> {
     try {
       const watchUrl = `${this.baseUrl}/anime/animepahe/watch/${episodeId}`;
       console.log(`[AnimePaheProvider] Getting watch data by ID: ${watchUrl}`);
@@ -142,7 +142,7 @@ export class AnimePaheProvider {
         .map((source: any) => ({
           url: source.url,
           quality: source.quality || 'default',
-          type: 'sub' as const,
+          type: isDub ? 'dub' : 'sub',
           headers: {
             ...response.data.headers,
             Referer: 'https://animepahe.com/',

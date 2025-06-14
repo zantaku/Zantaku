@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { View, StyleSheet, Platform, StatusBar, TouchableOpacity, Modal, Text, NativeScrollEvent, NativeSyntheticEvent, Switch, Dimensions, Animated, ScrollView } from 'react-native';
+import { View, StyleSheet, Platform, StatusBar, TouchableOpacity, Modal, Text, NativeScrollEvent, NativeSyntheticEvent, Switch, Dimensions, Animated, ScrollView, FlatList } from 'react-native';
 import Slider from '@react-native-community/slider';
 import Reanimated, { 
   useSharedValue, 
@@ -36,12 +36,13 @@ interface Chapter {
   number: string;
   title: string;
   url: string;
+  source: string;
 }
 
 export default function WebNovelReader() {
   const params = useLocalSearchParams();
   const router = useRouter();
-  const flashListRef = useRef<FlashList<string>>(null);
+  const flashListRef = useRef<FlatList<string>>(null);
   const lastScrollTime = useRef<number>(0);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastUpdatedPage = useRef<number>(-1);
@@ -120,17 +121,39 @@ export default function WebNovelReader() {
   const progressTracker = useReadingProgress();
 
   // Image headers for bypassing referer checks
-  const imageHeaders = useMemo(() => ({
-    'Referer': 'https://mangakatana.com/',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Origin': 'https://mangakatana.com'
-  }), []);
+  const imageHeaders = useMemo(() => {
+    // Extract headers from params if available
+    const headerKeys = Object.keys(params).filter(key => key.startsWith('header'));
+    if (headerKeys.length > 0) {
+      try {
+        const firstHeaderKey = headerKeys[0];
+        const headerData = JSON.parse(params[firstHeaderKey] as string);
+        return headerData;
+      } catch (error) {
+        console.warn('[WebNovelReader] Failed to parse headers from params:', error);
+      }
+    }
+    
+    // Default headers based on the image URLs
+    const firstImage = images[0];
+    if (firstImage && firstImage.includes('mangafire')) {
+      return {
+        'Referer': 'https://mangafire.to/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      };
+    }
+    
+    // Fallback headers
+    return {
+      'Referer': 'https://mangakatana.com/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Origin': 'https://mangakatana.com'
+    };
+  }, [params, images]);
 
   // Memoize chapter navigation handlers
   const nextChapter = useMemo(() => chapterNav.getChapterByType('next'), [chapterNav]);
   const previousChapter = useMemo(() => chapterNav.getChapterByType('previous'), [chapterNav]);
-
-
 
   // Load images progressively based on current scroll position
   const loadImagesAroundCurrentView = useCallback(async (currentIndex: number) => {
@@ -212,7 +235,7 @@ export default function WebNovelReader() {
     if (targetChapter) {
       // Skip save modal if in incognito mode, auto-save enabled, or progress already updated
       if (isIncognito || shouldAutoSave || progressTracker.hasUpdatedProgress) {
-        setSelectedChapter(targetChapter);
+        setSelectedChapter({ ...targetChapter, source: 'synthetic' });
         setAutoLoadChapter(true);
         setShowChapterModal(true);
       } else {
@@ -220,7 +243,7 @@ export default function WebNovelReader() {
         setPendingNextChapter(true);
         setShowSaveModal(true);
         setNavigationType(type);
-        setSelectedChapter(targetChapter);
+        setSelectedChapter({ ...targetChapter, source: 'synthetic' });
       }
     }
   }, [chapterNav, progressTracker.hasUpdatedProgress, isIncognito, shouldAutoSave, params.chapter]);
@@ -397,15 +420,15 @@ export default function WebNovelReader() {
 
     // Debounce the expensive calculations
     scrollTimeoutRef.current = setTimeout(() => {
-      // More efficient current page calculation using binary search approach
+      // Calculate current page for vertical scrolling
+      const scrollY = contentOffset.y;
       let currentPage = 0;
       let accumulatedHeight = 0;
-      const scrollY = contentOffset.y;
       
-      // Find the current page more efficiently
+      // Find the current page based on scroll position
       for (let i = 0; i < images.length; i++) {
         const imageState = imageLoader.getImageState(i);
-        const imageHeight = imageState.height || 400;
+        const imageHeight = imageState.height || 400; // fallback height
         
         if (scrollY < accumulatedHeight + imageHeight / 2) {
           currentPage = i;
@@ -416,7 +439,7 @@ export default function WebNovelReader() {
       }
       
       // Only update progress if the page actually changed
-      if (currentPage !== lastUpdatedPage.current) {
+      if (currentPage !== lastUpdatedPage.current && currentPage >= 0 && currentPage < images.length) {
         progressTracker.updateProgress(currentPage, images.length);
         lastUpdatedPage.current = currentPage;
         
@@ -545,7 +568,7 @@ export default function WebNovelReader() {
       if (navigationType) {
         const targetChapter = chapterNav.getChapterByType(navigationType);
         if (targetChapter) {
-          setSelectedChapter(targetChapter);
+          setSelectedChapter({ ...targetChapter, source: 'synthetic' });
           setAutoLoadChapter(true);
           setShowChapterModal(true);
         }
@@ -567,27 +590,54 @@ export default function WebNovelReader() {
     // Check if this image should be loaded based on progressive loading
     const shouldLoad = loadedImageIndices.has(index) || index < INITIAL_LOAD_COUNT;
     
+    // Calculate dynamic height - use loaded height or fallback
+    const imageHeight = imageState.height || 600;
+    
     return (
-      <WebtoonImage
-        imageUrl={imageUrl}
-        index={index}
-        imageHeaders={imageHeaders}
-        onPress={handleZoomToggle}
-        onLoadStart={() => imageLoader.handleImageLoadStart(index)}
-        onLoadSuccess={(width, height) => imageLoader.handleImageLoadSuccess(index, width, height)}
-        onLoadError={(error) => imageLoader.handleImageLoadError(index)}
-        isLoading={imageState.isLoading}
-        hasError={imageState.hasError}
-        onRetry={() => imageLoader.retryImage(index)}
-        height={imageState.height}
-        shouldLoad={shouldLoad}
-        isZoomed={isZoomed}
-        zoomAnimatedValue={zoomAnimatedValue}
-        translateX={translateX}
-        translateY={translateY}
-      />
+      <View style={[styles.imageContainer, { height: imageHeight }]}>
+        <ExpoImage
+          source={{ 
+            uri: imageUrl,
+            headers: imageHeaders 
+          }}
+          style={[styles.mangaImage, { height: imageHeight }]}
+          contentFit="cover"
+          onLoadStart={() => {
+            console.log(`[WebNovelReader] Loading image ${index + 1}: ${imageUrl}`);
+            imageLoader.handleImageLoadStart(index);
+          }}
+          onLoad={(event) => {
+            console.log(`[WebNovelReader] Successfully loaded image ${index + 1}`);
+            const { width, height } = event.source;
+            imageLoader.handleImageLoadSuccess(index, width, height);
+          }}
+          onError={(error) => {
+            console.error(`[WebNovelReader] Failed to load image ${index + 1}:`, error);
+            imageLoader.handleImageLoadError(index);
+          }}
+          cachePolicy="memory-disk"
+          placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+        />
+        {imageState.isLoading && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.loadingText}>Loading page {index + 1}...</Text>
+          </View>
+        )}
+        {imageState.hasError && (
+          <TouchableOpacity 
+            style={styles.errorOverlay}
+            onPress={() => {
+              console.log(`[WebNovelReader] Retrying image ${index + 1}`);
+              imageLoader.retryImage(index);
+            }}
+          >
+            <FontAwesome5 name="exclamation-triangle" size={24} color="#ff4444" />
+            <Text style={styles.imageErrorText}>Tap to retry</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     );
-  }, [imageHeaders, handleZoomToggle, imageLoader, loadedImageIndices, isZoomed, zoomAnimatedValue, translateX, translateY]);
+  }, [imageHeaders, imageLoader, loadedImageIndices]);
 
   const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
 
@@ -1023,17 +1073,15 @@ export default function WebNovelReader() {
 
   return (
     <View style={styles.container}>
-      <FlashList
+      <FlatList
         ref={flashListRef}
         data={images}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        estimatedItemSize={400}
-        showsVerticalScrollIndicator={false}
-        onScroll={isZoomed ? undefined : handleScroll}
+        showsVerticalScrollIndicator={true}
+        onScroll={handleScroll}
         scrollEventThrottle={100}
-        removeClippedSubviews={true}
-        scrollEnabled={!isZoomed}
+        scrollEnabled={true}
       />
 
       <ReaderUI
@@ -1100,7 +1148,7 @@ export default function WebNovelReader() {
                   setPendingNextChapter(false);
                   const targetChapter = chapterNav.getChapterByType(navigationType!);
                   if (targetChapter) {
-                    setSelectedChapter(targetChapter);
+                    setSelectedChapter({ ...targetChapter, source: 'synthetic' });
                     setAutoLoadChapter(true);
                     setShowChapterModal(true);
                   }
@@ -1175,9 +1223,10 @@ export default function WebNovelReader() {
           userPreferred: params.title as string
         }}
         mangaId={params.mangaId as string}
-        autoLoad={autoLoadChapter}
-        currentReader="webnovel"
-        existingParams={params}
+        currentProvider={params.currentProvider as any}
+        anilistId={params.anilistId as string}
+        format={params.format as string}
+        countryOfOrigin={params.countryOfOrigin as string}
       />
 
       {/* Notification */}
@@ -1529,5 +1578,43 @@ const styles = StyleSheet.create({
   dropdownMenuItemText: {
     fontSize: 14,
     color: '#333',
+  },
+  imageContainer: {
+    position: 'relative',
+    width: WINDOW_WIDTH,
+    backgroundColor: '#111',
+  },
+  mangaImage: {
+    width: WINDOW_WIDTH,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  errorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  imageErrorText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 }); 

@@ -39,6 +39,7 @@ const ReadTab = ({
           anilistId={anilistId}
           countryOfOrigin={countryOfOrigin}
           coverImage={coverImage}
+          format={format}
         />
       )}
     </View>

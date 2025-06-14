@@ -100,6 +100,9 @@ const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
             <Text style={styles.seekingText}>
               Seeking to {formatTime(seekingPosition)}
             </Text>
+            <Text style={styles.seekingSubtext}>
+              HLS will buffer from this position
+            </Text>
             <View style={styles.seekingBar}>
               <View 
                 style={[
@@ -153,6 +156,13 @@ const styles = StyleSheet.create({
     color: PLAYER_COLORS.TEXT_LIGHT,
     fontSize: 14,
     fontWeight: '500',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  seekingSubtext: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    fontWeight: '400',
     marginBottom: 8,
     textAlign: 'center',
   },

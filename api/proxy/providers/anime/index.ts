@@ -176,7 +176,7 @@ export class AnimeProviderManager {
           throw new Error('Anime not found on AnimePahe');
         }
         
-        watchData = await animePaheProvider.getWatchData(animeId, episodeNumber);
+        watchData = await animePaheProvider.getWatchData(animeId, episodeNumber, isDub);
       } else {
         throw new Error(`Unsupported provider: ${provider}`);
       }
@@ -215,16 +215,7 @@ export class AnimeProviderManager {
     if (!autoSelectEnabled && specificProvider) {
       console.log(`[ProviderManager] Auto-select OFF, trying only ${specificProvider} for episode ${episodeNumber || episodeId}`);
       
-      // Check if user is requesting dub from AnimePahe (which only provides subs)
-      if (isDub && specificProvider === 'animepahe') {
-        console.log('[ProviderManager] AnimePahe does not support dub content (subs only)');
-        return {
-          provider: specificProvider,
-          data: { sources: [], subtitles: [] },
-          success: false,
-          error: 'AnimePahe only provides subbed content'
-        };
-      }
+      // AnimePahe can now handle both sub and dub content
       
       const result = await this.getWatchDataFromProvider(
         specificProvider,
@@ -246,11 +237,9 @@ export class AnimeProviderManager {
     // Auto-select is ON - try providers in order of preference
     let providers: ProviderType[] = ['animepahe', 'zoro'];
     
-    // Skip AnimePahe for dub content since it only provides subs
-    if (isDub) {
-      providers = providers.filter(p => p !== 'animepahe');
-      console.log('[ProviderManager] Skipping AnimePahe for dub content (subs only)');
-    }
+    // Note: AnimePahe can provide both sub and dub content, so we don't skip it
+    console.log(`[ProviderManager] Will try providers for ${isDub ? 'DUB' : 'SUB'}: ${providers.join(' → ')}`);
+    
     
     for (const provider of providers) {
       try {

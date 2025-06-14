@@ -1250,7 +1250,17 @@ export default function MangaDetailsScreen() {
         mangaTitle={details?.title || { english: '', userPreferred: '' }}
         mangaId={id as string}
         countryOfOrigin={details?.countryOfOrigin}
+        format={details?.format}
       />
+      {/* Debug logging */}
+      {(() => {
+        console.log('Manga Details Debug:', {
+          format: details?.format,
+          countryOfOrigin: details?.countryOfOrigin,
+          title: details?.title
+        });
+        return null;
+      })()}
 
       {/* Toast Notifications */}
       {showSuccessToast && (

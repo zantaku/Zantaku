@@ -4493,6 +4493,8 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
         currentProvider={currentProvider}
         mangaSlugId={mangaSlugId || undefined}
         chapterManager={chapterManager}
+        format={params.format as string}
+        countryOfOrigin={params.countryOfOrigin as string}
       />
 
       {/* Save progress modal */}
