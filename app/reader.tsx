@@ -1900,12 +1900,18 @@ export default function ReaderScreen() {
           }
 
           const chapterNumber = Array.isArray(params.chapter) 
-            ? params.chapter[0].replace(/[^0-9.]/g, '')
-            : params.chapter.replace(/[^0-9.]/g, '');
+            ? params.chapter[0]
+            : params.chapter;
+
+          // Convert chapter number to integer for AniList (which only accepts integers)
+          // For decimal chapters like 5.5, this will save as 5, but that's the limitation of AniList
+          const progressValue = parseInt(String(chapterNumber), 10);
 
           console.log('Saving progress to AniList:', {
             mediaId: anilistId,
-            progress: Math.floor(parseFloat(chapterNumber))
+            progress: progressValue,
+            originalChapter: chapterNumber,
+            note: 'AniList only accepts integers for progress'
           });
 
           const mutation = `
@@ -1933,7 +1939,7 @@ export default function ReaderScreen() {
               query: mutation,
               variables: {
                 mediaId: parseInt(String(anilistId)),
-                progress: Math.floor(parseFloat(chapterNumber))
+                progress: progressValue
               }
             })
           });

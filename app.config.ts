@@ -5,7 +5,7 @@ export default {
     name: "Zantaku",
     slug: "kamilist",
     version: "1.0.0",
-    orientation: "portrait",
+    orientation: "default", // Allow both portrait and landscape for TV support
     icon: "./assets/images/icon.png",
     scheme: "kamilist",
     userInterfaceStyle: "automatic",

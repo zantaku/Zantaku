@@ -467,7 +467,11 @@ export default function AnimeScreen() {
           ...anime.title,
           userPreferred: anime.title.userPreferred || anime.title.romaji || anime.title.english || 'Unknown Title'
         },
-        averageScore: anime.averageScore ? anime.averageScore / 10 : null
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0,
+        description: anime.description || '',
+        bannerImage: anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large,
+        episodes: anime.episodes || null,
+        trending: anime.trending || null
       }));
 
       if (processedTrending.length > 0) {
@@ -600,85 +604,97 @@ export default function AnimeScreen() {
     }
   };
 
-  const renderHeroItem = ({ item: anime }: { item: Anime }) => (
-    <TouchableOpacity 
-      style={[styles.heroSection, { width }]}
-      onPress={() => router.push(`/anime/${anime.id}`)}
-      activeOpacity={0.9}
-    >
-      <ExpoImage
-        source={{ uri: anime.bannerImage || anime.coverImage.extraLarge }}
-        style={styles.heroImage}
-        contentFit="cover"
-        transition={1000}
-      />
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
-        locations={[0.3, 0.6, 1]}
-        style={styles.heroGradient}
+  const renderHeroItem = ({ item: anime }: { item: Anime }) => {
+    // Safety checks for required data
+    if (!anime || !anime.id) {
+      return null;
+    }
+
+    const imageSource = anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large;
+    const title = anime.title?.english || anime.title?.userPreferred || anime.title?.romaji || 'Unknown Title';
+    const description = anime.description?.replace(/<[^>]*>/g, '') || '';
+
+    return (
+      <TouchableOpacity 
+        style={[styles.heroSection, { width }]}
+        onPress={() => router.push(`/anime/${anime.id}`)}
+        activeOpacity={0.9}
       >
-        <View style={styles.heroContent}>
-          <BlurView intensity={30} tint="dark" style={styles.heroMetaContainer}>
-            <View style={styles.heroStats}>
-              {anime.averageScore && (
+        <ExpoImage
+          source={{ uri: imageSource }}
+          style={styles.heroImage}
+          contentFit="cover"
+          transition={1000}
+          placeholder="https://via.placeholder.com/400x600/1a1a1a/666666?text=Loading"
+        />
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.95)']}
+          locations={[0.2, 0.5, 0.7, 1]}
+          style={styles.heroGradient}
+        >
+          <View style={styles.heroContent}>
+            <BlurView intensity={40} tint="dark" style={styles.heroMetaContainer}>
+              <View style={styles.heroStats}>
+                {anime.averageScore > 0 && (
+                  <View style={styles.heroStatItem}>
+                    <FontAwesome5 name="star" size={12} color="#FFD700" solid />
+                    <Text style={styles.heroStatText}>
+                      {anime.averageScore.toFixed(1)}
+                    </Text>
+                  </View>
+                )}
+                {anime.trending && (
+                  <View style={styles.heroStatItem}>
+                    <FontAwesome5 name="fire-alt" size={12} color="#FF6B6B" solid />
+                    <Text style={styles.heroStatText}>#{anime.trending}</Text>
+                  </View>
+                )}
                 <View style={styles.heroStatItem}>
-                  <FontAwesome5 name="star" size={14} color="#FFD700" solid />
+                  <FontAwesome5 name="tv" size={12} color="#4CAF50" solid />
                   <Text style={styles.heroStatText}>
-                    {anime.averageScore.toFixed(1)}
+                    {anime.episodes ? `${anime.episodes} Ep` : 'Ongoing'}
                   </Text>
                 </View>
-              )}
-              {anime.trending && (
-                <View style={styles.heroStatItem}>
-                  <FontAwesome5 name="fire-alt" size={14} color="#FF6B6B" solid />
-                  <Text style={styles.heroStatText}>#{anime.trending}</Text>
-                </View>
-              )}
-              <View style={styles.heroStatItem}>
-                <FontAwesome5 name="tv" size={14} color="#4CAF50" solid />
-                <Text style={styles.heroStatText}>
-                  {anime.episodes ? `${anime.episodes} Ep` : 'Ongoing'}
-                </Text>
               </View>
-            </View>
-          </BlurView>
+            </BlurView>
 
-          <View style={styles.heroTitleContainer}>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {anime.title.english || anime.title.userPreferred}
-            </Text>
-            {anime.description && (
-              <Text style={styles.heroDescription} numberOfLines={2}>
-                {anime.description?.replace(/<[^>]*>/g, '')}
+            <View style={styles.heroTitleContainer}>
+              <Text style={styles.heroTitle} numberOfLines={2}>
+                {title}
               </Text>
-            )}
-          </View>
+              {description && (
+                <Text style={styles.heroDescription} numberOfLines={3}>
+                  {description}
+                </Text>
+              )}
+            </View>
 
-          <TouchableOpacity 
-            style={styles.watchButton}
-            onPress={() => router.push(`/anime/${anime.id}`)}
-          >
-            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-            <FontAwesome5 name="play" size={16} color="#fff" />
-            <Text style={styles.watchButtonText}>Watch Now</Text>
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.watchButton}
+              onPress={() => router.push(`/anime/${anime.id}`)}
+            >
+              <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+              <FontAwesome5 name="play" size={14} color="#fff" />
+              <Text style={styles.watchButtonText}>Watch Now</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+        <View style={styles.progressBarContainer}>
+          <Animated.View 
+            style={[
+              styles.progressBar,
+              {
+                width: progressAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%']
+                })
+              }
+            ]} 
+          />
         </View>
-      </LinearGradient>
-      <View style={styles.progressBarContainer}>
-        <Animated.View 
-          style={[
-            styles.progressBar,
-            {
-              width: progressAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', '100%']
-              })
-            }
-          ]} 
-        />
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   const renderPaginationDots = () => (
     <View style={styles.paginationContainer}>
@@ -993,7 +1009,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   heroWrapper: {
-    height: height * 0.75,
+    height: height * 0.6,
     position: 'relative',
   },
   heroSection: {
@@ -1010,56 +1026,56 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '80%',
+    height: '75%',
     justifyContent: 'flex-end',
-    padding: 24,
-    paddingBottom: 64,
+    padding: 20,
+    paddingBottom: 50,
   },
   heroContent: {
     width: '100%',
-    gap: 24,
+    gap: 16,
   },
   heroMetaContainer: {
     alignSelf: 'flex-start',
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   heroStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   heroStatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   heroStatText: {
-    fontSize: 15,
+    fontSize: 13,
     color: '#fff',
-    fontWeight: '700',
+    fontWeight: '600',
   },
   heroTitleContainer: {
-    gap: 16,
+    gap: 12,
   },
   heroTitle: {
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.5,
-    lineHeight: 48,
+    lineHeight: 38,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
   heroDescription: {
-    fontSize: 17,
+    fontSize: 15,
     color: '#fff',
     opacity: 0.9,
-    lineHeight: 26,
+    lineHeight: 22,
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -1068,18 +1084,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 18,
-    borderRadius: 16,
-    gap: 12,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 10,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    marginTop: 8,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginTop: 4,
+    alignSelf: 'flex-start',
   },
   watchButtonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -1187,23 +1204,23 @@ const styles = StyleSheet.create({
   },
   paginationContainer: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 30,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    zIndex: 2,
+    zIndex: 3,
   },
   paginationDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
   },
   paginationDotActive: {
-    width: 24,
+    width: 20,
     backgroundColor: '#02A9FF',
   },
   top100Container: {
@@ -1308,13 +1325,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    zIndex: 10,
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    zIndex: 2,
   },
   progressBar: {
     height: '100%',
     backgroundColor: '#02A9FF',
+    opacity: 0.8,
   },
   retryButton: {
     padding: 16,

@@ -1,4 +1,5 @@
 import { StyleSheet, View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, ImageBackground, Dimensions, Animated, Platform, RefreshControl, DeviceEventEmitter } from 'react-native';
+import { isTVEnvironment, getTVScreenDimensions } from '../../utils/tvDetection';
 import { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -392,8 +393,23 @@ export default function TabsIndex() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const { isDarkMode, currentTheme } = useTheme();
+  const isTV = isTVEnvironment();
   const searchModalRef = useRef(null);
   const welcomeModalRef = useRef(null);
+
+  // Debug TV dimensions
+  useEffect(() => {
+    if (isTV) {
+      const tvDims = getTVScreenDimensions();
+      console.log('🔥 Main Content TV Dimensions:', { 
+        dp: tvDims.dp,
+        pixels: tvDims.pixels,
+        pixelRatio: tvDims.pixelRatio,
+        isTV: Platform.isTV,
+        calculatedPadding: Math.max(60, tvDims.pixels.width * 0.05)
+      });
+    }
+  }, [isTV]);
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1169,10 +1185,45 @@ export default function TabsIndex() {
     );
   }
 
+  // Get TV dimensions dynamically for inline styles
+  const tvDims = isTV ? getTVScreenDimensions() : null;
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: currentTheme.colors.background }}>
+    <View style={[
+      isTV ? {
+        flex: 1,
+        paddingTop: 0,
+        width: tvDims?.pixels.width || '100%',
+        height: tvDims?.pixels.height || '100%',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+      } : styles.container, 
+      { backgroundColor: currentTheme.colors.background }
+    ]}>
+      {/* Debug overlay for TV - shows full screen width */}
+      {isTV && __DEV__ && tvDims && (
+        <View style={{ 
+          position: 'absolute', 
+          top: 0, 
+          left: 0, 
+          backgroundColor: 'red', 
+          width: tvDims.pixels.width, 
+          height: 4,
+          zIndex: 1000
+        }} />
+      )}
       <ScrollView 
-        style={styles.container}
+        style={isTV ? {
+          flex: 1,
+          width: tvDims?.pixels.width || '100%',
+        } : styles.scrollView}
+        contentContainerStyle={isTV ? {
+          paddingHorizontal: Math.max(60, (tvDims?.pixels.width || 960) * 0.05),
+          paddingVertical: 40,
+          minHeight: tvDims?.pixels.height || '100%',
+          width: tvDims?.pixels.width || '100%',
+        } : styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1217,7 +1268,7 @@ export default function TabsIndex() {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1313,10 +1364,10 @@ const styles = StyleSheet.create({
   },
   mediaList: {
     paddingVertical: 4,
-    gap: 12,
+    gap: Platform.isTV ? 20 : 12, // More spacing for TV
   },
   mediaCard: {
-    width: 160,
+    width: Platform.isTV ? 220 : 160, // Larger cards for TV
     borderRadius: 12,
     overflow: 'hidden',
     elevation: 3,
@@ -1328,7 +1379,7 @@ const styles = StyleSheet.create({
   mediaCoverContainer: {
     position: 'relative',
     width: '100%',
-    height: 220,
+    height: Platform.isTV ? 300 : 220, // Taller covers for TV
   },
   mediaCover: {
     width: '100%',
@@ -1572,5 +1623,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  // TV-specific styles - FORCE FULL SCREEN WITH ACTUAL PIXELS
+  tvContainer: {
+    flex: 1,
+    paddingTop: 0,
+    width: getTVScreenDimensions().pixels.width, // FORCE actual physical pixels
+    height: getTVScreenDimensions().pixels.height, // FORCE actual physical pixels
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  tvScrollView: {
+    flex: 1,
+    width: getTVScreenDimensions().pixels.width, // FORCE actual physical pixels
+  },
+  tvContent: {
+    paddingHorizontal: Math.max(60, getTVScreenDimensions().pixels.width * 0.05), // Responsive TV padding
+    paddingVertical: 40,
+    minHeight: getTVScreenDimensions().pixels.height, // FORCE actual physical pixels
+    width: getTVScreenDimensions().pixels.width, // FORCE actual physical pixels
   },
 });

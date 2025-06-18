@@ -509,85 +509,96 @@ export default function MangaScreen() {
     }
   };
 
-  const renderHeroItem = ({ item: manga }: { item: Manga }) => (
-    <TouchableOpacity
-      style={[styles.heroContainer, { width }]}
-      onPress={() => router.push(`/manga/${manga.id}`)}
-      activeOpacity={0.9}
-    >
-      <ExpoImage
-        source={{ uri: manga.bannerImage || manga.coverImage.extraLarge }}
-        style={styles.heroBanner}
-        contentFit="cover"
-        transition={1000}
-      />
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
-        locations={[0.3, 0.6, 1]}
-        style={styles.heroGradient}
+  const renderHeroItem = ({ item: manga }: { item: Manga }) => {
+    // Safety checks for required data
+    if (!manga || !manga.id) {
+      return null;
+    }
+
+    const imageSource = manga.bannerImage || manga.coverImage?.extraLarge || manga.coverImage?.large;
+    const title = manga.title?.english || manga.title?.userPreferred || manga.title?.romaji || 'Unknown Title';
+    const description = manga.description?.replace(/<[^>]*>/g, '') || '';
+
+    return (
+      <TouchableOpacity
+        style={[styles.heroContainer, { width }]}
+        onPress={() => router.push(`/manga/${manga.id}`)}
+        activeOpacity={0.9}
       >
-        <View style={styles.heroContent}>
-          <BlurView intensity={30} tint="dark" style={styles.heroMetaContainer}>
-            <View style={styles.heroStats}>
-              {manga.averageScore && (
+        <ExpoImage
+          source={{ uri: imageSource }}
+          style={styles.heroBanner}
+          contentFit="cover"
+          transition={1000}
+        />
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.95)']}
+          locations={[0.2, 0.5, 0.7, 1]}
+          style={styles.heroGradient}
+        >
+          <View style={styles.heroContent}>
+            <BlurView intensity={30} tint="dark" style={styles.heroMetaContainer}>
+              <View style={styles.heroStats}>
+                {manga.averageScore && (
+                  <View style={styles.heroStatItem}>
+                    <FontAwesome5 name="star" size={14} color="#FFD700" solid />
+                    <Text style={styles.heroStatText}>
+                      {manga.averageScore.toFixed(1)}
+                    </Text>
+                  </View>
+                )}
+                {manga.trending && (
+                  <View style={styles.heroStatItem}>
+                    <FontAwesome5 name="fire-alt" size={14} color="#FF6B6B" solid />
+                    <Text style={styles.heroStatText}>#{manga.trending}</Text>
+                  </View>
+                )}
                 <View style={styles.heroStatItem}>
-                  <FontAwesome5 name="star" size={14} color="#FFD700" solid />
+                  <FontAwesome5 name="book" size={14} color="#4CAF50" solid />
                   <Text style={styles.heroStatText}>
-                    {manga.averageScore.toFixed(1)}
+                    {manga.chapters ? `${manga.chapters} Ch` : 'Ongoing'}
                   </Text>
                 </View>
-              )}
-              {manga.trending && (
-                <View style={styles.heroStatItem}>
-                  <FontAwesome5 name="fire-alt" size={14} color="#FF6B6B" solid />
-                  <Text style={styles.heroStatText}>#{manga.trending}</Text>
-                </View>
-              )}
-              <View style={styles.heroStatItem}>
-                <FontAwesome5 name="book" size={14} color="#4CAF50" solid />
-                <Text style={styles.heroStatText}>
-                  {manga.chapters ? `${manga.chapters} Ch` : 'Ongoing'}
-                </Text>
               </View>
-            </View>
-          </BlurView>
+            </BlurView>
 
-          <View style={styles.heroTitleContainer}>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {manga.title.userPreferred}
-            </Text>
-            {manga.description && (
-              <Text style={styles.heroDescription} numberOfLines={2}>
-                {manga.description?.replace(/<[^>]*>/g, '')}
+            <View style={styles.heroTitleContainer}>
+              <Text style={styles.heroTitle} numberOfLines={2}>
+                {title}
               </Text>
-            )}
-          </View>
+              {description && (
+                <Text style={styles.heroDescription} numberOfLines={2}>
+                  {description}
+                </Text>
+              )}
+            </View>
 
-          <TouchableOpacity
-            style={styles.readNowButton}
-            onPress={() => router.push(`/manga/${manga.id}`)}
-          >
-            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-            <FontAwesome5 name="book-reader" size={16} color="#fff" />
-            <Text style={styles.readNowText}>Read Now</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.readNowButton}
+              onPress={() => router.push(`/manga/${manga.id}`)}
+            >
+              <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+              <FontAwesome5 name="book-reader" size={16} color="#fff" />
+              <Text style={styles.readNowText}>Read Now</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+        <View style={styles.progressBarContainer}>
+          <Animated.View 
+            style={[
+              styles.progressBar,
+              {
+                width: progressAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%']
+                })
+              }
+            ]} 
+          />
         </View>
-      </LinearGradient>
-      <View style={styles.progressBarContainer}>
-        <Animated.View 
-          style={[
-            styles.progressBar,
-            {
-              width: progressAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', '100%']
-              })
-            }
-          ]} 
-        />
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   const renderPaginationDots = () => (
     <View style={styles.paginationContainer}>
@@ -796,7 +807,7 @@ const styles = StyleSheet.create({
   },
   heroContainer: {
     width: '100%',
-    height: height * 0.75,
+    height: '100%',
     position: 'relative',
   },
   heroBanner: {
@@ -808,56 +819,56 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '80%',
+    height: '75%',
     justifyContent: 'flex-end',
-    padding: 24,
-    paddingBottom: 48,
+    padding: 20,
+    paddingBottom: 50,
   },
   heroContent: {
     width: '100%',
-    gap: 24,
+    gap: 16,
   },
   heroMetaContainer: {
     alignSelf: 'flex-start',
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   heroStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   heroStatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   heroStatText: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#fff',
     fontWeight: '700',
   },
   heroTitleContainer: {
-    gap: 16,
+    gap: 12,
   },
   heroTitle: {
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.5,
-    lineHeight: 48,
+    lineHeight: 38,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
   heroDescription: {
-    fontSize: 17,
+    fontSize: 16,
     color: '#fff',
     opacity: 0.9,
-    lineHeight: 26,
+    lineHeight: 22,
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -866,18 +877,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 18,
-    borderRadius: 16,
-    gap: 12,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 10,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    marginTop: 8,
+    marginTop: 4,
+    alignSelf: 'flex-start',
   },
   readNowText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -923,14 +935,14 @@ const styles = StyleSheet.create({
   },
   paginationContainer: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 30,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    zIndex: 2,
+    zIndex: 3,
   },
   paginationDot: {
     width: 8,
@@ -943,6 +955,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#02A9FF',
   },
   heroWrapper: {
+    height: height * 0.6,
     position: 'relative',
   },
   lastSection: {
@@ -1043,13 +1056,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    zIndex: 10,
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    zIndex: 2,
   },
   progressBar: {
     height: '100%',
     backgroundColor: '#02A9FF',
+    opacity: 0.8,
   },
   retryButton: {
     padding: 16,

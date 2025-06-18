@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Dimensions, Platform, TextInput, ScrollView, FlatList } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useTheme } from '../hooks/useTheme';
@@ -190,6 +190,86 @@ const ListChapterCard = memo(({
 });
 // #endregion
 
+// #region Continue Reading Button Component
+const ContinueReadingButton = memo(({ 
+    chapters, 
+    readProgress, 
+    onPress, 
+    currentTheme, 
+    coverImage 
+}: { 
+    chapters: Chapter[]; 
+    readProgress: number; 
+    onPress: (chapter: Chapter) => void; 
+    currentTheme: any; 
+    coverImage?: string; 
+}) => {
+    // Find the next unread chapter
+    const nextChapter = useMemo(() => {
+        if (readProgress === 0) {
+            // If no progress, start from chapter 1 or the first available chapter
+            return chapters.find(ch => parseFloat(ch.number) === 1) || chapters[0];
+        }
+        
+        // Find the next chapter after current progress
+        const sortedChapters = [...chapters].sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
+        return sortedChapters.find(ch => parseFloat(ch.number) > readProgress);
+    }, [chapters, readProgress]);
+
+    if (!nextChapter || chapters.length === 0) {
+        return null; // Don't show button if no next chapter or no chapters
+    }
+
+    const isFirstChapter = readProgress === 0;
+    const chapterNumber = nextChapter.number;
+    const buttonText = isFirstChapter ? 'Start Reading' : `Continue Ch. ${chapterNumber}`;
+    const progressText = isFirstChapter ? 'Begin your journey' : `Last read: Ch. ${readProgress}`;
+
+    return (
+        <TouchableOpacity 
+            style={[styles.continueButton, { backgroundColor: currentTheme.colors.surface }]}
+            onPress={() => onPress(nextChapter)}
+            activeOpacity={0.8}
+        >
+            <View style={styles.continueButtonContent}>
+                <View style={styles.continueThumbnailContainer}>
+                    <ExpoImage
+                        source={{ uri: coverImage || defaultThumbnail }}
+                        style={styles.continueThumbnail}
+                        contentFit="cover"
+                        placeholder={PLACEHOLDER_BLUR_HASH}
+                        transition={200}
+                    />
+                    <View style={styles.continueOverlay}>
+                        <FontAwesome5 
+                            name={isFirstChapter ? "play" : "book-open"} 
+                            size={24} 
+                            color="#FFFFFF" 
+                        />
+                    </View>
+                </View>
+                <View style={styles.continueTextContainer}>
+                    <Text style={[styles.continueButtonText, { color: currentTheme.colors.text }]}>
+                        {buttonText}
+                    </Text>
+                    <Text style={[styles.continueProgressText, { color: currentTheme.colors.textSecondary }]}>
+                        {progressText}
+                    </Text>
+                    {nextChapter.title && (
+                        <Text style={[styles.continueChapterTitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+                            {nextChapter.title}
+                        </Text>
+                    )}
+                </View>
+                <View style={styles.continueArrow}>
+                    <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} />
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
+});
+// #endregion
+
 export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId, format, countryOfOrigin }: ChapterListProps) {
     const { isDarkMode, currentTheme } = useTheme();
     const { isIncognito } = useIncognito();
@@ -309,7 +389,18 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                                  setPreferences({ defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
             }
         };
+        const loadSortOrder = async () => {
+            try {
+                const sortOrder = await AsyncStorage.getItem('chapterSortOrder');
+                if (sortOrder !== null) {
+                    setIsNewestFirst(sortOrder === 'newest');
+                }
+            } catch (error) {
+                logError('Failed to load chapter sort order:', error);
+            }
+        };
         loadPrefs();
+        loadSortOrder();
         fetchAniListProgress();
         setCurrentMangaTitle(mangaTitle.userPreferred || mangaTitle.english || '');
     }, [fetchAniListProgress, mangaTitle]);
@@ -559,10 +650,23 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 />
             )}
             {renderProviderChanger()}
+            <ContinueReadingButton 
+                chapters={chapters}
+                readProgress={readProgress}
+                onPress={handleChapterPress}
+                currentTheme={currentTheme}
+                coverImage={coverImage}
+            />
             <View style={styles.header}>
                 <Text style={[styles.titleText, {color: currentTheme.colors.text}]}>Chapters</Text>
                 <View style={styles.headerButtons}>
-                    <TouchableOpacity style={styles.headerButton} onPress={() => setIsNewestFirst(p => !p)}><FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={16} color={currentTheme.colors.text} /></TouchableOpacity>
+                    <TouchableOpacity style={styles.headerButton} onPress={() => {
+                        setIsNewestFirst(prev => {
+                            const newValue = !prev;
+                            AsyncStorage.setItem('chapterSortOrder', newValue ? 'newest' : 'oldest');
+                            return newValue;
+                        });
+                    }}><FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={16} color={currentTheme.colors.text} /></TouchableOpacity>
                     <TouchableOpacity style={styles.headerButton} onPress={() => setColumnCount(p => p === 1 ? 2 : 1)}><FontAwesome5 name={columnCount === 1 ? "th-large" : "th-list"} size={16} color={currentTheme.colors.text} /></TouchableOpacity>
                 </View>
             </View>
@@ -763,5 +867,65 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 9998,
+    },
+    
+    // Continue Reading Button Styles
+    continueButton: {
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 12,
+        overflow: 'hidden',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    continueButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+    },
+    continueThumbnailContainer: {
+        width: 60,
+        height: 80,
+        borderRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+        marginRight: 16,
+    },
+    continueThumbnail: {
+        width: '100%',
+        height: '100%',
+    },
+    continueOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    continueTextContainer: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    continueButtonText: {
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    continueProgressText: {
+        fontSize: 14,
+        marginBottom: 2,
+    },
+    continueChapterTitle: {
+        fontSize: 12,
+        fontStyle: 'italic',
+    },
+    continueArrow: {
+        marginLeft: 12,
     },
 });

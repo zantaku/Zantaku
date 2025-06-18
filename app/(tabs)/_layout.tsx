@@ -15,8 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DeviceEventEmitter } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 import { MotiView } from 'moti';
+import { isTVEnvironment } from '../../utils/tvDetection';
+import TVLayout from '../../components/TVLayout';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen'); // FORCE actual screen dimensions
 const TAB_BAR_WIDTH = Math.min(SCREEN_WIDTH * 0.85, 320);
 
 interface TabIconProps {
@@ -123,6 +125,20 @@ export default function TabsLayout() {
   const isAnimePage = pathname.startsWith('/anime') || pathname === '/@anime';
   const isMangaPage = pathname.startsWith('/manga') || pathname === '/@manga';
   const insets = useSafeAreaInsets();
+  const isTV = isTVEnvironment();
+
+  // DEBUG: Log all dimensions
+  useEffect(() => {
+    console.log('🔥 TABS LAYOUT DIMENSIONS DEBUG:', {
+      isTV,
+      platformIsTV: Platform.isTV,
+      screenDimensions: Dimensions.get('screen'),
+      windowDimensions: Dimensions.get('window'),
+      SCREEN_WIDTH,
+      SCREEN_HEIGHT,
+      TAB_BAR_WIDTH
+    });
+  }, [isTV]);
 
   // Calculate bottom spacing based on platform and safe area
   const bottomSpacing = Platform.select({
@@ -269,36 +285,91 @@ export default function TabsLayout() {
   }
 
   console.log('TabsLayout - Rendering Tabs, Current Path:', pathname);
-  return (
-    <>
-      {/* Main content */}
-      <View style={styles.container}>
+  
+  // If TV environment, render completely different layout
+  if (isTV) {
+    return (
+      <TVLayout>
         <Tabs
           screenOptions={{
-            tabBarStyle: {
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              backgroundColor: isDarkMode 
-                ? 'rgba(18, 18, 18, 0.98)'
-                : 'rgba(255, 255, 255, 0.98)',
-              height: Platform.select({
-                ios: 95,
-                android: 75 + (insets.bottom > 0 ? insets.bottom : 16),
-                default: 75
-              }),
-              paddingBottom: Platform.select({
-                ios: insets.bottom + 8,
-                android: insets.bottom > 0 ? insets.bottom + 8 : 24,
-                default: 8
-              }),
-              paddingTop: 12,
-              paddingHorizontal: 8,
-              borderTopWidth: 0,
-              elevation: 0,
-              zIndex: 999,
-            },
+            tabBarStyle: { display: 'none' }, // Completely hide tabs on TV
+            headerShown: false, // Hide all headers on TV
+          }}
+        >
+          <Tabs.Screen
+            name="@anime"
+            options={{
+              title: 'Watch',
+              tabBarLabel: () => null,
+              tabBarIcon: () => null,
+            }}
+          />
+          <Tabs.Screen
+            name="index"
+            options={{
+              title: 'Home',
+              tabBarLabel: () => null,
+              tabBarIcon: () => null,
+            }}
+          />
+          <Tabs.Screen
+            name="@manga"
+            options={{
+              title: 'Read',
+              tabBarLabel: () => null,
+              tabBarIcon: () => null,
+            }}
+          />
+        </Tabs>
+
+        {/* TV-specific modals */}
+        {isAnimePage && (
+          <AnimeSearchGlobal visible={isSearchVisible} onClose={() => setIsSearchVisible(false)} />
+        )}
+        {isMangaPage && (
+          <MangaSearchGlobal visible={isSearchVisible} onClose={() => setIsSearchVisible(false)} />
+        )}
+        {!isAnimePage && !isMangaPage && (
+          <GlobalSearch visible={isSearchVisible} onClose={() => setIsSearchVisible(false)} />
+        )}
+        
+        <AppSettingsModal 
+          visible={showSettings} 
+          onClose={() => setShowSettings(false)} 
+        />
+      </TVLayout>
+    );
+  }
+
+  // Mobile layout (existing code)
+  const tabsContent = (
+    <View style={styles.container}>
+      <Tabs
+        screenOptions={{
+          tabBarStyle: {
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: isDarkMode 
+              ? 'rgba(18, 18, 18, 0.98)'
+              : 'rgba(255, 255, 255, 0.98)',
+            height: Platform.select({
+              ios: 95,
+              android: 75 + (insets.bottom > 0 ? insets.bottom : 16),
+              default: 75
+            }),
+            paddingBottom: Platform.select({
+              ios: insets.bottom + 8,
+              android: insets.bottom > 0 ? insets.bottom + 8 : 24,
+              default: 8
+            }),
+            paddingTop: 12,
+            paddingHorizontal: 8,
+            borderTopWidth: 0,
+            elevation: 0,
+            zIndex: 999,
+          },
             tabBarItemStyle: {
               height: 60,
               paddingTop: 8,
@@ -402,8 +473,13 @@ export default function TabsLayout() {
           />
         </Tabs>
       </View>
+  );
 
-      {/* Modals - Render outside the main View to ensure they're on top */}
+  return (
+    <>
+      {tabsContent}
+
+      {/* Mobile-specific modals */}
       {isAnimePage && (
         <AnimeSearchGlobal visible={isSearchVisible} onClose={() => setIsSearchVisible(false)} />
       )}

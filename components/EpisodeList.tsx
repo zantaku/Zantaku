@@ -269,6 +269,86 @@ const ListEpisodeCard = memo(({ episode, onPress, currentProgress, currentTheme,
 });
 // #endregion
 
+// #region Continue Watching Button Component
+const ContinueWatchingButton = memo(({ 
+    episodes, 
+    currentProgress, 
+    onPress, 
+    currentTheme, 
+    coverImage 
+}: { 
+    episodes: Episode[]; 
+    currentProgress: number; 
+    onPress: (episode: Episode) => void; 
+    currentTheme: any; 
+    coverImage?: string; 
+}) => {
+    // Find the next unwatched episode
+    const nextEpisode = useMemo(() => {
+        if (currentProgress === 0) {
+            // If no progress, start from episode 1 or the first available episode
+            return episodes.find(ep => ep.number === 1) || episodes[0];
+        }
+        
+        // Find the next episode after current progress
+        const sortedEpisodes = [...episodes].sort((a, b) => a.number - b.number);
+        return sortedEpisodes.find(ep => ep.number > currentProgress);
+    }, [episodes, currentProgress]);
+
+    if (!nextEpisode || episodes.length === 0) {
+        return null; // Don't show button if no next episode or no episodes
+    }
+
+    const isFirstEpisode = currentProgress === 0;
+    const episodeNumber = nextEpisode.number;
+    const buttonText = isFirstEpisode ? 'Start Watching' : `Continue Ep. ${episodeNumber}`;
+    const progressText = isFirstEpisode ? 'Begin your journey' : `Last watched: Ep. ${currentProgress}`;
+
+    return (
+        <TouchableOpacity 
+            style={[styles.continueButton, { backgroundColor: currentTheme.colors.surface }]}
+            onPress={() => onPress(nextEpisode)}
+            activeOpacity={0.8}
+        >
+            <View style={styles.continueButtonContent}>
+                <View style={styles.continueThumbnailContainer}>
+                    <Image
+                        source={{ uri: nextEpisode.image || coverImage || '' }}
+                        style={styles.continueThumbnail}
+                        contentFit="cover"
+                        placeholder={PLACEHOLDER_BLUR_HASH}
+                        transition={200}
+                    />
+                    <View style={styles.continueOverlay}>
+                        <FontAwesome5 
+                            name={isFirstEpisode ? "play" : "play-circle"} 
+                            size={24} 
+                            color="#FFFFFF" 
+                        />
+                    </View>
+                </View>
+                <View style={styles.continueTextContainer}>
+                    <Text style={[styles.continueButtonText, { color: currentTheme.colors.text }]}>
+                        {buttonText}
+                    </Text>
+                    <Text style={[styles.continueProgressText, { color: currentTheme.colors.textSecondary }]}>
+                        {progressText}
+                    </Text>
+                    {nextEpisode.title && (
+                        <Text style={[styles.continueEpisodeTitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+                            {nextEpisode.title}
+                        </Text>
+                    )}
+                </View>
+                <View style={styles.continueArrow}>
+                    <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} />
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
+});
+// #endregion
+
 export default function EpisodeList({ episodes: initialEpisodes, loading: initialLoading, animeTitle, anilistId, malId, coverImage, mangaTitle }: EpisodeListProps) {
     // #region State and Hooks
     const { isDarkMode, currentTheme } = useTheme();
@@ -438,6 +518,12 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         AsyncStorage.getItem('episodeColumnCount').then(val => {
             if (val) setColumnCount(Number(val));
         });
+        // Load sort order preference
+        AsyncStorage.getItem('episodeSortOrder').then(val => {
+            if (val !== null) {
+                setIsNewestFirst(val === 'newest');
+            }
+        });
         // Load provider settings
         AsyncStorage.getItem('animeProviderSettings').then(val => {
             if (val) {
@@ -523,7 +609,13 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         }
     }, [selectedEpisode, router, animeTitle, anilistId, currentProgress]);
     
-    const handleSortToggle = useCallback(() => setIsNewestFirst(prev => !prev), []);
+    const handleSortToggle = useCallback(() => {
+        setIsNewestFirst(prev => {
+            const newValue = !prev;
+            AsyncStorage.setItem('episodeSortOrder', newValue ? 'newest' : 'oldest');
+            return newValue;
+        });
+    }, []);
     const handleColumnToggle = useCallback(() => setColumnCount(prev => (prev === 1 ? 2 : 1)), []);
     
     const handleNotificationToggle = useCallback(async () => {
@@ -749,6 +841,13 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 />
             )}
             {renderProviderChanger()}
+            <ContinueWatchingButton 
+                episodes={episodes}
+                currentProgress={currentProgress}
+                onPress={handleEpisodePress}
+                currentTheme={currentTheme}
+                coverImage={coverImage}
+            />
             <View style={styles.headerWrapper}>
                 <View style={styles.header}>
                     <Text style={[styles.titleText, { color: currentTheme.colors.text }]}>Episodes</Text>
@@ -973,5 +1072,65 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         zIndex: 9998,
+    },
+    
+    // Continue Watching Button Styles
+    continueButton: {
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 12,
+        overflow: 'hidden',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    continueButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+    },
+    continueThumbnailContainer: {
+        width: 80,
+        height: 60,
+        borderRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+        marginRight: 16,
+    },
+    continueThumbnail: {
+        width: '100%',
+        height: '100%',
+    },
+    continueOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    continueTextContainer: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    continueButtonText: {
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    continueProgressText: {
+        fontSize: 14,
+        marginBottom: 2,
+    },
+    continueEpisodeTitle: {
+        fontSize: 12,
+        fontStyle: 'italic',
+    },
+    continueArrow: {
+        marginLeft: 12,
     },
 });

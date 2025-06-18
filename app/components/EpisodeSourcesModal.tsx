@@ -663,7 +663,7 @@ export default function EpisodeSourcesModal({
 
   const fetchSources = async (episodeId: string, type: 'sub' | 'dub') => {
     // Use source settings for auto-select behavior
-    const shouldAutoSelect = sourceSettings.autoSelectSource;
+    const shouldAutoSelect = sourceSettings.autoSelectSource && autoSelectSource;
     
     try {
       console.log(`\n=== EPISODE SOURCES MODAL DEBUG (Provider Manager) ===`);
@@ -719,7 +719,7 @@ export default function EpisodeSourcesModal({
       }
       
       console.log(`✅ Found sources from provider: ${watchResult.provider}`);
-      console.log(`�� Sources available: ${watchResult.data.sources.length}`);
+      console.log(`📊 Sources available: ${watchResult.data.sources.length}`);
       console.log(`📊 Subtitles available: ${watchResult.data.subtitles.length}`);
       
       // Create direct references to API data
@@ -774,27 +774,15 @@ export default function EpisodeSourcesModal({
         // Update sources state for UI
         setSources(formattedSources);
         
-        // If auto-select, proceed with automatic selection
-        if (shouldAutoSelect) {
-          // Update pill message to show successful loading
-          setPillMessage(`Loading ${type} version from ${watchResult.provider}...`);
-          
-          // Check for m3u8 source
-          const m3u8Source = formattedSources.find((source: Source) => source.isM3U8);
-          if (m3u8Source) {
-            console.log(`✅ Found HLS (m3u8) stream for ${type} from ${watchResult.provider}`);
-            handleDirectSourceSelect(m3u8Source, directSubtitles, directTimings, anilistId);
-            return;
-          } else {
-            console.log(`ℹ️ No HLS stream found, using direct source from ${watchResult.provider}`);
-            const firstSource = formattedSources[0];
-            if (firstSource) {
-              handleDirectSourceSelect(firstSource, directSubtitles, directTimings, anilistId);
-              return;
-            }
-          }
-        } else {
-          // For manual selection, prepare quality options
+        // Determine if we should show source selection or auto-select
+        const hasMultipleSources = formattedSources.length > 1;
+        const shouldShowSelection = hasMultipleSources && !shouldAutoSelect;
+        
+        console.log(`📊 Multiple sources available: ${hasMultipleSources}`);
+        console.log(`📊 Should show selection: ${shouldShowSelection}`);
+        
+        if (shouldShowSelection) {
+          // For manual selection with multiple sources, prepare quality options
           const qualityOptions = formattedSources.map((source: Source) => ({
             quality: source.quality || 'default',
             url: source.url,
@@ -819,8 +807,32 @@ export default function EpisodeSourcesModal({
           setSubtitles(directSubtitles);
           setTimings(directTimings || null);
           
-          console.log(`📊 Prepared ${qualityOptions.length} quality options for selection`);
+          console.log(`📊 Prepared ${qualityOptions.length} quality options for user selection`);
           return;
+        } else {
+          // Auto-select mode or single source - proceed with automatic selection
+          setPillMessage(`Loading ${type} version from ${watchResult.provider}...`);
+          
+          // Prefer HLS (m3u8) streams if available and setting is enabled
+          let selectedSource: Source | null = null;
+          
+          if (sourceSettings.preferHLSStreams) {
+            selectedSource = formattedSources.find((source: Source) => source.isM3U8) || null;
+            if (selectedSource) {
+              console.log(`✅ Selected HLS (m3u8) stream for ${type} from ${watchResult.provider}`);
+            }
+          }
+          
+          // Fallback to first available source if no HLS found or HLS not preferred
+          if (!selectedSource) {
+            selectedSource = formattedSources[0];
+            console.log(`✅ Selected ${selectedSource.isM3U8 ? 'HLS' : 'direct'} stream for ${type} from ${watchResult.provider}`);
+          }
+          
+          if (selectedSource) {
+            handleDirectSourceSelect(selectedSource, directSubtitles, directTimings, anilistId);
+            return;
+          }
         }
       } else {
         console.log(`❌ No sources available from any provider`);
@@ -1028,10 +1040,16 @@ export default function EpisodeSourcesModal({
   const QualitySelectionView = () => {
     return (
       <View style={styles.qualitySelectionContainer}>
-        <Text style={styles.title}>Select Quality</Text>
-        <Text style={styles.subtitle}>Choose your preferred quality</Text>
+        <Text style={styles.title}>Multiple Sources Found</Text>
+        <Text style={styles.subtitle}>
+          Choose from {availableQualities.length} available streaming {availableQualities.length === 1 ? 'source' : 'sources'}
+        </Text>
         
-        <ScrollView style={styles.qualityList}>
+        <View style={styles.sourceCountBadge}>
+          <Text style={styles.sourceCountText}>{availableQualities.length} Sources Available</Text>
+        </View>
+        
+        <ScrollView style={styles.qualityList} showsVerticalScrollIndicator={false}>
           {availableQualities.map((quality, index) => (
             <ReanimatedTouchableOpacity
               key={`quality-${index}`}
@@ -1053,18 +1071,33 @@ export default function EpisodeSourcesModal({
                 handleSourceSelect(selectedSource);
               }}
             >
-              <View style={styles.qualityButtonContent}>
-                <Text style={styles.qualityLabel}>{quality.quality}</Text>
-                {quality.isDefault && (
-                  <View style={styles.recommendedBadge}>
-                    <Text style={styles.recommendedText}>Recommended</Text>
+                              <View style={styles.qualityButtonContent}>
+                  <View style={styles.qualityInfo}>
+                    <View>
+                      <Text style={styles.qualityLabel}>{quality.quality}</Text>
+                      <View style={styles.sourceTypeContainer}>
+                        <Text style={styles.sourceTypeText}>
+                          {quality.url.includes('.m3u8') ? '🎬 HLS Stream' : '📺 Direct Stream'}
+                        </Text>
+                        {quality.isDefault && (
+                          <View style={styles.recommendedBadge}>
+                            <Text style={styles.recommendedText}>Recommended</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
                   </View>
-                )}
-              </View>
-              <FontAwesome5 name="play-circle" size={18} color="#02A9FF" />
+                  <FontAwesome5 name="play-circle" size={20} color="#02A9FF" />
+                </View>
             </ReanimatedTouchableOpacity>
           ))}
         </ScrollView>
+        
+        <View style={styles.selectionFooter}>
+          <Text style={styles.footerHint}>
+            💡 HLS streams typically offer better stability and quality adaptation
+          </Text>
+        </View>
         
         <ReanimatedTouchableOpacity
           style={styles.backButton}
@@ -1073,7 +1106,7 @@ export default function EpisodeSourcesModal({
             setType(type); // Reset back to type selection
           }}
         >
-          <Text style={styles.backButtonText}>Go Back</Text>
+          <Text style={styles.backButtonText}>← Go Back</Text>
         </ReanimatedTouchableOpacity>
       </View>
     );
@@ -1406,6 +1439,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
   },
+  sourceCountBadge: {
+    backgroundColor: 'rgba(2, 169, 255, 0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(2, 169, 255, 0.4)',
+  },
+  sourceCountText: {
+    color: '#02A9FF',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   qualityList: {
     width: '100%',
     maxHeight: 300,
@@ -1430,10 +1479,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  qualityInfo: {
+    flex: 1,
+    flexDirection: 'column',
+  },
   qualityLabel: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  sourceTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  sourceTypeText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    fontWeight: '500',
   },
   recommendedBadge: {
     backgroundColor: '#02A9FF',
@@ -1447,8 +1510,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  backButton: {
+  selectionFooter: {
+    alignItems: 'center',
     marginTop: 16,
+    marginBottom: 8,
+  },
+  footerHint: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  backButton: {
     backgroundColor: 'rgba(30, 30, 30, 0.8)',
     paddingHorizontal: 24,
     paddingVertical: 12,

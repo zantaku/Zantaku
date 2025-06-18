@@ -1,5 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, FlatList, TouchableOpacity, Dimensions, Platform, Modal, Animated, Alert } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ActivityIndicator, 
+  TouchableOpacity, 
+  Dimensions, 
+  Platform, 
+  Modal, 
+  Animated, 
+  Alert
+} from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -8,6 +20,7 @@ import { useNovelData } from '../hooks/useNovelData';
 import { useNovelDownloader } from '../hooks/useNovelDownloader';
 import * as FileSystem from 'expo-file-system';
 import * as Constants from 'expo-constants';
+import CorrectNovelSearchModal from './CorrectNovelSearchModal';
 
 const getStoragePath = (novelId: string, volumeId: string, type: 'root' | 'epub' | 'images' = 'root') => {
   const isExpoGo = Constants.default.appOwnership === 'expo';
@@ -46,9 +59,13 @@ interface NovelVolumeListProps {
   mangaTitle: {
     english: string;
     userPreferred: string;
+    romaji?: string;
+    native?: string;
   };
   anilistId?: string;
 }
+
+
 
 export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeListProps) {
   const router = useRouter();
@@ -62,10 +79,18 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
     deleteVolume, 
     checkDownloadedVolumes 
   } = useNovelDownloader(novelId);
+
+  // UI State
+  const [viewMode, setViewMode] = React.useState<'list' | 'grid'>('list');
+  const [sortMode, setSortMode] = React.useState<'newest' | 'oldest'>('newest');
   const [showOptionsModal, setShowOptionsModal] = React.useState(false);
   const [selectedVolume, setSelectedVolume] = React.useState<Volume | null>(null);
   const [showNotification, setShowNotification] = React.useState(false);
   const [notificationMessage, setNotificationMessage] = React.useState('');
+  const [showCorrectNovelModal, setShowCorrectNovelModal] = React.useState(false);
+  const [currentNovelTitle, setCurrentNovelTitle] = React.useState<string>('');
+
+  // Animations
   const notificationAnim = React.useRef(new Animated.Value(-100)).current;
 
   // Check downloaded volumes when volumes list changes
@@ -74,6 +99,29 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
       checkDownloadedVolumes(volumes);
     }
   }, [volumes, checkDownloadedVolumes]);
+
+  React.useEffect(() => {
+    setCurrentNovelTitle(mangaTitle.userPreferred || mangaTitle.english || '');
+  }, [mangaTitle]);
+
+  // Sort and categorize volumes
+  const sortedVolumes = React.useMemo(() => {
+    const sorted = [...volumes].sort((a, b) => {
+      const aNum = parseInt(a.number);
+      const bNum = parseInt(b.number);
+      return sortMode === 'newest' ? bNum - aNum : aNum - bNum;
+    });
+
+    // Separate downloaded and non-downloaded
+    const downloaded = sorted.filter(v => downloadedVolumes.has(v.id));
+    const downloading = sorted.filter(v => downloadingVolumes.has(v.id));
+    const available = sorted.filter(v => 
+      !downloadedVolumes.has(v.id) && !downloadingVolumes.has(v.id)
+    );
+
+    // Return in order: downloading, downloaded, available
+    return [...downloading, ...downloaded, ...available];
+  }, [volumes, sortMode, downloadedVolumes, downloadingVolumes]);
 
   const showNotificationIsland = (message: string) => {
     setNotificationMessage(message);
@@ -147,79 +195,255 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
     setSelectedVolume(null);
   };
 
+  const handleNovelChange = () => {
+    setShowCorrectNovelModal(true);
+  };
+
+  const handleNovelSelect = (novelId: string, novelTitle: string) => {
+    setCurrentNovelTitle(novelTitle);
+    setShowCorrectNovelModal(false);
+    // Handle novel selection - this would trigger a re-fetch with the new novel
+    console.log('Selected novel ID:', novelId, 'Title:', novelTitle);
+  };
+
+  const getStatusBadge = (volume: Volume) => {
+    const isDownloading = downloadingVolumes.has(volume.id);
+    const isDownloaded = downloadedVolumes.has(volume.id);
+    const downloadProgress = downloadingVolumes.get(volume.id)?.progress || 0;
+
+    if (isDownloading) {
+      return (
+        <View style={[styles.statusBadge, { backgroundColor: '#FFA50020' }]}>
+          <Text style={[styles.statusText, { color: '#FFA500' }]}>
+            {Math.round(downloadProgress * 100)}%
+          </Text>
+        </View>
+      );
+    }
+
+    if (isDownloaded) {
+      return (
+        <View style={[styles.statusBadge, { backgroundColor: '#28A74520' }]}>
+          <Text style={[styles.statusText, { color: '#28A745' }]}>
+            Downloaded
+          </Text>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
   const renderVolumeItem = ({ item }: { item: Volume }) => {
     const downloadInfo = downloadingVolumes.get(item.id);
     const isDownloading = downloadInfo !== undefined;
     const downloadProgress = downloadInfo?.progress || 0;
+    const isDownloaded = downloadedVolumes.has(item.id);
 
-    return (
-      <TouchableOpacity
-        style={[
-          styles.volumeItem, 
-          { 
-            backgroundColor: currentTheme.colors.surface,
-            borderColor: downloadedVolumes.has(item.id) 
-              ? currentTheme.colors.primary 
-              : currentTheme.colors.border,
-            borderWidth: downloadedVolumes.has(item.id) ? 2 : 1,
-          }
-        ]}
-        onPress={() => handleVolumePress(item)}
-        onLongPress={() => handleVolumeLongPress(item)}
-        delayLongPress={500}
-      >
-        <View style={styles.coverContainer}>
-          {item.cover ? (
-            <ExpoImage
-              source={{ uri: item.cover }}
-              style={styles.volumeCover}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={[styles.placeholderCover, { backgroundColor: currentTheme.colors.surface }]}>
-              <Text style={[styles.placeholderText, { color: currentTheme.colors.textSecondary }]}>No Cover</Text>
+    if (viewMode === 'grid') {
+      return (
+        <View style={styles.gridWrapper}>
+          <TouchableOpacity
+            style={[
+              styles.gridItem,
+              {
+                backgroundColor: currentTheme.colors.surface,
+                borderColor: isDownloaded 
+                  ? '#28A745'
+                  : currentTheme.colors.border,
+                borderWidth: isDownloaded ? 2 : 1,
+              }
+            ]}
+            onPress={() => handleVolumePress(item)}
+            onLongPress={() => handleVolumeLongPress(item)}
+            delayLongPress={500}
+          >
+            <View style={styles.gridCoverContainer}>
+              {item.cover ? (
+                <ExpoImage
+                  source={{ uri: item.cover }}
+                  style={styles.gridCover}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={[styles.gridPlaceholderCover, { backgroundColor: currentTheme.colors.background }]}>
+                  <FontAwesome5 name="book" size={24} color={currentTheme.colors.textSecondary} />
+                </View>
+              )}
+              
+              {isDownloaded && (
+                <View style={styles.gridStatusOverlay}>
+                  <FontAwesome5 name="check-circle" size={16} color="#28A745" solid />
+                </View>
+              )}
+              
+              {isDownloading && (
+                <View style={styles.gridDownloadingOverlay}>
+                  <Text style={styles.gridDownloadingText}>
+                    {Math.round(downloadProgress * 100)}%
+                  </Text>
+                </View>
+              )}
             </View>
-          )}
-          {downloadedVolumes.has(item.id) && (
-            <View style={styles.downloadedOverlay}>
-              <FontAwesome5 name="check-circle" size={24} color={currentTheme.colors.primary} solid />
-            </View>
-          )}
-          {isDownloading && (
-            <View style={styles.downloadingOverlay}>
-              <Text style={styles.downloadingText}>
-                {Math.round(downloadProgress * 100)}%
+            
+            <View style={styles.gridInfo}>
+              <Text style={[styles.gridVolumeNumber, { color: currentTheme.colors.primary }]}>
+                Vol. {item.number}
               </Text>
-              <ActivityIndicator size="small" color={currentTheme.colors.primary} style={styles.downloadingSpinner} />
-              <Text style={styles.downloadingLabel}>Tap to cancel</Text>
+              <Text 
+                style={[styles.gridVolumeTitle, { color: currentTheme.colors.text }]} 
+                numberOfLines={2}
+              >
+                {item.title}
+              </Text>
             </View>
-          )}
+          </TouchableOpacity>
         </View>
-        <View style={styles.volumeInfo}>
-          <View style={styles.volumeHeader}>
-            <Text style={[styles.volumeNumber, { color: currentTheme.colors.primary }]}>
-              Volume {item.number}
-            </Text>
-            {downloadedVolumes.has(item.id) && (
-              <View style={[styles.downloadedBadge, { backgroundColor: `${currentTheme.colors.primary}20` }]}>
-                <Text style={[styles.downloadedText, { color: currentTheme.colors.primary }]}>
-                  Downloaded
-                </Text>
+      );
+    }
+
+    // List view
+    return (
+      <View style={styles.listWrapper}>
+        <TouchableOpacity
+          style={[
+            styles.listItem,
+            {
+              backgroundColor: currentTheme.colors.surface,
+              borderColor: isDownloaded 
+                ? '#28A745'
+                : currentTheme.colors.border,
+              borderWidth: isDownloaded ? 2 : 1,
+            }
+          ]}
+          onPress={() => handleVolumePress(item)}
+          onLongPress={() => handleVolumeLongPress(item)}
+          delayLongPress={500}
+        >
+          <View style={styles.listCoverContainer}>
+            {item.cover ? (
+              <ExpoImage
+                source={{ uri: item.cover }}
+                style={styles.listCover}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={[styles.listPlaceholderCover, { backgroundColor: currentTheme.colors.background }]}>
+                <FontAwesome5 name="book" size={20} color={currentTheme.colors.textSecondary} />
+              </View>
+            )}
+            
+            {isDownloaded && (
+              <View style={styles.listStatusOverlay}>
+                <FontAwesome5 name="check-circle" size={16} color="#28A745" solid />
+              </View>
+            )}
+            
+            {isDownloading && (
+              <View style={styles.listDownloadingOverlay}>
+                <ActivityIndicator size="small" color={currentTheme.colors.primary} />
               </View>
             )}
           </View>
-          <Text style={[styles.volumeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
-            {item.title}
-          </Text>
-        </View>
-      </TouchableOpacity>
+          
+          <View style={styles.listInfo}>
+            <View style={styles.listHeader}>
+              <Text style={[styles.listVolumeNumber, { color: currentTheme.colors.primary }]}>
+                Volume {item.number}
+              </Text>
+              {getStatusBadge(item)}
+            </View>
+            <Text style={[styles.listVolumeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+              {item.title}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
     );
   };
+
+
+
+  const renderHeader = () => (
+    <View style={[styles.header, { backgroundColor: currentTheme.colors.background }]}>
+      {/* Novel Info Section */}
+      <View style={[styles.novelInfo, { backgroundColor: currentTheme.colors.surface }]}>
+        <TouchableOpacity 
+          style={styles.novelTitleContainer}
+          onPress={handleNovelChange}
+        >
+          <Text style={[styles.novelTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
+            {currentNovelTitle}
+          </Text>
+          <FontAwesome5 name="edit" size={12} color={currentTheme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Controls */}
+      <View style={styles.controls}>
+        <Text style={[styles.volumesTitle, { color: currentTheme.colors.text }]}>Volumes</Text>
+        <View style={styles.controlButtons}>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: currentTheme.colors.surface }]}
+            onPress={() => setSortMode(sortMode === 'newest' ? 'oldest' : 'newest')}
+          >
+            <FontAwesome5 
+              name={sortMode === 'newest' ? "sort-numeric-down" : "sort-numeric-up"} 
+              size={16} 
+              color={currentTheme.colors.text} 
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: currentTheme.colors.surface }]}
+            onPress={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
+          >
+            <FontAwesome5 
+              name={viewMode === 'list' ? 'th' : 'list'} 
+              size={16} 
+              color={currentTheme.colors.text} 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Stats */}
+      <View style={styles.stats}>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: currentTheme.colors.text }]}>
+            {volumes.length}
+          </Text>
+          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
+            Total
+          </Text>
+        </View>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: '#28A745' }]}>
+            {downloadedVolumes.size}
+          </Text>
+          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
+            Downloaded
+          </Text>
+        </View>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: '#FFA500' }]}>
+            {downloadingVolumes.size}
+          </Text>
+          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
+            Downloading
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
 
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: currentTheme.colors.background }]}>
-        <ActivityIndicator size="large" color="#02A9FF" />
+        <ActivityIndicator size="large" color={currentTheme.colors.primary} />
+        <Text style={[styles.loadingText, { color: currentTheme.colors.textSecondary }]}>
+          Loading volumes...
+        </Text>
       </View>
     );
   }
@@ -227,7 +451,13 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
   if (error) {
     return (
       <View style={[styles.errorContainer, { backgroundColor: currentTheme.colors.background }]}>
-        <Text style={[styles.errorText, { color: currentTheme.colors.textSecondary }]}>{error}</Text>
+        <FontAwesome5 name="exclamation-triangle" size={48} color={currentTheme.colors.error} />
+        <Text style={[styles.errorText, { color: currentTheme.colors.text }]}>
+          Failed to load volumes
+        </Text>
+        <Text style={[styles.errorSubtext, { color: currentTheme.colors.textSecondary }]}>
+          {error}
+        </Text>
       </View>
     );
   }
@@ -251,18 +481,30 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
         </Animated.View>
       )}
 
-      <FlatList
-        data={volumes}
-        renderItem={renderVolumeItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.listContainer, { backgroundColor: currentTheme.colors.background }]}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={[styles.emptyContainer, { backgroundColor: currentTheme.colors.background }]}>
-            <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>No volumes available</Text>
-          </View>
-        }
-      />
+      <View style={[styles.container, { backgroundColor: currentTheme.colors.background }]}>
+        <FlashList
+          data={sortedVolumes}
+          renderItem={renderVolumeItem}
+          keyExtractor={(item) => item.id}
+          numColumns={viewMode === 'grid' ? 2 : 1}
+          key={viewMode}
+          estimatedItemSize={viewMode === 'grid' ? 200 : 120}
+          ListHeaderComponent={renderHeader}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <FontAwesome5 name="book-open" size={48} color={currentTheme.colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: currentTheme.colors.text }]}>
+                No volumes found
+              </Text>
+              <Text style={[styles.emptySubtext, { color: currentTheme.colors.textSecondary }]}>
+                No volumes available for this novel
+              </Text>
+            </View>
+          }
+        />
+      </View>
 
       {/* Volume Options Modal */}
       <Modal
@@ -286,10 +528,12 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
                 onPress={handleRedownload}
               >
                 <FontAwesome5 name="sync-alt" size={24} color={currentTheme.colors.primary} />
-                <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Redownload</Text>
-                <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                  Download the file again
-                </Text>
+                <View style={styles.optionTextContainer}>
+                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Redownload</Text>
+                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
+                    Download the file again
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -297,10 +541,12 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
                 onPress={handleViewFile}
               >
                 <FontAwesome5 name="book-reader" size={24} color={currentTheme.colors.primary} />
-                <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Read</Text>
-                <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                  Open in reader
-                </Text>
+                <View style={styles.optionTextContainer}>
+                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Read</Text>
+                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
+                    Open in reader
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -328,10 +574,12 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
                 }}
               >
                 <FontAwesome5 name="folder-open" size={24} color={currentTheme.colors.primary} />
-                <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>View Files</Text>
-                <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                  Show stored files
-                </Text>
+                <View style={styles.optionTextContainer}>
+                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>View Files</Text>
+                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
+                    Show stored files
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -339,10 +587,12 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
                 onPress={handleDeleteVolume}
               >
                 <FontAwesome5 name="trash-alt" size={24} color="#dc3545" />
-                <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Delete</Text>
-                <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                  Remove from device
-                </Text>
+                <View style={styles.optionTextContainer}>
+                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Delete</Text>
+                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
+                    Remove from device
+                  </Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -355,146 +605,305 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
           </View>
         </View>
       </Modal>
+
+      {/* Correct Novel Search Modal */}
+      <CorrectNovelSearchModal
+        isVisible={showCorrectNovelModal}
+        onClose={() => setShowCorrectNovelModal(false)}
+        currentTitle={currentNovelTitle}
+        onNovelSelect={handleNovelSelect}
+      />
     </>
   );
 }
 
 const { width } = Dimensions.get('window');
+
 const styles = StyleSheet.create({
-  loadingContainer: {
+  container: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    paddingTop: 100, // Move container down to avoid top navbar
   },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  listContainer: {
+  header: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 8,
   },
-  volumeItem: {
-    flexDirection: 'row',
-    borderRadius: 16,
-    marginBottom: 16,
-    padding: 12,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    borderWidth: 1,
-  },
-  coverContainer: {
+  novelInfo: {
     borderRadius: 12,
-    overflow: 'hidden',
+    padding: 16,
+    marginBottom: 16,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  volumeCover: {
-    width: 85,
-    height: 125,
-    borderRadius: 12,
-  },
-  placeholderCover: {
-    width: 85,
-    height: 125,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: 12,
-  },
-  volumeInfo: {
-    flex: 1,
-    marginLeft: 16,
-    justifyContent: 'center',
-  },
-  volumeHeader: {
+  novelTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
   },
-  volumeTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    lineHeight: 20,
+  novelTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 8,
   },
-  volumeNumber: {
-    fontSize: 13,
+  controls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  volumesTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  controlButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  controlButton: {
+    padding: 8,
+    borderRadius: 20,
+    width: 38,
+    height: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  listContainer: {
+    paddingBottom: 100,
+  },
+  
+  // List View Styles
+  listWrapper: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  listItem: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    padding: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  listCoverContainer: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  listCover: {
+    width: 60,
+    height: 90,
+    borderRadius: 8,
+  },
+  listPlaceholderCover: {
+    width: 60,
+    height: 90,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listInfo: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  listHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  listVolumeNumber: {
+    fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
-  downloadedOverlay: {
+  listVolumeTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  listStatusOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+    padding: 2,
+  },
+  listDownloadingOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 8,
   },
-  downloadedBadge: {
+
+  // Grid View Styles
+  gridWrapper: {
+    flex: 1,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
+  },
+  gridItem: {
+    borderRadius: 16,
+    padding: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  gridCoverContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+    position: 'relative',
+  },
+  gridCover: {
+    width: '100%',
+    height: 160,
     borderRadius: 12,
   },
-  downloadedText: {
+  gridPlaceholderCover: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gridInfo: {
+    alignItems: 'center',
+  },
+  gridVolumeNumber: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  gridVolumeTitle: {
     fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  gridStatusOverlay: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  gridDownloadingOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  gridDownloadingText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+
+  // Status Badge Styles
+  statusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  statusText: {
+    fontSize: 10,
     fontWeight: '600',
   },
-  emptyContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-  },
-  downloadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+
+  // Loading & Error States
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 12,
+    gap: 16,
+    paddingTop: 100,
   },
-  downloadingText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
+  loadingText: {
+    fontSize: 16,
   },
-  downloadingSpinner: {
-    marginBottom: 8,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    gap: 16,
+    paddingTop: 100,
   },
-  downloadingLabel: {
-    color: '#fff',
-    fontSize: 12,
-    opacity: 0.8,
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  emptyContainer: {
+    padding: 32,
+    alignItems: 'center',
+    gap: 16,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   optionsModalContainer: {
     width: '90%',
+    maxWidth: 400,
     padding: 24,
     borderRadius: 16,
-    backgroundColor: '#fff',
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -511,7 +920,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   optionsContainer: {
-    gap: 12,
+    gap: 8,
     marginBottom: 16,
   },
   optionButton: {
@@ -521,13 +930,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 16,
   },
+  optionTextContainer: {
+    flex: 1,
+  },
   optionText: {
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 2,
   },
   optionDescription: {
     fontSize: 14,
-    marginLeft: 'auto',
   },
   cancelButton: {
     padding: 16,
@@ -538,18 +950,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
   notificationIsland: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 50 : 20,
     left: 20,
     right: 20,
-    backgroundColor: '#02A9FF',
     borderRadius: 12,
     padding: 16,
     zIndex: 1000,
@@ -570,4 +975,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+
+
 }); 
