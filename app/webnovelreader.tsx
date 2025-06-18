@@ -24,9 +24,10 @@ import { useImageLoader } from '../hooks/useImageLoader';
 import { useChapterNavigation } from '../hooks/useChapterNavigation';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { useTheme } from '../hooks/useTheme';
+
 import WebtoonImage from '../components/WebtoonImage';
 import ReaderUI from '../components/ReaderUI';
-import ChapterSourcesModal from '../components/ChapterSourcesModal';
+
 
 const WINDOW_HEIGHT = Dimensions.get('window').height;
 const WINDOW_WIDTH = Dimensions.get('window').width;
@@ -58,9 +59,7 @@ export default function WebNovelReader() {
   const [shouldSaveProgress, setShouldSaveProgress] = useState(false);
   const [pendingNextChapter, setPendingNextChapter] = useState(false);
   const [navigationType, setNavigationType] = useState<'next' | 'previous' | null>(null);
-  const [showChapterModal, setShowChapterModal] = useState(false);
-  const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
-  const [autoLoadChapter, setAutoLoadChapter] = useState(false);
+
   
   // Progressive loading state
   const [loadedImageIndices, setLoadedImageIndices] = useState<Set<number>>(new Set());
@@ -107,6 +106,8 @@ export default function WebNovelReader() {
   // Local navigation state for fallback
   const [localHasNextChapter, setLocalHasNextChapter] = useState(false);
   const [localHasPreviousChapter, setLocalHasPreviousChapter] = useState(false);
+  
+
 
   // Progressive loading constants
   const INITIAL_LOAD_COUNT = 5; // Load first 5 images immediately for webtoon
@@ -209,44 +210,44 @@ export default function WebNovelReader() {
     }
   }, [images, imageHeaders, loadedImageIndices]);
 
-  // Chapter navigation - moved before handleScroll
+  // Chapter navigation - simplified for webnovel reader
   const handleChapterNavigation = useCallback((type: 'next' | 'previous') => {
-    let targetChapter = chapterNav.getChapterByType(type);
-    
-    // If API didn't provide chapter data, create synthetic chapter
-    if (!targetChapter) {
-      const currentChapterNum = parseFloat(String(params.chapter));
-      if (!isNaN(currentChapterNum)) {
-        const targetChapterNum = type === 'next' 
-          ? currentChapterNum + 1 
-          : currentChapterNum - 1;
+    const currentChapterNum = parseFloat(String(params.chapter));
+    if (!isNaN(currentChapterNum)) {
+      const targetChapterNum = type === 'next' 
+        ? currentChapterNum + 1 
+        : currentChapterNum - 1;
+      
+      if (targetChapterNum > 0) {
+        // Save progress first if needed
+        const saveAndNavigate = async () => {
+          if (!isIncognito && !progressTracker.hasUpdatedProgress) {
+            try {
+              await progressTracker.saveProgress(
+                {
+                  mangaId: params.mangaId as string,
+                  chapter: params.chapter as string,
+                  title: params.title as string,
+                  anilistId: params.anilistId as string,
+                },
+                isIncognito,
+                images.length
+              );
+            } catch (error) {
+              console.warn('Failed to save progress before navigation:', error);
+            }
+          }
+          
+          // Navigate back to manga details page with chapter selection
+          DeviceEventEmitter.emit('refreshMangaDetails');
+          DeviceEventEmitter.emit('selectChapter', { chapterNumber: String(targetChapterNum) });
+          router.back();
+        };
         
-        if (targetChapterNum > 0) {
-          targetChapter = {
-            id: `chapter-${targetChapterNum}`,
-            number: String(targetChapterNum),
-            title: `Chapter ${targetChapterNum}`,
-            url: `chapter-${targetChapterNum}`
-          };
-        }
+        saveAndNavigate();
       }
     }
-    
-    if (targetChapter) {
-      // Skip save modal if in incognito mode, auto-save enabled, or progress already updated
-      if (isIncognito || shouldAutoSave || progressTracker.hasUpdatedProgress) {
-        setSelectedChapter({ ...targetChapter, source: 'synthetic' });
-        setAutoLoadChapter(true);
-        setShowChapterModal(true);
-      } else {
-        // Only show save modal if not in incognito mode and progress hasn't been updated
-        setPendingNextChapter(true);
-        setShowSaveModal(true);
-        setNavigationType(type);
-        setSelectedChapter({ ...targetChapter, source: 'synthetic' });
-      }
-    }
-  }, [chapterNav, progressTracker.hasUpdatedProgress, isIncognito, shouldAutoSave, params.chapter]);
+  }, [params.chapter, params.mangaId, params.title, params.anilistId, isIncognito, progressTracker, images.length, router]);
 
   // Load images from params
   useEffect(() => {
@@ -282,6 +283,8 @@ export default function WebNovelReader() {
             setLocalHasNextChapter(true);
           }
         }
+        
+
         
         // Start progressive loading with first few images
         console.log(`[WebNovelReader] Starting progressive loading with first ${INITIAL_LOAD_COUNT} images`);
@@ -565,14 +568,10 @@ export default function WebNovelReader() {
       setShowSaveModal(false);
       setPendingNextChapter(false);
       
-      if (navigationType) {
-        const targetChapter = chapterNav.getChapterByType(navigationType);
-        if (targetChapter) {
-          setSelectedChapter({ ...targetChapter, source: 'synthetic' });
-          setAutoLoadChapter(true);
-          setShowChapterModal(true);
+              if (navigationType) {
+          // Direct navigation without modal since we have the chapter navigation logic
+          handleChapterNavigation(navigationType);
         }
-      }
     } catch (err) {
       setNotificationMessage(err instanceof Error ? err.message : 'Failed to save progress');
       setShowNotification(true);
@@ -1146,11 +1145,8 @@ export default function WebNovelReader() {
                 onPress={() => {
                   setShowSaveModal(false);
                   setPendingNextChapter(false);
-                  const targetChapter = chapterNav.getChapterByType(navigationType!);
-                  if (targetChapter) {
-                    setSelectedChapter({ ...targetChapter, source: 'synthetic' });
-                    setAutoLoadChapter(true);
-                    setShowChapterModal(true);
+                  if (navigationType) {
+                    handleChapterNavigation(navigationType);
                   }
                 }}
               >
@@ -1209,25 +1205,7 @@ export default function WebNovelReader() {
         </View>
       </Modal>
 
-      {/* Chapter Sources Modal */}
-      <ChapterSourcesModal
-        visible={showChapterModal}
-        onClose={() => {
-          setShowChapterModal(false);
-          setSelectedChapter(null);
-          setAutoLoadChapter(false);
-        }}
-        chapter={selectedChapter}
-        mangaTitle={{
-          english: params.title as string,
-          userPreferred: params.title as string
-        }}
-        mangaId={params.mangaId as string}
-        currentProvider={params.currentProvider as any}
-        anilistId={params.anilistId as string}
-        format={params.format as string}
-        countryOfOrigin={params.countryOfOrigin as string}
-      />
+
 
       {/* Notification */}
       {showNotification && (

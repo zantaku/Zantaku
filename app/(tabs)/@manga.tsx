@@ -85,6 +85,31 @@ interface Staff {
 
 const { width, height } = Dimensions.get('window');
 
+// Helper functions for card icons and text
+const getCardIcon = (sectionTitle: string) => {
+  if (sectionTitle === 'Just Added Chapters') return 'book-reader';
+  if (sectionTitle.includes('Releasing')) return 'play';
+  if (sectionTitle.includes('New in')) return 'star-half-alt';
+  if (sectionTitle.includes('Anticipated')) return 'heart';
+  return 'star';
+};
+
+const getCardIconColor = (sectionTitle: string, fallbackColor: string) => {
+  if (sectionTitle === 'Just Added Chapters') return fallbackColor;
+  if (sectionTitle.includes('Releasing')) return '#4CAF50';
+  if (sectionTitle.includes('New in')) return '#FF9800';
+  if (sectionTitle.includes('Anticipated')) return '#E91E63';
+  return '#FFD700';
+};
+
+const getCardText = (sectionTitle: string, manga: any) => {
+  if (sectionTitle === 'Just Added Chapters') return manga.format || 'Manga';
+  if (sectionTitle.includes('Releasing')) return manga.status || 'Releasing';
+  if (sectionTitle.includes('New in')) return 'New';
+  if (sectionTitle.includes('Anticipated')) return 'Coming Soon';
+  return manga.averageScore ? manga.averageScore.toFixed(1) : 'N/A';
+};
+
 export default function MangaScreen() {
   const router = useRouter();
   const { isDarkMode } = useTheme();
@@ -105,6 +130,9 @@ export default function MangaScreen() {
   const [oneShots, setOneShots] = useState<Manga[]>([]);
   const [lastYearManga, setLastYearManga] = useState<Manga[]>([]);
   const [top100Manga, setTop100Manga] = useState<Manga[]>([]);
+  const [releasingThisYear, setReleasingThisYear] = useState<Manga[]>([]);
+  const [newThisYear, setNewThisYear] = useState<Manga[]>([]);
+  const [anticipatedThisYear, setAnticipatedThisYear] = useState<Manga[]>([]);
   const currentYear = new Date().getFullYear();
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [showSearch, setShowSearch] = useState(false);
@@ -172,7 +200,7 @@ export default function MangaScreen() {
       console.log('Token available:', !!token);
 
       const query = `
-        query ($lastYear: Int, $isAdult: Boolean) {
+        query ($lastYear: Int, $currentYear: Int, $isAdult: Boolean) {
           trending: Page(page: 1, perPage: 5) {
             media(sort: TRENDING_DESC, type: MANGA, isAdult: $isAdult) {
               id
@@ -341,6 +369,68 @@ export default function MangaScreen() {
               }
             }
           }
+          popularManga: Page(page: 1, perPage: 15) {
+            media(sort: POPULARITY_DESC, type: MANGA, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                large
+              }
+              chapters
+              averageScore
+              status
+              format
+              startDate {
+                year
+              }
+            }
+          }
+          highestRated: Page(page: 1, perPage: 15) {
+            media(sort: SCORE_DESC, type: MANGA, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                large
+              }
+              chapters
+              averageScore
+              format
+              startDate {
+                year
+              }
+            }
+          }
+          completedManga: Page(page: 1, perPage: 15) {
+            media(sort: POPULARITY_DESC, type: MANGA, status: FINISHED, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                large
+              }
+              chapters
+              averageScore
+              status
+              format
+              startDate {
+                year
+              }
+            }
+          }
         }
       `;
 
@@ -350,6 +440,7 @@ export default function MangaScreen() {
           query,
           variables: {
             lastYear: currentYear - 1,
+            currentYear: currentYear,
             isAdult: showAdultContent
           }
         },
@@ -365,6 +456,14 @@ export default function MangaScreen() {
 
       console.log('API Response Status:', response.status);
       console.log('API Response Data:', JSON.stringify(response.data, null, 2));
+      
+      // Debug the new sections in raw response
+      if (response.data?.data) {
+        console.log('🔍 [Debug] Raw new sections data:');
+        console.log('📅 Raw popularManga:', response.data.data.popularManga?.media?.length || 0);
+        console.log('⭐ Raw highestRated:', response.data.data.highestRated?.media?.length || 0);
+        console.log('❤️ Raw completedManga:', response.data.data.completedManga?.media?.length || 0);
+      }
 
       if (response.data?.errors) {
         console.error('GraphQL Errors:', response.data.errors);
@@ -476,6 +575,45 @@ export default function MangaScreen() {
         averageScore: manga.averageScore ? manga.averageScore / 10 : null
       }));
 
+      // Process popular manga
+      let processedPopularManga: Manga[] = [];
+      if (data.popularManga && data.popularManga.media) {
+        processedPopularManga = data.popularManga.media.map((manga: any) => ({
+          ...manga,
+          title: {
+            ...manga.title,
+            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
+          },
+          averageScore: manga.averageScore ? manga.averageScore / 10 : null
+        }));
+      }
+
+      // Process highest rated manga
+      let processedHighestRated: Manga[] = [];
+      if (data.highestRated && data.highestRated.media) {
+        processedHighestRated = data.highestRated.media.map((manga: any) => ({
+          ...manga,
+          title: {
+            ...manga.title,
+            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
+          },
+          averageScore: manga.averageScore ? manga.averageScore / 10 : null
+        }));
+      }
+
+      // Process completed manga
+      let processedCompletedManga: Manga[] = [];
+      if (data.completedManga && data.completedManga.media) {
+        processedCompletedManga = data.completedManga.media.map((manga: any) => ({
+          ...manga,
+          title: {
+            ...manga.title,
+            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
+          },
+          averageScore: manga.averageScore ? manga.averageScore / 10 : null
+        }));
+      }
+
       setRecentlyUpdated(processedRecent);
       setLastYearManga(processedLastYear);
       setOneShots(processedOneShots);
@@ -484,6 +622,15 @@ export default function MangaScreen() {
       setManhua(processedManhua);
       setTaihua(processedTaihua);
       setTop100Manga(processedTop100);
+      setReleasingThisYear(processedPopularManga);
+      setNewThisYear(processedHighestRated);
+      setAnticipatedThisYear(processedCompletedManga);
+
+      // Debug logging for new sections
+      console.log('🚀 [MangaScreen] New sections data:');
+      console.log('📅 Popular manga:', processedPopularManga.length, processedPopularManga.slice(0, 3));
+      console.log('⭐ Highest rated:', processedHighestRated.length, processedHighestRated.slice(0, 3));
+      console.log('❤️ Completed manga:', processedCompletedManga.length, processedCompletedManga.slice(0, 3));
 
     } catch (error: any) {
       console.error('Error fetching manga data:', error);
@@ -503,6 +650,9 @@ export default function MangaScreen() {
       setManhua([]);
       setTaihua([]);
       setTop100Manga([]);
+      setReleasingThisYear([]);
+      setNewThisYear([]);
+      setAnticipatedThisYear([]);
       setHeroManga(null);
     } finally {
       setLoading(false);
@@ -667,15 +817,28 @@ export default function MangaScreen() {
 
         {[
           { title: 'Trending Now', data: trendingManga },
+          { title: 'Most Popular', data: releasingThisYear, icon: 'fire' },
+          { title: 'Highest Rated', data: newThisYear, icon: 'star' },
+          { title: 'Completed Series', data: anticipatedThisYear, icon: 'check-circle' },
           { title: 'Just Added Chapters', data: recentlyUpdated },
           { title: 'One-shots', data: oneShots },
           { title: 'Light Novels', data: lightNovels },
           { title: 'Manhwa', data: manhwa },
           { title: 'Donghua', data: manhua },
           { title: 'Manhua', data: taihua }
-        ].map((section) => (
+        ].filter(section => section.data.length > 0).map((section) => (
           <View key={section.title} style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
+              {section.icon && (
+                <FontAwesome5 
+                  name={section.icon} 
+                  size={20} 
+                  color={currentTheme.colors.primary} 
+                  style={{ marginLeft: 8, marginTop: 2 }}
+                />
+              )}
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {section.data.map((manga) => (
                 <TouchableOpacity
@@ -696,13 +859,12 @@ export default function MangaScreen() {
                   </Text>
                   <View style={styles.cardRating}>
                     <FontAwesome5 
-                      name={section.title === 'Just Added Chapters' ? 'book-reader' : 'star'} 
+                      name={getCardIcon(section.title)} 
                       size={12} 
-                      color={section.title === 'Just Added Chapters' ? currentTheme.colors.textSecondary : '#FFD700'} 
+                      color={getCardIconColor(section.title, currentTheme.colors.textSecondary)} 
                     />
                     <Text style={[styles.ratingText, { color: currentTheme.colors.textSecondary }]}>
-                      {section.title === 'Just Added Chapters' ? (manga.format || 'Manga') : 
-                        manga.averageScore ? manga.averageScore.toFixed(1) : 'N/A'}
+                      {getCardText(section.title, manga)}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -897,10 +1059,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 32,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 24,
     fontWeight: '800',
-    marginBottom: 16,
     letterSpacing: -0.5,
   },
   card: {
