@@ -1,6 +1,6 @@
 // TODO: FINISH THE SETTINGS PAGE
 
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../hooks/useTheme';
@@ -169,6 +169,18 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
     filteredSettings: settings.length
   });
 
+  // Social media links
+  const socialLinks = [
+    { icon: 'discord', url: 'https://discord.gg/Pm7KyBYdA5', color: '#5865F2' },
+    { icon: 'github', url: 'https://github.com/zantaku/', color: '#333333' },
+    { icon: 'reddit', url: 'https://www.reddit.com/r/Zantaku/', color: '#FF4500' },
+    { icon: 'youtube', url: 'https://www.youtube.com/@Zantaku', color: '#FF0000' },
+  ];
+
+  const openLink = (url: string) => {
+    Linking.openURL(url).catch(err => console.error('An error occurred', err));
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: currentTheme.colors.background }]}>
       {/* Header */}
@@ -230,6 +242,20 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
               Early Access V1.5
             </Text>
           </TouchableOpacity>
+          
+          {/* Social Media Links */}
+          <View style={styles.socialLinksContainer}>
+            {socialLinks.map((social, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.socialButton}
+                onPress={() => openLink(social.url)}
+              >
+                <FontAwesome5 name={social.icon} size={22} color={social.color} />
+              </TouchableOpacity>
+            ))}
+          </View>
+          
           <Text style={[styles.copyrightText, { color: currentTheme.colors.textSecondary }]}>
             © 2025 Zantaku. All rights reserved.
           </Text>
@@ -299,6 +325,15 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 24,
     marginBottom: 20, // Consistent margin for guest users
+  },
+  socialLinksContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginVertical: 16,
+  },
+  socialButton: {
+    marginHorizontal: 12,
+    padding: 8,
   },
   copyrightText: {
     fontSize: 12,

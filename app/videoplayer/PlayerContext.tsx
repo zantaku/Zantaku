@@ -49,7 +49,7 @@ interface PlayerContextType {
 const defaultPreferences: PlayerPreferences = {
   volume: 1,
   playbackRate: 1,
-  subtitlesEnabled: true,
+  subtitlesEnabled: false,
   preferredQuality: VIDEO_QUALITIES[0],
   preferredLanguage: 'English',
   autoplayNext: true,

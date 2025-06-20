@@ -109,9 +109,9 @@ export default function AnimeScreen() {
   const { settings } = useSettings();
   const currentTheme = isDarkMode ? darkTheme : lightTheme;
   const [trendingAnime, setTrendingAnime] = useState<Anime[]>([]);
-  const [recentlyUpdated, setRecentlyUpdated] = useState<Anime[]>([]);
+  const [airingNow, setAiringNow] = useState<Anime[]>([]);
   const [birthdays, setBirthdays] = useState<(Character | Staff)[]>([]);
-  const [seasonalAnime, setSeasonalAnime] = useState<Anime[]>([]);
+  const [anticipatedUpcoming, setAnticipatedUpcoming] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
   const [heroAnime, setHeroAnime] = useState<Anime | null>(null);
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
@@ -389,6 +389,59 @@ export default function AnimeScreen() {
               seasonYear
             }
           }
+          airingNow: Page(page: 1, perPage: 15) {
+            media(sort: POPULARITY_DESC, type: ANIME, status: RELEASING, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                extraLarge
+                large
+                color
+              }
+              episodes
+              averageScore
+              popularity
+              status
+              nextAiringEpisode {
+                episode
+                timeUntilAiring
+              }
+              season
+              seasonYear
+            }
+          }
+          anticipatedUpcoming: Page(page: 1, perPage: 15) {
+            media(sort: POPULARITY_DESC, type: ANIME, status: NOT_YET_RELEASED, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                extraLarge
+                large
+                color
+              }
+              episodes
+              averageScore
+              popularity
+              status
+              startDate {
+                year
+                month
+                day
+              }
+              season
+              seasonYear
+            }
+          }
         }
       `;
 
@@ -482,9 +535,29 @@ export default function AnimeScreen() {
         console.warn('No trending anime data available');
       }
 
-      const recent = data.recent?.media || [];
-      console.log('Recent anime count:', recent.length);
-      setRecentlyUpdated(recent);
+      const airingNowData = data.airingNow?.media || [];
+      console.log('Airing Now anime count:', airingNowData.length);
+      const processedAiringNow = airingNowData.map((anime: any) => ({
+        ...anime,
+        title: {
+          ...anime.title,
+          userPreferred: formatTitle(anime.title)
+        },
+        averageScore: formatScore(anime.averageScore)
+      }));
+      setAiringNow(processedAiringNow);
+
+      const anticipatedData = data.anticipatedUpcoming?.media || [];
+      console.log('Anticipated Upcoming anime count:', anticipatedData.length);
+      const processedAnticipated = anticipatedData.map((anime: any) => ({
+        ...anime,
+        title: {
+          ...anime.title,
+          userPreferred: formatTitle(anime.title)
+        },
+        averageScore: formatScore(anime.averageScore)
+      }));
+      setAnticipatedUpcoming(processedAnticipated);
 
       const characters = data.birthdayCharacters?.characters || [];
       const staffMembers = data.birthdayStaff?.staff || [];
@@ -512,10 +585,6 @@ export default function AnimeScreen() {
 
       console.log('Today\'s birthdays:', todayBirthdays.length);
       setBirthdays(todayBirthdays);
-
-      const seasonal = data.seasonal?.media || [];
-      console.log('Seasonal anime count:', seasonal.length);
-      setSeasonalAnime(seasonal);
 
       const processedMovies = data.movies?.media.map((anime: any) => ({
         ...anime,
@@ -546,7 +615,7 @@ export default function AnimeScreen() {
         averageScore: formatScore(anime.averageScore)
       })) || [];
 
-      const processedAnticipated = data.anticipated?.media.map((anime: any) => ({
+      const processedAnticipatedOld = data.anticipated?.media.map((anime: any) => ({
         ...anime,
         title: {
           ...anime.title,
@@ -575,13 +644,11 @@ export default function AnimeScreen() {
         averageScore: formatScore(anime.averageScore)
       }));
 
-      setRecentlyUpdated(recent);
       setBirthdays(todayBirthdays);
-      setSeasonalAnime(seasonal);
       setAnimeMovies(processedMovies);
       setMusicVideos(processedMusicVideos);
       setLastYearAnime(processedLastYear);
-      setAnticipatedAnime(processedAnticipated);
+      setAnticipatedAnime(processedAnticipatedOld);
       setPopularAnime(processedPopular);
       setTop100Anime(processedTop100);
       
@@ -595,9 +662,9 @@ export default function AnimeScreen() {
       
       // Set empty arrays but don't throw - let the UI handle the empty state
       setTrendingAnime([]);
-      setRecentlyUpdated([]);
+      setAiringNow([]);
       setBirthdays([]);
-      setSeasonalAnime([]);
+      setAnticipatedUpcoming([]);
       setHeroAnime(null);
     } finally {
       setLoading(false);
@@ -812,13 +879,14 @@ export default function AnimeScreen() {
         </View>
 
         {[
-          { title: 'Anticipated Anime', subtitle: 'Upcoming and currently airing', data: anticipatedAnime },
+          { title: 'Airing Now', subtitle: 'Currently broadcasting episodes', data: airingNow },
+          { title: 'Anticipated Anime', subtitle: 'Upcoming releases to watch for', data: anticipatedUpcoming },
           { title: 'New and Popular', subtitle: 'Trending this week', data: popularAnime },
           { title: `Best of ${currentYear - 1}`, data: lastYearAnime },
           { title: 'Anime Movies', subtitle: 'Popular theatrical releases', data: animeMovies },
           { title: 'Music Videos', subtitle: 'Anime music & performances', data: musicVideos }
         ].map((section, index) => (
-          <View key={section.title} style={[styles.section, index === 4 && styles.lastSection]}>
+          <View key={section.title} style={[styles.section, index === 5 && styles.lastSection]}>
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
@@ -853,15 +921,35 @@ export default function AnimeScreen() {
                       {anime.title.english || anime.title.userPreferred}
                     </Text>
                     <View style={styles.scoreContainer}>
-                      <FontAwesome5 
-                        name={section.title === 'Music Videos' ? 'clock' : 'star'} 
-                        size={10} 
-                        color={section.title === 'Music Videos' ? currentTheme.colors.textSecondary : '#FFD700'} 
-                        solid 
-                      />
-                      <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
-                        {section.title === 'Music Videos' ? `${anime.duration} min` : formatScore(anime.averageScore)}
-                      </Text>
+                      {section.title === 'Airing Now' && anime.nextAiringEpisode ? (
+                        <>
+                          <FontAwesome5 name="clock" size={10} color="#4CAF50" solid />
+                          <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
+                            Ep {anime.nextAiringEpisode.episode} in {Math.floor(anime.nextAiringEpisode.timeUntilAiring / 3600)}h
+                          </Text>
+                        </>
+                      ) : section.title === 'Music Videos' ? (
+                        <>
+                          <FontAwesome5 name="clock" size={10} color={currentTheme.colors.textSecondary} solid />
+                          <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
+                            {anime.duration} min
+                          </Text>
+                        </>
+                      ) : section.title === 'Anticipated Anime' && anime.startDate ? (
+                        <>
+                          <FontAwesome5 name="calendar" size={10} color="#FF9800" solid />
+                          <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
+                            {anime.startDate.month}/{anime.startDate.year}
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <FontAwesome5 name="star" size={10} color="#FFD700" solid />
+                          <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
+                            {formatScore(anime.averageScore)}
+                          </Text>
+                        </>
+                      )}
                     </View>
                   </View>
                 </TouchableOpacity>

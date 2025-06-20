@@ -29,7 +29,7 @@ interface Manga {
     color: string;
   };
   bannerImage: string;
-  description: string | null;
+  description: string;
   chapters: number;
   averageScore: number;
   trending: number;
@@ -85,31 +85,6 @@ interface Staff {
 
 const { width, height } = Dimensions.get('window');
 
-// Helper functions for card icons and text
-const getCardIcon = (sectionTitle: string) => {
-  if (sectionTitle === 'Just Added Chapters') return 'book-reader';
-  if (sectionTitle.includes('Releasing')) return 'play';
-  if (sectionTitle.includes('New in')) return 'star-half-alt';
-  if (sectionTitle.includes('Anticipated')) return 'heart';
-  return 'star';
-};
-
-const getCardIconColor = (sectionTitle: string, fallbackColor: string) => {
-  if (sectionTitle === 'Just Added Chapters') return fallbackColor;
-  if (sectionTitle.includes('Releasing')) return '#4CAF50';
-  if (sectionTitle.includes('New in')) return '#FF9800';
-  if (sectionTitle.includes('Anticipated')) return '#E91E63';
-  return '#FFD700';
-};
-
-const getCardText = (sectionTitle: string, manga: any) => {
-  if (sectionTitle === 'Just Added Chapters') return manga.format || 'Manga';
-  if (sectionTitle.includes('Releasing')) return manga.status || 'Releasing';
-  if (sectionTitle.includes('New in')) return 'New';
-  if (sectionTitle.includes('Anticipated')) return 'Coming Soon';
-  return manga.averageScore ? manga.averageScore.toFixed(1) : 'N/A';
-};
-
 export default function MangaScreen() {
   const router = useRouter();
   const { isDarkMode } = useTheme();
@@ -130,9 +105,6 @@ export default function MangaScreen() {
   const [oneShots, setOneShots] = useState<Manga[]>([]);
   const [lastYearManga, setLastYearManga] = useState<Manga[]>([]);
   const [top100Manga, setTop100Manga] = useState<Manga[]>([]);
-  const [releasingThisYear, setReleasingThisYear] = useState<Manga[]>([]);
-  const [newThisYear, setNewThisYear] = useState<Manga[]>([]);
-  const [anticipatedThisYear, setAnticipatedThisYear] = useState<Manga[]>([]);
   const currentYear = new Date().getFullYear();
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [showSearch, setShowSearch] = useState(false);
@@ -200,7 +172,7 @@ export default function MangaScreen() {
       console.log('Token available:', !!token);
 
       const query = `
-        query ($lastYear: Int, $currentYear: Int, $isAdult: Boolean) {
+        query ($lastYear: Int, $isAdult: Boolean) {
           trending: Page(page: 1, perPage: 5) {
             media(sort: TRENDING_DESC, type: MANGA, isAdult: $isAdult) {
               id
@@ -369,68 +341,6 @@ export default function MangaScreen() {
               }
             }
           }
-          popularManga: Page(page: 1, perPage: 15) {
-            media(sort: POPULARITY_DESC, type: MANGA, isAdult: $isAdult) {
-              id
-              title {
-                userPreferred
-                english
-                romaji
-                native
-              }
-              coverImage {
-                large
-              }
-              chapters
-              averageScore
-              status
-              format
-              startDate {
-                year
-              }
-            }
-          }
-          highestRated: Page(page: 1, perPage: 15) {
-            media(sort: SCORE_DESC, type: MANGA, isAdult: $isAdult) {
-              id
-              title {
-                userPreferred
-                english
-                romaji
-                native
-              }
-              coverImage {
-                large
-              }
-              chapters
-              averageScore
-              format
-              startDate {
-                year
-              }
-            }
-          }
-          completedManga: Page(page: 1, perPage: 15) {
-            media(sort: POPULARITY_DESC, type: MANGA, status: FINISHED, isAdult: $isAdult) {
-              id
-              title {
-                userPreferred
-                english
-                romaji
-                native
-              }
-              coverImage {
-                large
-              }
-              chapters
-              averageScore
-              status
-              format
-              startDate {
-                year
-              }
-            }
-          }
         }
       `;
 
@@ -440,7 +350,6 @@ export default function MangaScreen() {
           query,
           variables: {
             lastYear: currentYear - 1,
-            currentYear: currentYear,
             isAdult: showAdultContent
           }
         },
@@ -456,14 +365,6 @@ export default function MangaScreen() {
 
       console.log('API Response Status:', response.status);
       console.log('API Response Data:', JSON.stringify(response.data, null, 2));
-      
-      // Debug the new sections in raw response
-      if (response.data?.data) {
-        console.log('🔍 [Debug] Raw new sections data:');
-        console.log('📅 Raw popularManga:', response.data.data.popularManga?.media?.length || 0);
-        console.log('⭐ Raw highestRated:', response.data.data.highestRated?.media?.length || 0);
-        console.log('❤️ Raw completedManga:', response.data.data.completedManga?.media?.length || 0);
-      }
 
       if (response.data?.errors) {
         console.error('GraphQL Errors:', response.data.errors);
@@ -575,45 +476,6 @@ export default function MangaScreen() {
         averageScore: manga.averageScore ? manga.averageScore / 10 : null
       }));
 
-      // Process popular manga
-      let processedPopularManga: Manga[] = [];
-      if (data.popularManga && data.popularManga.media) {
-        processedPopularManga = data.popularManga.media.map((manga: any) => ({
-          ...manga,
-          title: {
-            ...manga.title,
-            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
-          },
-          averageScore: manga.averageScore ? manga.averageScore / 10 : null
-        }));
-      }
-
-      // Process highest rated manga
-      let processedHighestRated: Manga[] = [];
-      if (data.highestRated && data.highestRated.media) {
-        processedHighestRated = data.highestRated.media.map((manga: any) => ({
-          ...manga,
-          title: {
-            ...manga.title,
-            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
-          },
-          averageScore: manga.averageScore ? manga.averageScore / 10 : null
-        }));
-      }
-
-      // Process completed manga
-      let processedCompletedManga: Manga[] = [];
-      if (data.completedManga && data.completedManga.media) {
-        processedCompletedManga = data.completedManga.media.map((manga: any) => ({
-          ...manga,
-          title: {
-            ...manga.title,
-            userPreferred: manga.title.userPreferred || manga.title.romaji || manga.title.english || 'Unknown Title'
-          },
-          averageScore: manga.averageScore ? manga.averageScore / 10 : null
-        }));
-      }
-
       setRecentlyUpdated(processedRecent);
       setLastYearManga(processedLastYear);
       setOneShots(processedOneShots);
@@ -622,15 +484,6 @@ export default function MangaScreen() {
       setManhua(processedManhua);
       setTaihua(processedTaihua);
       setTop100Manga(processedTop100);
-      setReleasingThisYear(processedPopularManga);
-      setNewThisYear(processedHighestRated);
-      setAnticipatedThisYear(processedCompletedManga);
-
-      // Debug logging for new sections
-      console.log('🚀 [MangaScreen] New sections data:');
-      console.log('📅 Popular manga:', processedPopularManga.length, processedPopularManga.slice(0, 3));
-      console.log('⭐ Highest rated:', processedHighestRated.length, processedHighestRated.slice(0, 3));
-      console.log('❤️ Completed manga:', processedCompletedManga.length, processedCompletedManga.slice(0, 3));
 
     } catch (error: any) {
       console.error('Error fetching manga data:', error);
@@ -650,105 +503,91 @@ export default function MangaScreen() {
       setManhua([]);
       setTaihua([]);
       setTop100Manga([]);
-      setReleasingThisYear([]);
-      setNewThisYear([]);
-      setAnticipatedThisYear([]);
       setHeroManga(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderHeroItem = ({ item: manga }: { item: Manga }) => {
-    // Safety checks for required data
-    if (!manga || !manga.id) {
-      return null;
-    }
-
-    const imageSource = manga.bannerImage || manga.coverImage?.extraLarge || manga.coverImage?.large;
-    const title = manga.title?.english || manga.title?.userPreferred || manga.title?.romaji || 'Unknown Title';
-    const description = manga.description?.replace(/<[^>]*>/g, '') || '';
-
-    return (
-      <TouchableOpacity
-        style={[styles.heroContainer, { width }]}
-        onPress={() => router.push(`/manga/${manga.id}`)}
-        activeOpacity={0.9}
+  const renderHeroItem = ({ item: manga }: { item: Manga }) => (
+    <TouchableOpacity
+      style={[styles.heroContainer, { width }]}
+      onPress={() => router.push(`/manga/${manga.id}`)}
+      activeOpacity={0.9}
+    >
+      <ExpoImage
+        source={{ uri: manga.bannerImage || manga.coverImage.extraLarge }}
+        style={styles.heroBanner}
+        contentFit="cover"
+        transition={1000}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
+        locations={[0.3, 0.6, 1]}
+        style={styles.heroGradient}
       >
-        <ExpoImage
-          source={{ uri: imageSource }}
-          style={styles.heroBanner}
-          contentFit="cover"
-          transition={1000}
-        />
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.95)']}
-          locations={[0.2, 0.5, 0.7, 1]}
-          style={styles.heroGradient}
-        >
-          <View style={styles.heroContent}>
-            <BlurView intensity={30} tint="dark" style={styles.heroMetaContainer}>
-              <View style={styles.heroStats}>
-                {manga.averageScore && (
-                  <View style={styles.heroStatItem}>
-                    <FontAwesome5 name="star" size={14} color="#FFD700" solid />
-                    <Text style={styles.heroStatText}>
-                      {manga.averageScore.toFixed(1)}
-                    </Text>
-                  </View>
-                )}
-                {manga.trending && (
-                  <View style={styles.heroStatItem}>
-                    <FontAwesome5 name="fire-alt" size={14} color="#FF6B6B" solid />
-                    <Text style={styles.heroStatText}>#{manga.trending}</Text>
-                  </View>
-                )}
+        <View style={styles.heroContent}>
+          <BlurView intensity={30} tint="dark" style={styles.heroMetaContainer}>
+            <View style={styles.heroStats}>
+              {manga.averageScore && (
                 <View style={styles.heroStatItem}>
-                  <FontAwesome5 name="book" size={14} color="#4CAF50" solid />
+                  <FontAwesome5 name="star" size={14} color="#FFD700" solid />
                   <Text style={styles.heroStatText}>
-                    {manga.chapters ? `${manga.chapters} Ch` : 'Ongoing'}
+                    {manga.averageScore.toFixed(1)}
                   </Text>
                 </View>
-              </View>
-            </BlurView>
-
-            <View style={styles.heroTitleContainer}>
-              <Text style={styles.heroTitle} numberOfLines={2}>
-                {title}
-              </Text>
-              {description && (
-                <Text style={styles.heroDescription} numberOfLines={2}>
-                  {description}
-                </Text>
               )}
+              {manga.trending && (
+                <View style={styles.heroStatItem}>
+                  <FontAwesome5 name="fire-alt" size={14} color="#FF6B6B" solid />
+                  <Text style={styles.heroStatText}>#{manga.trending}</Text>
+                </View>
+              )}
+              <View style={styles.heroStatItem}>
+                <FontAwesome5 name="book" size={14} color="#4CAF50" solid />
+                <Text style={styles.heroStatText}>
+                  {manga.chapters ? `${manga.chapters} Ch` : 'Ongoing'}
+                </Text>
+              </View>
             </View>
+          </BlurView>
 
-            <TouchableOpacity
-              style={styles.readNowButton}
-              onPress={() => router.push(`/manga/${manga.id}`)}
-            >
-              <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-              <FontAwesome5 name="book-reader" size={16} color="#fff" />
-              <Text style={styles.readNowText}>Read Now</Text>
-            </TouchableOpacity>
+          <View style={styles.heroTitleContainer}>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {manga.title.userPreferred}
+            </Text>
+            {manga.description && (
+              <Text style={styles.heroDescription} numberOfLines={2}>
+                {manga.description?.replace(/<[^>]*>/g, '')}
+              </Text>
+            )}
           </View>
-        </LinearGradient>
-        <View style={styles.progressBarContainer}>
-          <Animated.View 
-            style={[
-              styles.progressBar,
-              {
-                width: progressAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0%', '100%']
-                })
-              }
-            ]} 
-          />
+
+          <TouchableOpacity
+            style={styles.readNowButton}
+            onPress={() => router.push(`/manga/${manga.id}`)}
+          >
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+            <FontAwesome5 name="book-reader" size={16} color="#fff" />
+            <Text style={styles.readNowText}>Read Now</Text>
+          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
-    );
-  };
+      </LinearGradient>
+      <View style={styles.progressBarContainer}>
+        <Animated.View 
+          style={[
+            styles.progressBar,
+            {
+              width: progressAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0%', '100%']
+              })
+            }
+          ]} 
+        />
+      </View>
+    </TouchableOpacity>
+  );
 
   const renderPaginationDots = () => (
     <View style={styles.paginationContainer}>
@@ -817,28 +656,15 @@ export default function MangaScreen() {
 
         {[
           { title: 'Trending Now', data: trendingManga },
-          { title: 'Most Popular', data: releasingThisYear, icon: 'fire' },
-          { title: 'Highest Rated', data: newThisYear, icon: 'star' },
-          { title: 'Completed Series', data: anticipatedThisYear, icon: 'check-circle' },
           { title: 'Just Added Chapters', data: recentlyUpdated },
           { title: 'One-shots', data: oneShots },
           { title: 'Light Novels', data: lightNovels },
           { title: 'Manhwa', data: manhwa },
           { title: 'Donghua', data: manhua },
           { title: 'Manhua', data: taihua }
-        ].filter(section => section.data.length > 0).map((section) => (
+        ].map((section) => (
           <View key={section.title} style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
-              {section.icon && (
-                <FontAwesome5 
-                  name={section.icon} 
-                  size={20} 
-                  color={currentTheme.colors.primary} 
-                  style={{ marginLeft: 8, marginTop: 2 }}
-                />
-              )}
-            </View>
+            <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {section.data.map((manga) => (
                 <TouchableOpacity
@@ -859,12 +685,13 @@ export default function MangaScreen() {
                   </Text>
                   <View style={styles.cardRating}>
                     <FontAwesome5 
-                      name={getCardIcon(section.title)} 
+                      name={section.title === 'Just Added Chapters' ? 'book-reader' : 'star'} 
                       size={12} 
-                      color={getCardIconColor(section.title, currentTheme.colors.textSecondary)} 
+                      color={section.title === 'Just Added Chapters' ? currentTheme.colors.textSecondary : '#FFD700'} 
                     />
                     <Text style={[styles.ratingText, { color: currentTheme.colors.textSecondary }]}>
-                      {getCardText(section.title, manga)}
+                      {section.title === 'Just Added Chapters' ? (manga.format || 'Manga') : 
+                        manga.averageScore ? manga.averageScore.toFixed(1) : 'N/A'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -969,7 +796,7 @@ const styles = StyleSheet.create({
   },
   heroContainer: {
     width: '100%',
-    height: '100%',
+    height: height * 0.75,
     position: 'relative',
   },
   heroBanner: {
@@ -981,56 +808,56 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '75%',
+    height: '80%',
     justifyContent: 'flex-end',
-    padding: 20,
-    paddingBottom: 50,
+    padding: 24,
+    paddingBottom: 48,
   },
   heroContent: {
     width: '100%',
-    gap: 16,
+    gap: 24,
   },
   heroMetaContainer: {
     alignSelf: 'flex-start',
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   heroStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   heroStatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   heroStatText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#fff',
     fontWeight: '700',
   },
   heroTitleContainer: {
-    gap: 12,
+    gap: 16,
   },
   heroTitle: {
-    fontSize: 32,
+    fontSize: 40,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: -0.5,
-    lineHeight: 38,
+    lineHeight: 48,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
   heroDescription: {
-    fontSize: 16,
+    fontSize: 17,
     color: '#fff',
     opacity: 0.9,
-    lineHeight: 22,
+    lineHeight: 26,
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -1039,19 +866,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 14,
-    gap: 10,
+    paddingHorizontal: 32,
+    paddingVertical: 18,
+    borderRadius: 16,
+    gap: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    marginTop: 4,
-    alignSelf: 'flex-start',
+    marginTop: 8,
   },
   readNowText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -1059,14 +885,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 32,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
   sectionTitle: {
     fontSize: 24,
     fontWeight: '800',
+    marginBottom: 16,
     letterSpacing: -0.5,
   },
   card: {
@@ -1101,14 +923,14 @@ const styles = StyleSheet.create({
   },
   paginationContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 24,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    zIndex: 3,
+    zIndex: 2,
   },
   paginationDot: {
     width: 8,
@@ -1121,7 +943,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#02A9FF',
   },
   heroWrapper: {
-    height: height * 0.6,
     position: 'relative',
   },
   lastSection: {
@@ -1222,14 +1043,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    zIndex: 2,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
   },
   progressBar: {
     height: '100%',
     backgroundColor: '#02A9FF',
-    opacity: 0.8,
   },
   retryButton: {
     padding: 16,

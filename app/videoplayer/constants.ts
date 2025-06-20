@@ -45,13 +45,21 @@ export const PLAYER_BEHAVIOR = {
   CONTROLS_HIDE_DELAY: 4000, // ms
   DOUBLE_TAP_SEEK_TIME: 10, // seconds to seek on double tap
   SKIP_INTRO_DURATION: 90, // default seconds to skip for OP/ED
-  SEEK_DEBOUNCE_MS: 100, // ms to debounce seek operations for HLS
+  SEEK_DEBOUNCE_MS: 300, // ms to debounce seek operations for HLS
   SEEK_TOLERANCE_MS: 500, // ms tolerance for HLS seeking
 };
 
 // Constants for video quality options
 export const VIDEO_QUALITIES = ['auto', '1080p', '720p', '480p', '360p'] as const;
 export type VideoQuality = typeof VIDEO_QUALITIES[number];
+
+// Video quality optimization settings
+export const QUALITY_SETTINGS = {
+  PREFER_HIGHEST_QUALITY: true, // Always try to select the highest available quality
+  MIN_PREFERRED_HEIGHT: 1080, // Minimum preferred video height (1080p)
+  FALLBACK_HEIGHT: 720, // Fallback quality if highest not available
+  LOG_QUALITY_INFO: true, // Enable quality logging for debugging
+};
 
 // Constants for player animations
 export const ANIMATIONS = {

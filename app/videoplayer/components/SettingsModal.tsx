@@ -212,6 +212,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
             
+            {/* Show message when no subtitles are available */}
+            {(!subtitles || subtitles.length === 0) && (
+              <View style={styles.noSubtitlesContainer}>
+                <Text style={styles.noSubtitlesText}>
+                  No external subtitles available. This video likely uses hardsub.
+                </Text>
+              </View>
+            )}
+            
             {processedSubtitles.length > 0 && (
               <View style={styles.settingRow}>
                 <Text style={styles.settingLabel}>Language</Text>
@@ -411,6 +420,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <View style={styles.settingSection}>
             <Text style={styles.settingSectionTitle}>Display</Text>
             
+            {/* Quality Information */}
+            <View style={styles.settingRow}>
+              <View style={styles.qualityInfoContainer}>
+                <Text style={styles.qualityInfoTitle}>Video Quality</Text>
+                <Text style={styles.qualityInfoText}>
+                  The app automatically selects the highest available quality (1080p or higher when available).
+                  If videos appear pixelated, check your internet connection or try a different episode source.
+                </Text>
+              </View>
+            </View>
+            
             {/* Auto-Rotate Toggle - Disabled to force landscape */}
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>Auto-Rotate</Text>
@@ -559,110 +579,73 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
 const styles = StyleSheet.create({
   settingsModal: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
   },
   settingsContainer: {
-    width: Platform.OS === 'ios' || Platform.OS === 'android' ? '92%' : '85%',
-    maxWidth: 420,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 20,
-    minHeight: 400,
-    maxHeight: Platform.OS === 'ios' || Platform.OS === 'android' ? '90%' : '90%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '80%',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   settingsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    borderBottomColor: '#333',
   },
   settingsTitle: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
   },
   closeButton: {
-    padding: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 8,
   },
   settingsScrollView: {
-    flex: 1,
-    width: '100%',
+    maxHeight: '90%',
   },
   settingsContent: {
-    padding: 20,
-    paddingBottom: 30,
-    minWidth: '100%',
+    paddingBottom: 24,
   },
   settingSection: {
-    marginBottom: 28,
-    width: '100%',
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    marginTop: 16,
+    paddingHorizontal: 16,
   },
   settingSectionTitle: {
     color: '#FF6B00',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 16,
-    width: '100%',
-    flexDirection: 'column',
   },
   settingLabel: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  checkboxRow: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   speedOptions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 8,
+    justifyContent: 'flex-end',
   },
   speedOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    margin: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: '#333',
+    marginLeft: 8,
+    marginBottom: 8,
   },
   speedOptionSelected: {
     backgroundColor: '#FF6B00',
@@ -670,173 +653,20 @@ const styles = StyleSheet.create({
   speedOptionText: {
     color: 'white',
     fontSize: 14,
-    fontWeight: '500',
   },
   speedOptionTextSelected: {
-    color: 'white',
     fontWeight: 'bold',
-  },
-  languageOptionsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-  },
-  languageOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    margin: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  languageOptionSelected: {
-    backgroundColor: '#FF6B00',
-  },
-  languageOptionText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  languageTextSelected: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  scaleOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-  },
-  scaleOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    margin: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  scaleOptionActive: {
-    backgroundColor: '#FF6B00',
-  },
-  scaleOptionText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  scaleOptionTextActive: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  subtitlePreviewContainer: {
-    width: '100%',
-    height: 80,
-    marginVertical: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  subtitlePreviewBox: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    maxWidth: '85%',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  subtitlePreviewText: {
-    textAlign: 'center',
-    fontWeight: '500',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 4,
-  },
-  subSettingRow: {
-    marginTop: 16,
-    width: '100%',
-  },
-  subSettingLabelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  subSettingLabel: {
-    color: 'white',
-    fontSize: 15,
-    marginLeft: 8,
-  },
-  sliderContainer: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  sliderValue: {
-    width: 48,
-    textAlign: 'right',
-    fontSize: 14,
-    color: 'white',
-  },
-  colorOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  colorOption: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  colorOptionSelected: {
-    borderColor: '#FF6B00',
-    borderWidth: 3,
-  },
-  resetButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 107, 0, 0.2)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginTop: 16,
-    alignSelf: 'center',
-  },
-  resetButtonText: {
-    color: 'white',
-    marginLeft: 8,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  settingControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  switchOption: {
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  switchOptionText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  switchHint: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '500',
   },
   audioTrackOptions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
+    justifyContent: 'flex-end',
   },
   audioTrackOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    margin: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    backgroundColor: '#333',
+    marginLeft: 8,
   },
   audioTrackOptionSelected: {
     backgroundColor: '#FF6B00',
@@ -846,28 +676,201 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   audioTrackIcon: {
-    fontSize: 20,
-    marginRight: 8,
+    marginRight: 4,
   },
   audioTrackText: {
     color: 'white',
     fontSize: 14,
-    fontWeight: '500',
   },
   audioTrackTextSelected: {
-    color: 'white',
     fontWeight: 'bold',
   },
   audioTrackNote: {
-    marginTop: 16,
-    padding: 12,
-    borderRadius: 8,
+    marginTop: 8,
+    padding: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
   },
   audioTrackNoteText: {
+    color: '#CCC',
+    fontSize: 12,
+  },
+  languageOptionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    maxWidth: '60%',
+  },
+  languageOption: {
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: '#333',
+    marginLeft: 8,
+    marginBottom: 8,
+  },
+  languageOptionSelected: {
+    backgroundColor: '#FF6B00',
+  },
+  languageOptionText: {
     color: 'white',
     fontSize: 14,
+  },
+  languageTextSelected: {
+    fontWeight: 'bold',
+  },
+  subtitlePreviewContainer: {
+    width: '100%',
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  subtitlePreviewBox: {
+    padding: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    width: '100%',
+    alignItems: 'center',
+  },
+  subtitlePreviewText: {
+    textAlign: 'center',
+    color: 'white',
+    fontSize: 18,
+  },
+  subSettingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  subSettingLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subSettingLabel: {
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  sliderContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
+    marginLeft: 16,
+  },
+  sliderValue: {
+    color: 'white',
+    fontSize: 12,
+    marginTop: -8,
+  },
+  colorOptions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  colorOption: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  colorOptionSelected: {
+    borderWidth: 2,
+    borderColor: '#FF6B00',
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#444',
+    padding: 8,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  resetButtonText: {
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 4,
+  },
+  checkboxContainer: {
+    padding: 4,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkboxLabel: {
+    color: 'white',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  settingControl: {
+    flexDirection: 'row',
+  },
+  switchOption: {
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: '#333',
+  },
+  switchOptionText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  switchHint: {
+    color: '#999',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  scaleOptions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  scaleOption: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    backgroundColor: '#333',
+    marginLeft: 8,
+  },
+  scaleOptionActive: {
+    backgroundColor: '#FF6B00',
+  },
+  scaleOptionText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  scaleOptionTextActive: {
+    fontWeight: 'bold',
+  },
+  noSubtitlesContainer: {
+    marginTop: 8,
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 107, 0, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 0, 0.5)',
+  },
+  noSubtitlesText: {
+    color: '#FFC399',
+    fontSize: 14,
     fontWeight: '500',
+  },
+  qualityInfoContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  qualityInfoTitle: {
+    color: '#FF6B00',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  qualityInfoText: {
+    color: 'white',
+    fontSize: 14,
   },
 });
 

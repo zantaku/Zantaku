@@ -134,12 +134,14 @@ const VideoControls = ({
   
   const handleSeekChange = (value: number) => {
     setSeekValue(value);
-    // Real-time feedback during seeking - no restrictions on where user can seek
-    console.log(`🎯 Seeking to ${value.toFixed(1)}s (${((value / duration) * 100).toFixed(1)}%)`);
+    // Only log occasionally during seeking to prevent spam
+    if (Math.abs(value - seekValue) > 5) { // Only log every 5 seconds of difference
+      console.log(`🎯 Seeking to ${value.toFixed(1)}s (${((value / duration) * 100).toFixed(1)}%)`);
+    }
   };
   
   const handleSeekComplete = () => {
-    console.log(`🎯 Seek completed to ${seekValue.toFixed(1)}s - HLS will start buffering from this position`);
+    console.log(`🎯 Seek completed to ${seekValue.toFixed(1)}s`);
     onSeek(seekValue);
     setIsSeeking(false);
     onSeekEnd?.();
@@ -272,8 +274,8 @@ const VideoControls = ({
               onSlidingStart={handleSeekStart}
               onValueChange={handleSeekChange}
               onSlidingComplete={handleSeekComplete}
-              // Enhanced seeking properties for better HLS experience
-              step={0.1}  // Allow fine-grained seeking
+              // Enhanced seeking properties for better experience
+              step={1}  // Use 1 second steps to reduce update frequency
               tapToSeek={true}  // Allow tapping anywhere on the slider to seek
             />
           </View>

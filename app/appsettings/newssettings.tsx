@@ -5,6 +5,7 @@ import { SettingsLayout, SettingsSection, SettingsToggle, SettingsRadioGroup, Se
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../../hooks/useTheme';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 
 interface NewsSettings {
   // Sources
@@ -212,6 +213,7 @@ export default function NewsSettingsScreen() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const { currentTheme } = useTheme();
+  const router = useRouter();
 
   useEffect(() => {
     loadSettings();
@@ -220,11 +222,12 @@ export default function NewsSettingsScreen() {
   // Handle hardware back button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      router.back();
       return true;
     });
 
     return () => backHandler.remove();
-  }, []);
+  }, [router]);
 
   const loadSettings = async () => {
     try {

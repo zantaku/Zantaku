@@ -138,10 +138,14 @@ const PlayerScreen: React.FC = () => {
     return () => {
       if (seekTimeoutRef.current) {
         clearTimeout(seekTimeoutRef.current);
+        seekTimeoutRef.current = null;
       }
       if (controlsTimeout.current) {
         clearTimeout(controlsTimeout.current);
+        controlsTimeout.current = null;
       }
+      // Reset seeking state
+      isSeekingRef.current = false;
     };
   }, []);
 
@@ -179,8 +183,20 @@ const PlayerScreen: React.FC = () => {
           setVideoData(data);
           hasLoadedData.current = true;
           
-          // Load subtitle cues if available
-          if (data.subtitles && data.subtitles.length > 0) {
+          // Check if subtitles are available and valid
+          const hasValidSubtitles = data.subtitles && 
+                                   data.subtitles.length > 0 && 
+                                   data.subtitles[0]?.url;
+          
+          // Auto-disable subtitles if none are available (hardsub detection)
+          if (!hasValidSubtitles) {
+            console.log('⚠️ No valid subtitles found, disabling subtitle option (hardsub detected)');
+            setPreferences(prev => ({
+              ...prev,
+              subtitlesEnabled: false
+            }));
+          } else if (data.subtitles && data.subtitles[0]) {
+            // Load subtitle cues if available
             await loadSubtitleCues(data.subtitles[0].url);
           }
           
@@ -209,7 +225,7 @@ const PlayerScreen: React.FC = () => {
     };
 
     loadVideoData();
-  }, [params.dataKey, params.url, preferences.rememberPosition]);
+  }, [params.dataKey, params.url, preferences.rememberPosition, setPreferences]);
 
   // Load subtitle cues from URL
   const loadSubtitleCues = async (subtitleUrl: string) => {
@@ -218,8 +234,22 @@ const PlayerScreen: React.FC = () => {
       const vttContent = await response.text();
       const cues = parseVTT(vttContent);
       setSubtitleCues(cues);
+      
+      // If no cues were parsed from the VTT, disable subtitles
+      if (cues.length === 0) {
+        console.log('⚠️ No subtitle cues found in VTT file, disabling subtitles');
+        setPreferences(prev => ({
+          ...prev,
+          subtitlesEnabled: false
+        }));
+      }
     } catch (error) {
       console.error('❌ Error loading subtitles:', error);
+      // Disable subtitles on error
+      setPreferences(prev => ({
+        ...prev,
+        subtitlesEnabled: false
+      }));
     }
   };
 
@@ -319,9 +349,24 @@ const PlayerScreen: React.FC = () => {
         seekableDuration: durationSeconds,
       });
       
+      // Log quality information periodically (every 30 seconds)
+      const now = Date.now();
+      if (now - lastSeekTime > 30000) {
+        console.log(`📊 Video Quality Status:`);
+        console.log(`   Duration: ${Math.round(durationSeconds)}s`);
+        console.log(`   Current Time: ${Math.round(currentTimeSeconds)}s`);
+        console.log(`   Buffer: ${bufferPercentage.toFixed(1)}%`);
+        console.log(`   Playing: ${status.isPlaying ? 'Yes' : 'No'}`);
+        console.log(`   Buffering: ${isCurrentlyBuffering ? 'Yes' : 'No'}`);
+        // Check for video resolution if available
+        const statusWithSize = status as any;
+        if (statusWithSize.naturalSize && statusWithSize.naturalSize.width && statusWithSize.naturalSize.height) {
+          console.log(`   Video Resolution: ${statusWithSize.naturalSize.width}x${statusWithSize.naturalSize.height}`);
+        }
+      }
+      
       // Auto-save progress (throttled to avoid excessive writes)
       if (videoData?.episodeId && preferences.rememberPosition) {
-        const now = Date.now();
         if (now - lastSeekTime > 5000) { // Only save every 5 seconds
           const progressData = {
             currentTime: currentTimeSeconds,
@@ -334,6 +379,7 @@ const PlayerScreen: React.FC = () => {
     } else {
       // Video is not loaded, show buffering
       setIsBuffering(true);
+      console.log('⚠️ Video not loaded - showing buffering indicator');
     }
   }, [videoData?.episodeId, preferences.rememberPosition, paused, lastSeekTime]);
 
@@ -350,9 +396,12 @@ const PlayerScreen: React.FC = () => {
 
   // Debounced seek to reduce buffering
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSeekingRef = useRef(false);
   
   const handleSeek = useCallback((time: number) => {
-    if (videoRef.current) {
+    if (videoRef.current && !isSeekingRef.current) {
+      // Prevent multiple simultaneous seeks
+      isSeekingRef.current = true;
       setSeekingPosition(time);
       setLastSeekTime(Date.now());
       
@@ -361,22 +410,26 @@ const PlayerScreen: React.FC = () => {
         clearTimeout(seekTimeoutRef.current);
       }
       
-      // Reduced debounce for more responsive seeking
+      // Debounce the actual seek operation
       seekTimeoutRef.current = setTimeout(() => {
-        setIsBuffering(true);
-        
-        // Optimized tolerance values for HLS streams - allow seeking anywhere
-        videoRef.current?.setPositionAsync(time * 1000, {
-          toleranceMillisBefore: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
-          toleranceMillisAfter: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
-        }).then(() => {
-          setIsBuffering(false);
-          console.log(`📍 Seeked to ${time.toFixed(1)}s - HLS will buffer from this position`);
-        }).catch((error) => {
-          console.error('Seek error:', error);
-          setIsBuffering(false);
-        });
-      }, PLAYER_BEHAVIOR.SEEK_DEBOUNCE_MS); // Configurable debounce for responsive seeking
+        if (videoRef.current) {
+          setIsBuffering(true);
+          
+          // Perform the seek operation
+          videoRef.current.setPositionAsync(time * 1000, {
+            toleranceMillisBefore: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
+            toleranceMillisAfter: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
+          }).then(() => {
+            setIsBuffering(false);
+            isSeekingRef.current = false;
+            console.log(`📍 Seeked to ${time.toFixed(1)}s`);
+          }).catch((error) => {
+            console.error('Seek error:', error);
+            setIsBuffering(false);
+            isSeekingRef.current = false;
+          });
+        }
+      }, PLAYER_BEHAVIOR.SEEK_DEBOUNCE_MS);
     }
   }, []);
 
@@ -461,11 +514,19 @@ const PlayerScreen: React.FC = () => {
   const getVideoSource = useCallback(() => {
     if (!videoData?.source) return '';
     
-    if (USE_PROXY) {
-      return `${M3U8_PROXY_BASE_URL}${encodeURIComponent(videoData.source)}`;
+    const finalUrl = USE_PROXY 
+      ? `${M3U8_PROXY_BASE_URL}${encodeURIComponent(videoData.source)}`
+      : videoData.source;
+    
+    console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
+    console.log(`🔗 Using proxy: ${USE_PROXY ? 'Yes' : 'No'}`);
+    
+    // Log if URL contains quality indicators
+    if (finalUrl.includes('1080') || finalUrl.includes('720') || finalUrl.includes('480')) {
+      console.log(`📺 Quality detected in URL: ${finalUrl.match(/\d+p?/g)?.join(', ')}`);
     }
     
-    return videoData.source;
+    return finalUrl;
   }, [videoData?.source]);
 
   // Handle AniList save
@@ -552,6 +613,10 @@ const PlayerScreen: React.FC = () => {
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         rate={playbackSpeed}
         volume={preferences.volume}
+        // Enhanced video quality settings
+        shouldRasterizeIOS={false}
+        useNativeControls={false}
+        progressUpdateIntervalMillis={500}
       />
 
       {/* Double Tap Overlay for Seeking */}
@@ -603,7 +668,7 @@ const PlayerScreen: React.FC = () => {
       />
 
       {/* Subtitles */}
-      {currentSubtitle && preferences.subtitlesEnabled && (
+      {currentSubtitle && preferences.subtitlesEnabled && subtitleCues.length > 0 && (
         <View style={[styles.subtitleContainer, { bottom: subtitlePosition.y }]}>
           <Text style={[styles.subtitleText, {
             fontSize: preferences.subtitleStyle?.fontSize || 18,
@@ -726,6 +791,9 @@ const styles = StyleSheet.create({
   video: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
+    backgroundColor: '#000',
+    // Ensure video maintains aspect ratio and quality
+    overflow: 'hidden',
   },
   subtitleContainer: {
     position: 'absolute',

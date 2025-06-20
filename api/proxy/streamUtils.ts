@@ -187,7 +187,7 @@ function selectAppropriateQuality(content: string, baseUrl: string): string {
   // Find streams with resolution info
   const streamsWithResolution = streams.filter(s => s.resolution);
   
-  // Try to find a stream close to 720p (assuming formats like "1280x720")
+  // Try to find a stream close to the highest available quality
   if (streamsWithResolution.length > 0) {
     // Extract height from resolution strings (e.g., "1280x720" -> 720)
     const streamsWithHeight = streamsWithResolution.map(s => {
@@ -195,35 +195,31 @@ function selectAppropriateQuality(content: string, baseUrl: string): string {
       return { ...s, height };
     });
     
-    // First try: Find a stream with height close to 720p
-    let optimalResolution = streamsWithHeight.find(s => s.height === 720);
+    // Sort by height in descending order (highest quality first)
+    streamsWithHeight.sort((a, b) => b.height - a.height);
     
-    // Second try: If no 720p found, try something between 480p and 720p
-    if (!optimalResolution) {
-      optimalResolution = streamsWithHeight.find(s => s.height >= 480 && s.height <= 720);
+    // Prefer the highest quality available (1080p, 4K, etc.)
+    const highestQuality = streamsWithHeight[0];
+    
+    // If we have 1080p or higher, use it
+    if (highestQuality.height >= 1080) {
+      console.log(`[Quality Selector] Selected highest quality: ${highestQuality.resolution} (${highestQuality.bandwidth} bps)`);
+      return highestQuality.url;
     }
     
-    // Third try: If nothing in the optimal range, find closest to 720p
-    if (!optimalResolution) {
-      // Sort by how close they are to 720p
-      streamsWithHeight.sort((a, b) => Math.abs(a.height - 720) - Math.abs(b.height - 720));
-      optimalResolution = streamsWithHeight[0]; // Closest to 720p
-    }
+    // If no 1080p+, try to find 720p
+    const optimalResolution = streamsWithHeight.find(s => s.height === 720) || highestQuality;
     
-    if (optimalResolution) {
-      console.log(`[Quality Selector] Selected optimal resolution: ${optimalResolution.resolution} (${optimalResolution.bandwidth} bps)`);
-      return optimalResolution.url;
-    }
+    console.log(`[Quality Selector] Selected optimal resolution: ${optimalResolution.resolution} (${optimalResolution.bandwidth} bps)`);
+    return optimalResolution.url;
   }
   
-  // If we can't choose based on resolution, pick a middle-quality option
-  // This usually provides a good balance between quality and performance
+  // If we can't choose based on resolution, pick the highest quality option
+  // Sort by bandwidth in descending order and pick the highest
+  streams.sort((a, b) => b.bandwidth - a.bandwidth);
+  selectedStream = streams[0]; // Pick the highest bandwidth (best quality)
   
-  // For multiple quality options, pick one in the lower-middle range
-  const lowerMidIndex = Math.floor(streams.length / 3); // Pick from the lower third
-  selectedStream = streams[lowerMidIndex];
-  
-  console.log(`[Quality Selector] Selected quality option #${lowerMidIndex+1}/${streams.length}: ${selectedStream.resolution || 'unknown'} (${selectedStream.bandwidth} bps)`);
+  console.log(`[Quality Selector] Selected highest bandwidth option: ${selectedStream.resolution || 'unknown'} (${selectedStream.bandwidth} bps)`);
   
   return selectedStream.url;
 }
