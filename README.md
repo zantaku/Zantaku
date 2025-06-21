@@ -1,85 +1,102 @@
-# Zantaku 📚
+<div align="center">
 
-Your personal companion for anime watching and manga reading. Built with React native for the next generation of Otakus.
+<img src="./assets/images/icon.png" alt="Zantaku Icon" width="65"/>
 
-![Connect Watch Enjoy](https://media.discordapp.net/attachments/1334433714863603784/1361288259497496596/Connect._Watch._Enjoy..png?ex=6810aafc&is=680f597c&hm=4628a357f57b0ec27d095a9d4bc24a36beaed75ebded68ff1a8291794ed49f59&=&format=webp&quality=lossless&width=1310&height=873)
+# Zantaku App  
+**Your all-in-one app for anime watching and manga reading. Built by and for Weebs.**
 
-## ✨ Why Zantaku?
+[![Built with React Native](https://img.shields.io/badge/Built%20with-React%20Native-61DAFB?logo=react&style=flat-square)](https://reactnative.dev/)  
+[![Status: Public Beta](https://img.shields.io/badge/Status-Public%20Beta-orange?style=flat-square)](#) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-We understand the struggle. Anime subscriptions are getting more expensive, and finding free alternatives can be risky with dodgy websites and apps that don't deliver the experience you want. Not to mention the hassle of tracking your progress in notepads or spreadsheets.
+[Discord](https://discord.gg/Pm7KyBYdA5) · [Download](https://github.com/zantaku/Zantaku) · [Website](https://zantaku.com)
 
-Zantaku ends that today. Our goal is simple: provide the most up-to-date library with the smoothest experience, empowering people like you to enjoy content without compromise. The next generation of anime and manga enthusiasts will be on Zantaku.
+---
 
-Here's what makes us different:
-- 🚀 fast experience, even for massive series
-- 📱 Beautiful, modern UI that feels updated
-- 🔖 Smart progress tracking that remembers where you left off
-- 🌐 Multiple source support for your favorite content
+> 🚨 Zantaku is now in **Public Beta** — the app is live, usable, and constantly evolving.  
+> Community contributions, ideas, and feature testing are all welcome!
 
-![Latest Top 50](https://media.discordapp.net/attachments/1334433714863603784/1361288255139483748/Latest_Top_50.png?ex=6810aafb&is=680f597b&hm=d9ff581ac573d17d50eaea538fe21326562ae3c2f0f8e19e9c3d1e653d7c9b7a&=&format=webp&quality=lossless&width=1310&height=873)
+</div>
 
-## 🎯 Key Features
+---
 
-- 📖 **Universal Reader**
-  - Manga with smooth page transitions
-  - Light novels with customizable reading experience
-  - Web novels with progress tracking
-  
-- 📺 **Univerisal 
+## 🔥 Why Zantaku Exists
 
-![Dark Theme](https://media.discordapp.net/attachments/1334433714863603784/1361288260218781796/Change_Theme_-_Dark.png?ex=6810aafc&is=680f597c&hm=14a4bf8235c01fd0a1825516592703376f73725389616d637816bee717f65ada&=&format=webp&quality=lossless&width=1310&height=873)
+Yes, other apps exist. But they force you into two broken choices:
 
-## 🚀 Quick Start
+- Pay a monopoly for limited content, region locks, and a very limited support system  
+- Or dive into the chaotic world of piracy — installing shady apps, managing adblockers, finding sketchy extensions, and constantly hoping nothing breaks or infects your device
 
-1. **Prerequisites**
-   - Install [Expo Go](https://expo.dev/client) on your phone
-   - Have [Node.js](https://nodejs.org/) on your computer
+That whole scene? It's a mess.  
+**Zantaku ends that.**
 
-2. **Setup**
-   ```bash
-   git clone https://github.com/yourname/zantaku.git
-   cd zantaku
-   npm install
-   npx expo start
-   ```
+> “I created this app because I wanted my own platform where I can watch and read freely. No other apps let me do this.”  
+> — **Ayodaza**, Founder of Zantaku
 
-3. **Start Reading**
-   - Scan QR code with Expo Go
-   - Start exploring your favorite manga and novels!
+Zantaku combines everything into one clean platform — anime, manga, light novels — all in one place.  
 
-## 📚 Documentation
+No hacks. No extensions. No paywalls. No more worries. Focus on what you loved to do. Everything is yours now.
 
-Detailed guides available in our `/docs` directory:
-- [Android Build Guide](docs/android-build-guide.md)
-- [API Usage](docs/kamidb_api.md)
-- [Achievements System](docs/README-achievements.md)
-- [And more...](docs/)
 
-## 🛠️ For Developers
+---
 
-Built with modern tech for the best experience:
-- **Framework**: React Native + Expo
-- **Language**: TypeScript
-- **UI**: Native Base components
-- **Performance**: FlashList + AsyncStorage optimizations
+## ✨ Features
 
-[View full technical details](docs/technical-overview.md)
+### ✅ Core Experience (Ready Now)
+| 📺 Anime Streaming | 📖 Manga + Webtoon | 📚 Light Novels | 🔄 AniList Sync |
+|--------------------|--------------------|-----------------|-----------------|
+| Built-in player | Smooth scroll reader | Clean UI | Real-time progress |
 
-## 🤝 Contributing
+### 🔜 Coming Soon
+- 🤖 AI-Powered Recommendations  
+- 📴 Offline Mode  
+- 🧑‍🤝‍🧑 Social Profiles & Activity  
+- 📅 Release Tracker  
+- 🧬 Custom Profiles  
+- 🏆 Gamification System  
 
-We love contributions that make Zantaku better! 
-- 🐛 Found a bug? Open an issue
-- 💡 Have an idea? Start a discussion
-- 🔧 Want to contribute? Check our [Contributing Guide](CONTRIBUTING.md)
+> ⚡ This app is under **active development** — [Join our Discord](https://discord.gg/Pm7KyBYdA5) to stay updated.
 
-## ⚡ Brand Notice
+---
 
-Zantaku is an original project.  
-Please do not claim ownership or create confusing derivatives.  
-See [`TRADEMARK.md`](./TRADEMARK.md) for details.
+<details>
+  <summary><strong>💡 What does "Public Beta" mean?</strong></summary>
+  <br>
 
-## 📄 Documentation Notice
+Zantaku is fully usable, but still evolving.  
+We're testing new features, improving performance, and gathering community feedback.
 
-All documentation in `/docs` is proprietary and confidential.
-While our code is open source under MIT License, documentation requires permission for redistribution.
+- The app is **stable enough to use** daily  
+- Features may change based on your feedback  
+- You can help shape its future through code, bug reports, or ideas
 
+</details>
+
+---
+
+## 🛠️ Contributing
+
+We welcome all contributions — from code improvements to design ideas.
+
+- 🐛 Found a bug? [Open an issue](https://github.com/zantaku/Zantaku/issues)
+- ✨ Have a feature idea? Let’s talk on [Discord](https://discord.gg/Pm7KyBYdA5)
+- 📦 Ready to contribute? Fork this repo and send us a pull request!
+
+> See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup instructions and best practices.
+
+---
+
+## ⚖️ Disclaimer
+
+Zantaku **does not host or distribute any copyrighted content**.  
+The app uses **open APIs** to provide a better anime and manga tracking experience. Use responsibly.
+
+---
+
+<div align="center">
+
+<img src="./assets/images/footer-banner.png" alt="Zantaku Footer" width="100%"/>
+
+### The future starts in Zantaku 🚀  
+Built for weebs. By weebs. Stay free.
+
+</div>
