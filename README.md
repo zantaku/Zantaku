@@ -94,8 +94,6 @@ The app uses **open APIs** to provide a better anime and manga tracking experien
 
 <div align="center">
 
-<img src="./assets/images/footer-banner.png" alt="Zantaku Footer" width="100%"/>
-
 ### The future starts in Zantaku 🚀  
 Built for weebs. By weebs. Stay free.
 
