@@ -49,6 +49,13 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
       "react-native-video",
       "@react-native-community/datetimepicker"
     ],

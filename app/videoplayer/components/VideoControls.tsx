@@ -32,6 +32,8 @@ interface VideoControlsProps {
   showControls: boolean;
   onToggleControls: () => void;
   disabled?: boolean;
+  onPiPPress?: () => void;
+  onSystemPiPPress?: () => void;
 }
 
 const VideoControls = ({
@@ -59,7 +61,9 @@ const VideoControls = ({
   onBackPress,
   showControls,
   onToggleControls,
-  disabled = false
+  disabled = false,
+  onPiPPress,
+  onSystemPiPPress
 }: VideoControlsProps) => {
   const { preferences } = usePlayerContext();
   const [isSeeking, setIsSeeking] = useState(false);
@@ -272,7 +276,7 @@ const VideoControls = ({
             </Text>
           </View>
           
-        {/* Control Buttons - Right Side */}
+                  {/* Control Buttons - Right Side */}
 <View style={styles.controlButtonsContainer}>
               {/* Subtitles */}
             <TouchableOpacity 
@@ -307,7 +311,24 @@ const VideoControls = ({
               </View>
             </TouchableOpacity>
             
-            {/* Fullscreen Toggle */}
+            {/* System Picture-in-Picture Toggle - SECOND TO LAST BUTTON */}
+            {onSystemPiPPress && (
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={onSystemPiPPress}
+                accessibilityLabel="System Picture in Picture"
+              >
+                <View style={styles.iconWrapper}>
+                  <Ionicons 
+                    name="phone-portrait-outline" 
+                    size={24} 
+                    color={PLAYER_COLORS.TEXT_LIGHT} 
+                  />
+                </View>
+              </TouchableOpacity>
+            )}
+            
+            {/* Fullscreen Toggle - LAST BUTTON */}
             <TouchableOpacity 
               style={styles.controlButton} 
               onPress={onToggleFullscreen}
@@ -321,6 +342,23 @@ const VideoControls = ({
                 />
               </View>
             </TouchableOpacity>
+            
+            {/* In-App Picture-in-Picture Toggle - MOVED TO HIDDEN */}
+            {false && onPiPPress && (
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={onPiPPress}
+                accessibilityLabel="In-App Picture in Picture"
+              >
+                <View style={styles.iconWrapper}>
+                  <Ionicons 
+                    name="contract-outline" 
+                    size={24} 
+                    color={PLAYER_COLORS.TEXT_LIGHT} 
+                  />
+                </View>
+              </TouchableOpacity>
+            )}
 </View>
 
         </View>

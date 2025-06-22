@@ -24,8 +24,29 @@ import Slider from '@react-native-community/slider';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
 import { useSettings } from '../hooks/useSettings';
+import * as ImagePicker from 'expo-image-picker';
+import SuccessToast from './SuccessToast';
+import ErrorToast from './ErrorToast';
 
 // The LogBox suppression has been removed as we are fixing the root cause.
+
+// Add interface for Trace Moe API response
+interface TraceMoeResult {
+  anilist: number; // Just the ID number, not an object
+  filename: string;
+  episode: number | null;
+  similarity: number;
+  from: number;
+  to: number;
+  video: string;
+  image: string;
+}
+
+interface TraceMoeResponse {
+  frameCount: number;
+  error: string;
+  result: TraceMoeResult[];
+}
 
 interface AnimeResult {
   id: number;
@@ -91,6 +112,7 @@ interface Props {
 }
 
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
+const TRACE_MOE_API_ENDPOINT = 'https://api.trace.moe/search';
 
 const styles = StyleSheet.create({
   container: {
@@ -404,6 +426,108 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  imageSearchButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  imagePickerModal: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#1A1A1A',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  imagePickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  imagePickerOptionText: {
+    fontSize: 16,
+    marginLeft: 16,
+    color: '#FFFFFF',
+  },
+  imagePickerDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 8,
+  },
+  imagePickerCancel: {
+    marginTop: 8,
+    paddingVertical: 16,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+  },
+  imagePickerCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  imageSearchingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageSearchingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  urlInputContainer: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: 12,
+    margin: 16,
+    padding: 16,
+  },
+  urlInputTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  urlTextInput: {
+    backgroundColor: '#3A3A3A',
+    borderRadius: 8,
+    padding: 12,
+    color: '#FFFFFF',
+    fontSize: 16,
+    marginBottom: 16,
+    minHeight: 48,
+  },
+  urlInputButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  urlInputButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  urlSearchButton: {
+    backgroundColor: '#02A9FF',
+  },
+  urlCancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  urlButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 });
 
 export default function AnimeSearchGlobal({ visible, onClose }: Props) {
@@ -433,6 +557,16 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
   const [page, setPage] = useState(1);
   const [hasNextPage, setHasNextPage] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
+  // New state variables for image search
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
+  const [imageSearching, setImageSearching] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [foundAnimeTitle, setFoundAnimeTitle] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
 
   const FILTER_OPTIONS: FilterOptions = {
     format: ['TV', 'MOVIE', 'OVA', 'ONA', 'SPECIAL', 'MUSIC'],
@@ -1019,6 +1153,340 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
     );
   };
 
+  // Image search functions
+  const handleImageSearchPress = () => {
+    setShowImagePickerModal(true);
+  };
+  
+  const handleImagePickerClose = () => {
+    setShowImagePickerModal(false);
+    setShowUrlInput(false);
+    setImageUrl('');
+  };
+  
+  const handleUrlInputPress = () => {
+    setShowUrlInput(true);
+  };
+  
+  const handleUrlSearch = async () => {
+    if (!imageUrl.trim()) {
+      showToast('Please enter a valid image URL', true);
+      return;
+    }
+    
+    // Validate URL format
+    try {
+      new URL(imageUrl);
+    } catch (error) {
+      showToast('Please enter a valid URL', true);
+      return;
+    }
+    
+    handleImagePickerClose();
+    searchAnimeByImageUrl(imageUrl.trim());
+  };
+  
+  const searchAnimeByImageUrl = async (url: string) => {
+    setImageSearching(true);
+    setError(null);
+    
+    try {
+      console.log('Starting image search with URL:', url);
+      
+      // Make request to Trace Moe API with URL
+      const response = await axios({
+        method: 'get',
+        url: TRACE_MOE_API_ENDPOINT,
+        params: {
+          url: url,
+          cutBorders: true,
+        },
+        timeout: 30000, // 30 second timeout
+      });
+      
+      console.log('Trace Moe API response received:', response.status);
+      
+      if (response.data && response.data.result && response.data.result.length > 0) {
+        const bestMatch = response.data.result[0];
+        const similarity = Math.round(bestMatch.similarity * 100);
+        
+        console.log('Best match found:', {
+          animeId: bestMatch.anilist,
+          similarity: similarity
+        });
+        
+        // If similarity is too low, show warning
+        if (similarity < 70) {
+          showToast(`Low confidence match (${similarity}%). Try with a clearer image.`, true);
+          setImageSearching(false);
+          return;
+        }
+        
+        const animeId = bestMatch.anilist;
+        
+        // Fetch anime title from AniList
+        try {
+          const anilistResponse = await axios.post(
+            ANILIST_GRAPHQL_ENDPOINT,
+            {
+              query: `
+                query ($id: Int) {
+                  Media(id: $id, type: ANIME) {
+                    id
+                    title {
+                      userPreferred
+                      english
+                      romaji
+                      native
+                    }
+                  }
+                }
+              `,
+              variables: {
+                id: animeId
+              }
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              }
+            }
+          );
+          
+          const animeData = anilistResponse.data?.data?.Media;
+          const title = animeData?.title?.userPreferred || 
+                       animeData?.title?.english || 
+                       animeData?.title?.romaji || 
+                       animeData?.title?.native || 
+                       bestMatch.filename;
+          
+          setFoundAnimeTitle(title);
+          
+          // Show success toast and navigate to anime page
+          showToast(`Found "${title}" (${similarity}% match)`);
+          
+          // Add a small delay before navigating to ensure toast is visible
+          setTimeout(() => {
+            // Navigate to anime details page
+            console.log('Navigating to anime details page with ID:', animeId);
+            router.push({
+              pathname: '/anime/[id]',
+              params: { id: animeId }
+            });
+            onClose();
+          }, 1000);
+        } catch (anilistError) {
+          console.error('Error fetching anime title from AniList:', anilistError);
+          // Fallback to filename if AniList fails
+          showToast(`Found "${bestMatch.filename}" (${similarity}% match)`);
+          
+          setTimeout(() => {
+            router.push({
+              pathname: '/anime/[id]',
+              params: { id: animeId }
+            });
+            onClose();
+          }, 1000);
+        }
+      } else {
+        console.log('No matches found in Trace Moe response');
+        showToast('No matches found. Try with a different image.', true);
+      }
+    } catch (error: any) {
+      console.error('Error searching anime by image URL:', error);
+      
+      // More detailed error handling
+      if (error.response) {
+        console.error('Error response data:', error.response.data);
+        console.error('Error response status:', error.response.status);
+        
+        if (error.response.status === 429) {
+          showToast('Rate limit exceeded. Please try again later.', true);
+        } else if (error.response.status === 400) {
+          showToast('Invalid image URL or format. Please try a different image.', true);
+        } else {
+          showToast(`Server error: ${error.response.status}. Please try again.`, true);
+        }
+      } else if (error.request) {
+        console.error('No response received:', error.request);
+        showToast('No response from server. Check your internet connection.', true);
+      } else {
+        console.error('Error message:', error.message);
+        showToast('Error searching by image. Please try again.', true);
+      }
+    } finally {
+      setImageSearching(false);
+    }
+  };
+
+  // Add a helper function for showing toast notifications
+  const showToast = (message: string, isError: boolean = false) => {
+    setToastMessage(message);
+    if (isError) {
+      setShowErrorToast(true);
+      setShowSuccessToast(false);
+    } else {
+      setShowSuccessToast(true);
+      setShowErrorToast(false);
+    }
+  };
+
+  const pickImageFromCamera = async () => {
+    handleImagePickerClose();
+    
+    // Request camera permissions
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    
+    if (status !== 'granted') {
+      showToast('Camera permission is required to take a photo', true);
+      return;
+    }
+    
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+        base64: true,
+      });
+      
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const imageBase64 = result.assets[0].base64;
+        if (imageBase64) {
+          console.log('Image captured from camera, size:', imageBase64.length);
+          searchAnimeByImage(imageBase64);
+        } else {
+          showToast('Failed to process image. Please try again.', true);
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image from camera:', error);
+      showToast('Error taking photo. Please try again.', true);
+    }
+  };
+  
+  const pickImageFromGallery = async () => {
+    handleImagePickerClose();
+    
+    // Request media library permissions
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (status !== 'granted') {
+      showToast('Gallery permission is required to select an image', true);
+      return;
+    }
+    
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+        base64: true,
+      });
+      
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const imageBase64 = result.assets[0].base64;
+        if (imageBase64) {
+          console.log('Image selected from gallery, size:', imageBase64.length);
+          searchAnimeByImage(imageBase64);
+        } else {
+          showToast('Failed to process image. Please try again.', true);
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image from gallery:', error);
+      showToast('Error selecting image. Please try again.', true);
+    }
+  };
+  
+  const searchAnimeByImage = async (base64Image: string) => {
+    setImageSearching(true);
+    setError(null);
+    
+    try {
+      console.log('Starting image search with Trace Moe API');
+      
+      // Make request to Trace Moe API
+      const response = await axios({
+        method: 'post',
+        url: TRACE_MOE_API_ENDPOINT,
+        data: base64Image,
+        headers: {
+          'Content-Type': 'image/jpeg;base64',
+        },
+        params: {
+          cutBorders: true,
+        },
+        timeout: 30000, // 30 second timeout
+      });
+      
+      console.log('Trace Moe API response received:', response.status);
+      
+      if (response.data && response.data.result && response.data.result.length > 0) {
+        const bestMatch = response.data.result[0];
+        const similarity = Math.round(bestMatch.similarity * 100);
+        
+        console.log('Best match found:', {
+          animeId: bestMatch.anilist,
+          similarity: similarity
+        });
+        
+        // If similarity is too low, show warning
+        if (similarity < 70) {
+          showToast(`Low confidence match (${similarity}%). Try with a clearer screenshot.`, true);
+          setImageSearching(false);
+          return;
+        }
+        
+        const animeId = bestMatch.anilist;
+        
+        setFoundAnimeTitle(bestMatch.filename);
+        
+        // Show success toast and navigate to anime page
+        showToast(`Found "${bestMatch.filename}" (${similarity}% match)`);
+        
+        // Add a small delay before navigating to ensure toast is visible
+        setTimeout(() => {
+          // Navigate to anime details page
+          console.log('Navigating to anime details page with ID:', animeId);
+          router.push({
+            pathname: '/anime/[id]',
+            params: { id: animeId }
+          });
+          onClose();
+        }, 1000);
+      } else {
+        console.log('No matches found in Trace Moe response');
+        showToast('No matches found. Try with a different image.', true);
+      }
+    } catch (error: any) {
+      console.error('Error searching anime by image:', error);
+      
+      // More detailed error handling
+      if (error.response) {
+        console.error('Error response data:', error.response.data);
+        console.error('Error response status:', error.response.status);
+        
+        if (error.response.status === 429) {
+          showToast('Rate limit exceeded. Please try again later.', true);
+        } else {
+          showToast(`Server error: ${error.response.status}. Please try again.`, true);
+        }
+      } else if (error.request) {
+        console.error('No response received:', error.request);
+        showToast('No response from server. Check your internet connection.', true);
+      } else {
+        console.error('Error message:', error.message);
+        showToast('Error searching by image. Please try again.', true);
+      }
+    } finally {
+      setImageSearching(false);
+    }
+  };
+
   if (!visible) return null;
 
   return (
@@ -1063,6 +1531,16 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
                   </TouchableOpacity>
                 )}
               </View>
+              <TouchableOpacity
+                style={[styles.imageSearchButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
+                onPress={handleImageSearchPress}
+              >
+                <FontAwesome5
+                  name="camera"
+                  size={16}
+                  color={currentTheme.colors.primary}
+                />
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.filterButton, { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFFFFF' }]}
                 onPress={() => setShowFilterModal(true)}
@@ -1129,9 +1607,14 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
               </View>
             )}
 
-            {loading ? (
+            {loading || imageSearching ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+                {imageSearching && (
+                  <Text style={[styles.imageSearchingText, { color: currentTheme.colors.text }]}>
+                    Searching for anime by image...
+                  </Text>
+                )}
               </View>
             ) : (
               <FlatList
@@ -1359,6 +1842,90 @@ export default function AnimeSearchGlobal({ visible, onClose }: Props) {
                 <Text style={styles.clearFiltersText}>Clear All Filters</Text>
               </TouchableOpacity>
             </View>
+          )}
+          
+          {/* Image Picker Modal */}
+          {showImagePickerModal && (
+            <TouchableOpacity 
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={handleImagePickerClose}
+            >
+              <View style={styles.imagePickerModal}>
+                {!showUrlInput ? (
+                  <>
+                    <TouchableOpacity style={styles.imagePickerOption} onPress={handleUrlInputPress}>
+                      <FontAwesome5 name="link" size={24} color="#FFFFFF" />
+                      <Text style={styles.imagePickerOptionText}>Enter Image URL</Text>
+                    </TouchableOpacity>
+                    
+                    <View style={styles.imagePickerDivider} />
+                    
+                    <TouchableOpacity style={styles.imagePickerOption} onPress={pickImageFromCamera}>
+                      <FontAwesome5 name="camera" size={24} color="#FFFFFF" />
+                      <Text style={styles.imagePickerOptionText}>Take a Photo</Text>
+                    </TouchableOpacity>
+                    
+                    <View style={styles.imagePickerDivider} />
+                    
+                    <TouchableOpacity style={styles.imagePickerOption} onPress={pickImageFromGallery}>
+                      <FontAwesome5 name="image" size={24} color="#FFFFFF" />
+                      <Text style={styles.imagePickerOptionText}>Choose from Gallery</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity style={styles.imagePickerCancel} onPress={handleImagePickerClose}>
+                      <Text style={styles.imagePickerCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={styles.urlInputContainer}>
+                    <Text style={styles.urlInputTitle}>Enter Image URL</Text>
+                    <TextInput
+                      style={styles.urlTextInput}
+                      placeholder="https://example.com/image.jpg"
+                      placeholderTextColor="#999"
+                      value={imageUrl}
+                      onChangeText={setImageUrl}
+                      autoFocus
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                    />
+                    <View style={styles.urlInputButtons}>
+                      <TouchableOpacity 
+                        style={[styles.urlInputButton, styles.urlCancelButton]} 
+                        onPress={() => setShowUrlInput(false)}
+                      >
+                        <Text style={styles.urlButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.urlInputButton, styles.urlSearchButton]} 
+                        onPress={handleUrlSearch}
+                      >
+                        <Text style={styles.urlButtonText}>Search</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+          
+          {/* Toast Notifications */}
+          {showSuccessToast && (
+            <SuccessToast
+              message={toastMessage}
+              duration={5000}
+              onDismiss={() => setShowSuccessToast(false)}
+            />
+          )}
+          
+          {showErrorToast && (
+            <ErrorToast
+              message={toastMessage}
+              duration={5000}
+              onDismiss={() => setShowErrorToast(false)}
+            />
           )}
         </View>
       </Modal>

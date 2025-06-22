@@ -31,8 +31,12 @@ import {
   Platform,
   StatusBar,
   Animated,
+  ToastAndroid,
 } from 'react-native';
+import * as ExpoVideo from 'expo-video';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { VideoView, useVideoPlayer, VideoSource } from 'expo-video';
+import { useEvent } from 'expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
@@ -79,10 +83,69 @@ interface VideoData {
 const PlayerScreen: React.FC = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { preferences, setPreferences, anilistUser, onSaveToAniList } = usePlayerContext();
+  const { preferences, setPreferences, anilistUser, onSaveToAniList, onEnterPiP } = usePlayerContext();
+  
+  // System PiP functionality
+  const handleSystemPiP = async () => {
+    try {
+      console.log('[SYSTEM PiP] 🚀 Attempting to enter native Picture-in-Picture mode...');
+      
+      // Check if PiP is supported
+      const isSupported = ExpoVideo.isPictureInPictureSupported();
+      
+      if (!isSupported) {
+        Alert.alert(
+          'PiP Not Supported',
+          'Picture-in-Picture is not supported on this device or is disabled in settings.\n\nOn Android: Go to Settings → Apps → Kamilist → Picture-in-picture → Allow',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      // Try to enter PiP mode using VideoView
+      if (videoRef.current) {
+        try {
+          await videoRef.current.startPictureInPicture();
+          setPipMode(true);
+          console.log('[SYSTEM PiP] ✅ Successfully entered native Picture-in-Picture mode!');
+        } catch (pipError) {
+          console.error('[SYSTEM PiP] ❌ Failed to enter PiP mode:', pipError);
+          Alert.alert(
+            'PiP Failed',
+            'Unable to enter Picture-in-Picture mode. Make sure PiP is enabled in your device settings and try again.',
+            [{ text: 'OK' }]
+          );
+        }
+      } else {
+        Alert.alert(
+          'Player Not Ready',
+          'Video player is not ready for Picture-in-Picture mode. Try again in a moment.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('[SYSTEM PiP] ❌ Error with system PiP:', error);
+      Alert.alert(
+        'PiP Error',
+        'Unable to access Picture-in-Picture features.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  // Handle PiP mode changes
+  const handlePiPStart = useCallback(() => {
+    console.log('[SYSTEM PiP] 📱 Entered system Picture-in-Picture mode');
+    setPipMode(true);
+  }, []);
+
+  const handlePiPStop = useCallback(() => {
+    console.log('[SYSTEM PiP] 📱 Exited system Picture-in-Picture mode');
+    setPipMode(false);
+  }, []);
   
   // Video refs and state
-  const videoRef = useRef<Video>(null);
+  const videoRef = useRef<any>(null);
   const [videoData, setVideoData] = useState<VideoData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -93,6 +156,9 @@ const PlayerScreen: React.FC = () => {
     playableDuration: 0,
     seekableDuration: 0,
   });
+  
+  // Expo-video player state
+  const [pipMode, setPipMode] = useState(false);
   
   // Buffering state
   const [isBuffering, setIsBuffering] = useState(false);
@@ -152,6 +218,85 @@ const PlayerScreen: React.FC = () => {
     
     return finalUrl;
   }, [videoData?.source]);
+
+  // Create expo-video player for system PiP
+  const videoPlayer = useVideoPlayer(
+    videoData && videoSource ? {
+      uri: videoSource,
+      headers: videoData.headers || {}
+    } : null,
+    (player) => {
+      if (player && videoData) {
+        player.loop = false;
+        player.muted = false;
+        player.volume = preferences.volume;
+        player.playbackRate = playbackSpeed;
+        player.timeUpdateEventInterval = 500; // Update every 500ms
+        console.log('[EXPO-VIDEO] 🎬 Player created and configured');
+      }
+    }
+  );
+
+  // Simplified time update using refs to prevent infinite loops
+  const lastTimeRef = useRef(0);
+  const lastDurationRef = useRef(0);
+  
+  useEffect(() => {
+    if (videoPlayer) {
+      const timeUpdateInterval = setInterval(() => {
+        try {
+          const newTime = videoPlayer.currentTime || 0;
+          const newDuration = videoPlayer.duration || 0;
+          const isPlaying = videoPlayer.playing || false;
+          
+          // Only update time if there's a significant change
+          if (Math.abs(newTime - lastTimeRef.current) > 0.5) {
+            lastTimeRef.current = newTime;
+            setCurrentTime(newTime);
+          }
+          
+          // Set duration only once when video is loaded
+          if (newDuration > 0 && lastDurationRef.current === 0) {
+            lastDurationRef.current = newDuration;
+            setDuration(newDuration);
+          }
+          
+          // Update paused state
+          setPaused(!isPlaying);
+          
+        } catch (error) {
+          console.warn('[EXPO-VIDEO] Time update error:', error);
+        }
+      }, 500); // Update every 500ms
+      
+      return () => clearInterval(timeUpdateInterval);
+    }
+  }, [videoPlayer]); // Only depend on videoPlayer creation
+
+  // Sync preferences when videoPlayer is created or preferences change
+  const lastVolumeRef = useRef(preferences.volume);
+  const lastSpeedRef = useRef(playbackSpeed);
+  
+  useEffect(() => {
+    if (videoPlayer && videoData) {
+      try {
+        // Only update if values actually changed
+        if (lastVolumeRef.current !== preferences.volume) {
+          videoPlayer.volume = preferences.volume;
+          lastVolumeRef.current = preferences.volume;
+          console.log('[EXPO-VIDEO] Updated volume:', preferences.volume);
+        }
+        
+        if (lastSpeedRef.current !== playbackSpeed) {
+          videoPlayer.playbackRate = playbackSpeed;
+          lastSpeedRef.current = playbackSpeed;
+          console.log('[EXPO-VIDEO] Updated playback speed:', playbackSpeed);
+        }
+      } catch (error) {
+        console.warn('[EXPO-VIDEO] Failed to sync preferences:', error);
+      }
+    }
+  }, [videoPlayer, videoData, preferences.volume, playbackSpeed]);
 
   // Memoized subtitle display check
   const shouldShowSubtitles = useMemo(() => {
@@ -367,86 +512,29 @@ const PlayerScreen: React.FC = () => {
     }
   }, [currentTime, videoData?.timings, showSkipIntro, showSkipOutro]);
 
-  // Handle video playback status updates - optimized
-  const handlePlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      const currentTimeSeconds = status.positionMillis ? status.positionMillis / 1000 : 0;
-      const durationSeconds = status.durationMillis ? status.durationMillis / 1000 : 0;
-      const playableDurationSeconds = status.playableDurationMillis ? status.playableDurationMillis / 1000 : 0;
-      
-      // Batch state updates to reduce re-renders
-      const now = Date.now();
-      
-      setCurrentTime(currentTimeSeconds);
-      setDuration(durationSeconds);
-      setPaused(!status.shouldPlay);
-      
-      // Handle buffering state
-      const isCurrentlyBuffering = status.shouldPlay && !status.isPlaying && !paused;
-      setIsBuffering(isCurrentlyBuffering);
-      
-      // Calculate buffer progress (how much is buffered ahead)
-      const bufferPercentage = durationSeconds > 0 ? (playableDurationSeconds / durationSeconds) * 100 : 0;
-      setBufferProgress(bufferPercentage);
-      
-      setProgress({
-        currentTime: currentTimeSeconds,
-        playableDuration: playableDurationSeconds,
-        seekableDuration: durationSeconds,
-      });
-      
-      // Log quality information periodically (every 30 seconds)
-      if (now - lastSeekTime.current > 30000) {
-        console.log(`📊 Video Quality Status:`);
-        console.log(`   Duration: ${Math.round(durationSeconds)}s`);
-        console.log(`   Current Time: ${Math.round(currentTimeSeconds)}s`);
-        console.log(`   Buffer: ${bufferPercentage.toFixed(1)}%`);
-        console.log(`   Playing: ${status.isPlaying ? 'Yes' : 'No'}`);
-        console.log(`   Buffering: ${isCurrentlyBuffering ? 'Yes' : 'No'}`);
-        // Check for video resolution if available
-        const statusWithSize = status as any;
-        if (statusWithSize.naturalSize && statusWithSize.naturalSize.width && statusWithSize.naturalSize.height) {
-          console.log(`   Video Resolution: ${statusWithSize.naturalSize.width}x${statusWithSize.naturalSize.height}`);
-        }
-        lastSeekTime.current = now;
-      }
-      
-      // Auto-save progress (throttled to avoid excessive writes)
-      if (videoData?.episodeId && preferences.rememberPosition) {
-        if (now - lastProgressSave.current > 5000) { // Only save every 5 seconds
-          const progressData = {
-            currentTime: currentTimeSeconds,
-            duration: durationSeconds,
-            timestamp: now,
-          };
-          AsyncStorage.setItem(`${STORAGE_KEYS.VIDEO_PROGRESS}${videoData.episodeId}`, JSON.stringify(progressData));
-          lastProgressSave.current = now;
-        }
-      }
-    } else {
-      // Video is not loaded, show buffering
-      setIsBuffering(true);
-      console.log('⚠️ Video not loaded - showing buffering indicator');
-    }
-  }, [videoData?.episodeId, preferences.rememberPosition, paused]);
+  // No longer needed - using expo-video's built-in event system
 
-  // Control handlers
+  // Control handlers - Updated for expo-video
   const handlePlayPause = useCallback(() => {
-    if (videoRef.current) {
-      if (paused) {
-        videoRef.current.playAsync();
+    if (videoPlayer) {
+      if (paused || !videoPlayer.playing) {
+        videoPlayer.play();
+        console.log('▶️ Video resumed');
+        setPaused(false);
       } else {
-        videoRef.current.pauseAsync();
+        videoPlayer.pause();
+        console.log('⏸️ Video paused');
+        setPaused(true);
       }
     }
-  }, [paused]);
+  }, [paused, videoPlayer]);
 
   // Optimized seek with reduced debounce for better responsiveness
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSeekingRef = useRef(false);
   
   const handleSeek = useCallback((time: number) => {
-    if (videoRef.current && !isSeekingRef.current) {
+    if (videoPlayer && !isSeekingRef.current) {
       // Prevent multiple simultaneous seeks
       isSeekingRef.current = true;
       setSeekingPosition(time);
@@ -459,26 +547,24 @@ const PlayerScreen: React.FC = () => {
       
       // Optimized debounce for better responsiveness
       seekTimeoutRef.current = setTimeout(() => {
-        if (videoRef.current) {
+        if (videoPlayer) {
           setIsBuffering(true);
           
-          // Perform the seek operation
-          videoRef.current.setPositionAsync(time * 1000, {
-            toleranceMillisBefore: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
-            toleranceMillisAfter: PLAYER_BEHAVIOR.SEEK_TOLERANCE_MS,
-          }).then(() => {
+          try {
+            // Perform the seek operation with expo-video
+            videoPlayer.currentTime = time;
             setIsBuffering(false);
             isSeekingRef.current = false;
             console.log(`📍 Seeked to ${time.toFixed(1)}s`);
-          }).catch((error) => {
+          } catch (error: any) {
             console.error('Seek error:', error);
             setIsBuffering(false);
             isSeekingRef.current = false;
-          });
+          }
         }
       }, PLAYER_BEHAVIOR.SEEK_DEBOUNCE_MS);
     }
-  }, []);
+  }, [videoPlayer]);
 
   // Handle seek start - called when user starts dragging
   const handleSeekStart = useCallback(() => {
@@ -557,18 +643,63 @@ const PlayerScreen: React.FC = () => {
   }, [router]);
 
   // Handle fullscreen toggle (cycle through resize modes)
+  const [contentFitMode, setContentFitMode] = useState<"contain" | "cover" | "fill">("contain");
+  
   const handleToggleFullscreen = useCallback(() => {
-    const resizeModes = [ResizeMode.CONTAIN, ResizeMode.COVER, ResizeMode.STRETCH];
-    const currentIndex = resizeModes.indexOf(scalingMode as ResizeMode);
-    const nextIndex = (currentIndex + 1) % resizeModes.length;
-    const nextMode = resizeModes[nextIndex];
-    
-    setScalingMode(nextMode);
-    
-    // Show a brief toast/feedback about the current mode
+    // For expo-video, we need to use contentFit property
+    const contentFitModes = ["contain", "cover", "fill"] as const;
     const modeNames = ['Fit', 'Fill', 'Stretch'];
+    
+    const currentIndex = contentFitModes.indexOf(contentFitMode);
+    const nextIndex = (currentIndex + 1) % contentFitModes.length;
+    const nextMode = contentFitModes[nextIndex];
+    
+    // Update the contentFit mode
+    setContentFitMode(nextMode);
+    
+    // Also update the old scaling mode for compatibility
+    const oldResizeModes = [ResizeMode.CONTAIN, ResizeMode.COVER, ResizeMode.STRETCH];
+    setScalingMode(oldResizeModes[nextIndex]);
+    
     console.log(`📺 Video resize mode: ${modeNames[nextIndex]}`);
-  }, [scalingMode, setScalingMode]);
+    
+    // Show toast notification on Android
+    if (Platform.OS === 'android') {
+      ToastAndroid.showWithGravity(
+        `Video mode: ${modeNames[nextIndex]}`,
+        ToastAndroid.SHORT,
+        ToastAndroid.CENTER
+      );
+    } 
+    
+    // For iOS, we'll just use the console log for now
+    // We could implement a custom toast component if needed
+    
+    // Force update the VideoView - try multiple approaches
+    if (videoRef.current) {
+      // Method 1: Try setNativeProps
+      try {
+        if (videoRef.current.setNativeProps) {
+          videoRef.current.setNativeProps({ contentFit: nextMode });
+        }
+      } catch (error) {
+        console.warn('Could not set native props on VideoView', error);
+      }
+      
+      // Method 2: Try direct property update
+      try {
+        videoRef.current.contentFit = nextMode;
+      } catch (error) {
+        console.warn('Could not update contentFit directly', error);
+      }
+      
+      // Method 3: Force remount by toggling a key
+      setVideoKey(prevKey => prevKey + 1);
+    }
+  }, [contentFitMode]);
+  
+  // Add a key to force remount of the VideoView when needed
+  const [videoKey, setVideoKey] = useState(0);
 
   // Audio track switching
   const handleAudioTrackChange = useCallback(async (track: 'sub' | 'dub') => {
@@ -656,8 +787,23 @@ const PlayerScreen: React.FC = () => {
     <View style={styles.container}>
       <StatusBar hidden={true} />
       
-      {/* Video Player */}
-      <Video
+      {/* System PiP Video Player - VideoView for native PiP support */}
+      <VideoView
+        key={`video-view-${videoKey}`}
+        ref={videoRef}
+        style={styles.video}
+        player={videoPlayer}
+        allowsFullscreen={true}
+        allowsPictureInPicture={true}
+        startsPictureInPictureAutomatically={false}
+        nativeControls={false}
+        contentFit={contentFitMode}
+        onPictureInPictureStart={handlePiPStart}
+        onPictureInPictureStop={handlePiPStop}
+      />
+      
+      {/* Fallback: Original expo-av Video Player (commented out but kept for reference) */}
+      {/* <Video
         ref={videoRef}
         style={styles.video}
         source={{
@@ -670,11 +816,10 @@ const PlayerScreen: React.FC = () => {
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         rate={playbackSpeed}
         volume={preferences.volume}
-        // Enhanced video quality settings
         shouldRasterizeIOS={false}
         useNativeControls={false}
         progressUpdateIntervalMillis={500}
-      />
+      /> */}
 
       {/* Double Tap Overlay for Seeking */}
       <DoubleTapOverlay
@@ -721,6 +866,8 @@ const PlayerScreen: React.FC = () => {
         showControls={showControls}
         onToggleControls={toggleControls}
         disabled={showSettingsModal || showSubtitleOptions || showSpeedOptions || showSaveProgressModal || showExitModal}
+        onPiPPress={onEnterPiP}
+        onSystemPiPPress={handleSystemPiP}
       />
 
       {/* Subtitles */}
@@ -775,8 +922,8 @@ const PlayerScreen: React.FC = () => {
           currentSpeed={playbackSpeed}
           onSelectSpeed={(speed: number) => {
             setPlaybackSpeed(speed);
-            if (videoRef.current) {
-              videoRef.current.setRateAsync(speed, true);
+            if (videoPlayer) {
+              videoPlayer.playbackRate = speed;
             }
             setShowSpeedOptions(false);
           }}

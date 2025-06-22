@@ -44,6 +44,8 @@ interface PlayerContextType {
     currentTime: number;
     duration: number;
   }) => Promise<boolean>;
+  onEnterPiP?: () => void;
+  onExitPiP?: () => void;
 }
 
 const defaultPreferences: PlayerPreferences = {
@@ -76,7 +78,9 @@ export const PlayerContext = createContext<PlayerContextType>({
   setPreferences: () => {},
   anilistUser: null,
   setAnilistUser: () => {},
-  onSaveToAniList: undefined
+  onSaveToAniList: undefined,
+  onEnterPiP: undefined,
+  onExitPiP: undefined
 });
 
 export const usePlayerContext = () => useContext(PlayerContext);
@@ -90,7 +94,9 @@ export const PlayerProvider: React.FC<{
     currentTime: number;
     duration: number;
   }) => Promise<boolean>;
-}> = ({ children, anilistUser: initialAnilistUser, onSaveToAniList }) => {
+  onEnterPiP?: () => void;
+  onExitPiP?: () => void;
+}> = ({ children, anilistUser: initialAnilistUser, onSaveToAniList, onEnterPiP, onExitPiP }) => {
   const [preferences, setPreferences] = useState<PlayerPreferences>(defaultPreferences);
   const [anilistUser, setAnilistUser] = useState<AniListUser | null>(initialAnilistUser || null);
 
@@ -100,7 +106,9 @@ export const PlayerProvider: React.FC<{
       setPreferences, 
       anilistUser, 
       setAnilistUser,
-      onSaveToAniList
+      onSaveToAniList,
+      onEnterPiP,
+      onExitPiP
     }}>
       {children}
     </PlayerContext.Provider>
