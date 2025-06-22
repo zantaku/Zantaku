@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { PLAYER_COLORS } from '../constants';
 
 const EnhancedExitModal = ({
   visible, 
@@ -216,17 +217,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(13, 27, 42, 0.6)',
   },
   blurBackground: {
     width: '90%',
     maxWidth: 400,
     borderRadius: 12,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 230, 0.2)',
   },
   exitModalContent: {
     padding: 20,
-    backgroundColor: 'rgba(18, 18, 18, 0.8)',
+    backgroundColor: 'rgba(13, 27, 42, 0.9)',
   },
   exitModalTitle: {
     fontSize: 20,
@@ -248,18 +251,18 @@ const styles = StyleSheet.create({
   progressBarWrapper: {
     width: '100%',
     height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(173, 216, 230, 0.2)',
     borderRadius: 4,
-    marginBottom: 8,
     overflow: 'hidden',
+    marginBottom: 8,
   },
   progressBarFill: {
     height: '100%',
     borderRadius: 4,
   },
   progressInfoSubtext: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
     textAlign: 'center',
   },
   saveStatusContainer: {
@@ -269,7 +272,7 @@ const styles = StyleSheet.create({
   saveStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   saveStatusIndicator: {
     width: 24,
@@ -277,13 +280,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 10,
   },
   saveStatusComplete: {
     backgroundColor: '#4CAF50',
   },
   saveStatusPending: {
-    backgroundColor: '#02A9FF',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
   },
   saveStatusIncognito: {
     backgroundColor: '#9E9E9E',
@@ -293,10 +296,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   saveErrorText: {
-    color: '#FF6B6B',
+    color: '#FF5252',
     fontSize: 14,
-    textAlign: 'center',
     marginBottom: 16,
+    textAlign: 'center',
   },
   advancedOptionsToggle: {
     flexDirection: 'row',
@@ -305,13 +308,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   advancedOptionsToggleText: {
-    color: '#02A9FF',
+    color: PLAYER_COLORS.PRIMARY,
     fontSize: 14,
     marginRight: 5,
   },
   advancedOptionsContainer: {
     width: '100%',
     marginBottom: 16,
+    padding: 10,
+    backgroundColor: 'rgba(173, 216, 230, 0.1)',
+    borderRadius: 8,
   },
   advancedOption: {
     flexDirection: 'row',
@@ -321,32 +327,33 @@ const styles = StyleSheet.create({
   advancedOptionText: {
     color: '#FFFFFF',
     fontSize: 14,
-    marginLeft: 8,
+    marginLeft: 10,
   },
   exitModalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '100%',
   },
   exitModalButton: {
-    padding: 12,
+    flex: 1,
+    paddingVertical: 12,
     borderRadius: 8,
-    minWidth: 90,
+    justifyContent: 'center',
     alignItems: 'center',
+    marginHorizontal: 5,
   },
   exitModalCancelButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(173, 216, 230, 0.2)',
   },
   exitModalExitButton: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: PLAYER_COLORS.SECONDARY,
   },
   exitModalSaveButton: {
-    backgroundColor: '#02A9FF',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
   },
   exitModalButtonText: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
     fontSize: 14,
+    fontWeight: '500',
   },
 });
 

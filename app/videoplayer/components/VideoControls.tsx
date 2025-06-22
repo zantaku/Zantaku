@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, TouchableWithoutFeedback } from 'react-native';
-import Slider from '@react-native-community/slider';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { usePlayerContext } from '../PlayerContext';
 import { VideoProgressData } from '../types';
 import { PLAYER_COLORS, PLAYER_BEHAVIOR, ANIMATIONS, PLAYER_UI } from '../constants';
+import CustomSeekBar from './CustomSeekBar';
 
 interface VideoControlsProps {
   paused: boolean;
@@ -24,10 +24,14 @@ interface VideoControlsProps {
   onSpeedPress?: () => void;
   bufferProgress?: number;
   onSeekStart?: () => void;
+  onSeekChange?: (time: number) => void;
   onSeekEnd?: () => void;
   animeTitle?: string;
   episodeNumber?: number;
   onBackPress?: () => void;
+  showControls: boolean;
+  onToggleControls: () => void;
+  disabled?: boolean;
 }
 
 const VideoControls = ({
@@ -48,13 +52,16 @@ const VideoControls = ({
   onSpeedPress,
   bufferProgress = 0,
   onSeekStart,
+  onSeekChange,
   onSeekEnd,
   animeTitle,
   episodeNumber,
-  onBackPress
+  onBackPress,
+  showControls,
+  onToggleControls,
+  disabled = false
 }: VideoControlsProps) => {
   const { preferences } = usePlayerContext();
-  const [showControls, setShowControls] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -77,21 +84,22 @@ const VideoControls = ({
         useNativeDriver: true,
       }).start();
       
-      // Auto-hide controls after delay unless paused or seeking
-      if (!paused && !isSeeking) {
+      // Auto-hide controls after delay unless paused, seeking, or disabled (modals open)
+      if (!paused && !isSeeking && !disabled) {
         if (hideControlsTimeout.current) {
           clearTimeout(hideControlsTimeout.current);
         }
         hideControlsTimeout.current = setTimeout(() => {
-          Animated.timing(fadeAnim, {
-            toValue: 0,
-            duration: ANIMATIONS.CONTROLS_FADE_DURATION,
-            useNativeDriver: true,
-          }).start(() => {
-            setShowControls(false);
-          });
+          onToggleControls();
         }, PLAYER_BEHAVIOR.CONTROLS_HIDE_DELAY);
       }
+    } else {
+      // Hide controls
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: ANIMATIONS.CONTROLS_FADE_DURATION,
+        useNativeDriver: true,
+      }).start();
     }
     
     return () => {
@@ -99,7 +107,7 @@ const VideoControls = ({
         clearTimeout(hideControlsTimeout.current);
       }
     };
-  }, [showControls, paused, isSeeking]);
+  }, [showControls, paused, isSeeking, disabled, onToggleControls]);
   
   // Reset hide timeout on user interactions
   const resetHideTimeout = () => {
@@ -108,19 +116,14 @@ const VideoControls = ({
     }
     
     if (!showControls) {
-      setShowControls(true);
+      onToggleControls();
     } else {
-      hideControlsTimeout.current = setTimeout(() => {
-        if (!paused && !isSeeking) {
-          Animated.timing(fadeAnim, {
-            toValue: 0,
-            duration: ANIMATIONS.CONTROLS_FADE_DURATION,
-            useNativeDriver: true,
-          }).start(() => {
-            setShowControls(false);
-          });
-        }
-      }, PLAYER_BEHAVIOR.CONTROLS_HIDE_DELAY);
+      // If controls are already showing, reset the hide timer
+      if (!paused && !isSeeking && !disabled) {
+        hideControlsTimeout.current = setTimeout(() => {
+          onToggleControls();
+        }, PLAYER_BEHAVIOR.CONTROLS_HIDE_DELAY);
+      }
     }
   };
   
@@ -149,41 +152,41 @@ const VideoControls = ({
   };
   
   return (
-    <TouchableWithoutFeedback onPress={resetHideTimeout}>
-      <View style={styles.container}>
-        {/* Top Controls */}
-        <Animated.View 
-          style={[
-            styles.topControls, 
-            { opacity: fadeAnim },
-            !showControls && styles.hidden
-          ]}
-        >
-          <View style={styles.topControlsInner}>
-            <TouchableOpacity onPress={onBackPress} style={styles.topButton}>
-              <View style={styles.iconWrapper}>
-                <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
-              </View>
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {animeTitle && episodeNumber 
-                  ? `${animeTitle} - Episode ${episodeNumber}`
-                  : animeTitle || 'Current Episode'
-                }
-              </Text>
+    <View style={styles.container}>
+      {/* Top Controls */}
+      <Animated.View 
+        style={[
+          styles.topControls, 
+          { opacity: fadeAnim },
+          !showControls && styles.hidden
+        ]}
+      >
+        <View style={styles.topControlsInner}>
+          <TouchableOpacity onPress={onBackPress} style={styles.topButton}>
+            <View style={styles.iconWrapper}>
+              <Ionicons name="arrow-back" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
             </View>
-            
-            <TouchableOpacity style={styles.topButton} onPress={onSettingsPress}>
-              <View style={styles.iconWrapper}>
-                <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
-              </View>
-            </TouchableOpacity>
+          </TouchableOpacity>
+          
+          <View style={styles.titleContainer}>
+            <Text style={styles.titleText} numberOfLines={1}>
+              {animeTitle && episodeNumber 
+                ? `${animeTitle} - Episode ${episodeNumber}`
+                : animeTitle || 'Current Episode'
+              }
+            </Text>
           </View>
-        </Animated.View>
-        
-        {/* Center Controls */}
+          
+          <TouchableOpacity style={styles.topButton} onPress={onSettingsPress}>
+            <View style={styles.iconWrapper}>
+              <Ionicons name="settings-outline" size={PLAYER_UI.ICON_SIZE.LARGE} color={PLAYER_COLORS.TEXT_LIGHT} />
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+      
+      {/* Center Controls - wrapped in TouchableWithoutFeedback for tap-to-toggle */}
+      <TouchableWithoutFeedback onPress={resetHideTimeout}>
         <Animated.View 
           style={[
             styles.centerControls,
@@ -215,143 +218,123 @@ const VideoControls = ({
             <Text style={styles.seekButtonText}>{PLAYER_BEHAVIOR.DOUBLE_TAP_SEEK_TIME}s</Text>
           </TouchableOpacity>
         </Animated.View>
-        
-        {/* Skip Intro Button */}
-        {showSkipIntro && (
-          <Animated.View 
-            style={[
-              styles.skipIntroContainer,
-              { opacity: fadeAnim }
-            ]}
-          >
-            <TouchableOpacity 
-              style={styles.skipIntroButton}
-              onPress={onSkipIntro}
-            >
-              <Text style={styles.skipIntroText}>Skip Intro</Text>
-              <View style={styles.iconWrapper}>
-                <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-        
-        {/* Bottom Controls */}
+      </TouchableWithoutFeedback>
+
+      {/* Skip Intro Button */}
+      {showSkipIntro && (
         <Animated.View 
           style={[
-            styles.bottomControls, 
-            { opacity: fadeAnim },
-            !showControls && styles.hidden
+            styles.skipIntroContainer,
+            { opacity: fadeAnim }
           ]}
         >
-          {/* Progress Bar - Full Width */}
-          <View style={styles.progressBarContainer}>
-            {/* Full seekable range background - shows user can seek anywhere */}
-            <View style={styles.seekableRangeContainer}>
-              <View style={styles.seekableRange} />
+          <TouchableOpacity 
+            style={styles.skipIntroButton}
+            onPress={onSkipIntro}
+          >
+            <Text style={styles.skipIntroText}>Skip Intro</Text>
+            <View style={styles.iconWrapper}>
+              <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
             </View>
-            
-            {/* Buffer progress background */}
-            <View style={styles.bufferProgressContainer}>
-              <View 
-                style={[
-                  styles.bufferProgress, 
-                  { 
-                    width: duration > 0 ? `${(progress.playableDuration / duration) * 100}%` : '0%' 
-                  }
-                ]} 
-              />
-            </View>
-            
-            <Slider
-              style={styles.progressSlider}
-              minimumValue={0}
-              maximumValue={duration}
-              value={isSeeking ? seekValue : currentTime}
-              minimumTrackTintColor={PLAYER_COLORS.PRIMARY}
-              maximumTrackTintColor="rgba(255, 255, 255, 0.3)"
-              thumbTintColor={PLAYER_COLORS.PRIMARY}
-              onSlidingStart={handleSeekStart}
-              onValueChange={handleSeekChange}
-              onSlidingComplete={handleSeekComplete}
-              // Enhanced seeking properties for better experience
-              step={1}  // Use 1 second steps to reduce update frequency
-              tapToSeek={true}  // Allow tapping anywhere on the slider to seek
-            />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+      
+      {/* Bottom Controls */}
+      <Animated.View 
+        style={[
+          styles.bottomControls, 
+          { opacity: fadeAnim },
+          !showControls && styles.hidden
+        ]}
+      >
+        {/* Progress Bar - Full Width */}
+        <View style={styles.progressBarContainer}>
+          <CustomSeekBar
+            currentTime={currentTime}
+            duration={duration}
+            bufferedTime={progress.playableDuration}
+            onSeekStart={handleSeekStart}
+            onSeekChange={handleSeekChange}
+            onSeekEnd={handleSeekComplete}
+            onSeek={onSeek}
+            disabled={duration === 0}
+            style={styles.customSeekBar}
+          />
+        </View>
+        
+        {/* Bottom Row - Time and Controls */}
+        <View style={styles.bottomRow}>
+          {/* Time Display - Left Side */}
+          <View style={styles.timeContainer}>
+            <Text style={styles.timeText}>
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </Text>
           </View>
           
-          {/* Bottom Row - Time and Controls */}
-          <View style={styles.bottomRow}>
-            {/* Time Display - Left Side */}
-            <View style={styles.timeContainer}>
-              <Text style={styles.timeText}>
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </Text>
-            </View>
-            
-          {/* Control Buttons - Right Side */}
+        {/* Control Buttons - Right Side */}
 <View style={styles.controlButtonsContainer}>
-                {/* Subtitles */}
-              <TouchableOpacity 
-                style={[
-                  styles.controlButton,
-                  preferences?.subtitlesEnabled && styles.activeControlButton
-                ]} 
-                onPress={onSubtitlePress}
-                accessibilityLabel="Subtitles"
-              >
-                <View style={styles.iconWrapper}>
-                  <Ionicons 
-                    name="chatbubble" 
-                    size={24} 
-                    color={preferences?.subtitlesEnabled ? PLAYER_COLORS.PRIMARY : PLAYER_COLORS.TEXT_LIGHT} 
-                  />
-                </View>
-              </TouchableOpacity>
-              
-              {/* Playback Speed */}
-              <TouchableOpacity 
-                style={styles.controlButton} 
-                onPress={onSpeedPress}
-                accessibilityLabel="Speed"
-              >
-                <View style={styles.iconWrapper}>
-                  <Ionicons 
-                    name="speedometer" 
-                    size={24} 
-                    color={PLAYER_COLORS.TEXT_LIGHT} 
-                  />
-                </View>
-              </TouchableOpacity>
-              
-              {/* Fullscreen Toggle */}
-              <TouchableOpacity 
-                style={styles.controlButton} 
-                onPress={onToggleFullscreen}
-                accessibilityLabel="Fullscreen"
-              >
-                <View style={styles.iconWrapper}>
-                  <Ionicons 
-                    name="resize-outline" 
-                    size={24} 
-                    color={PLAYER_COLORS.TEXT_LIGHT} 
-                  />
-                </View>
-              </TouchableOpacity>
+              {/* Subtitles */}
+            <TouchableOpacity 
+              style={[
+                styles.controlButton,
+                preferences?.subtitlesEnabled && styles.activeControlButton
+              ]} 
+              onPress={onSubtitlePress}
+              accessibilityLabel="Subtitles"
+            >
+              <View style={styles.iconWrapper}>
+                <Ionicons 
+                  name="chatbubble" 
+                  size={24} 
+                  color={preferences?.subtitlesEnabled ? PLAYER_COLORS.PRIMARY : PLAYER_COLORS.TEXT_LIGHT} 
+                />
+              </View>
+            </TouchableOpacity>
+            
+            {/* Playback Speed */}
+            <TouchableOpacity 
+              style={styles.controlButton} 
+              onPress={onSpeedPress}
+              accessibilityLabel="Speed"
+            >
+              <View style={styles.iconWrapper}>
+                <Ionicons 
+                  name="speedometer" 
+                  size={24} 
+                  color={PLAYER_COLORS.TEXT_LIGHT} 
+                />
+              </View>
+            </TouchableOpacity>
+            
+            {/* Fullscreen Toggle */}
+            <TouchableOpacity 
+              style={styles.controlButton} 
+              onPress={onToggleFullscreen}
+              accessibilityLabel="Fullscreen"
+            >
+              <View style={styles.iconWrapper}>
+                <Ionicons 
+                  name="resize-outline" 
+                  size={24} 
+                  color={PLAYER_COLORS.TEXT_LIGHT} 
+                />
+              </View>
+            </TouchableOpacity>
 </View>
 
-          </View>
-        </Animated.View>
-      </View>
-    </TouchableWithoutFeedback>
+        </View>
+      </Animated.View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
+    backgroundColor: 'transparent',
     zIndex: 100,
+    pointerEvents: 'box-none', // Allow touch events to pass through to children only
   },
   hidden: {
     display: 'none',
@@ -361,26 +344,24 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 20,
-    paddingHorizontal: 20,
-    zIndex: 150,
+    height: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    backgroundColor: 'rgba(13, 27, 42, 0.6)', // Updated to blue with transparency
+    pointerEvents: 'auto', // Ensure this can receive touch events
+    zIndex: 200, // Higher z-index to ensure it's on top
   },
   topControlsInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    width: '100%',
   },
   topButton: {
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    elevation: 4,
-    zIndex: 160,
-  },
-  topRightButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    padding: 8,
   },
   titleContainer: {
     flex: 1,
@@ -389,53 +370,40 @@ const styles = StyleSheet.create({
   titleText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '500',
   },
   centerControls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
     position: 'absolute',
-    top: '50%',
+    top: '30%',
     left: 0,
     right: 0,
-    transform: [{ translateY: -25 }],
-    zIndex: 200,
+    bottom: '30%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'box-none', // Allow touch events to pass through to children only
   },
   playPauseButton: {
-    backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
-    borderRadius: PLAYER_UI.PLAY_BUTTON_SIZE / 2,
     width: PLAYER_UI.PLAY_BUTTON_SIZE,
     height: PLAYER_UI.PLAY_BUTTON_SIZE,
-    justifyContent: 'center',
+    borderRadius: PLAYER_UI.PLAY_BUTTON_SIZE / 2,
+    backgroundColor: 'rgba(13, 27, 42, 0.7)', // Updated to blue with transparency
     alignItems: 'center',
-    marginHorizontal: 30,
-    borderWidth: 1,
-    borderColor: `rgba(255, 102, 196, 0.5)`,
-    shadowColor: PLAYER_COLORS.PRIMARY,
-    shadowOffset: {
-      width: 0,
-      height: 0,
-    },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 8,
-    zIndex: 250,
+    justifyContent: 'center',
+    marginHorizontal: 40,
   },
   seekButton: {
     width: PLAYER_UI.SEEK_BUTTON_SIZE,
     height: PLAYER_UI.SEEK_BUTTON_SIZE,
-    backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
     borderRadius: PLAYER_UI.SEEK_BUTTON_SIZE / 2,
-    justifyContent: 'center',
+    backgroundColor: 'rgba(13, 27, 42, 0.7)', // Updated to blue with transparency
     alignItems: 'center',
-    elevation: 6,
-    zIndex: 220,
+    justifyContent: 'center',
   },
   seekButtonText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
     fontSize: 10,
-    marginTop: -5,
+    marginTop: 2,
   },
   bottomControls: {
     position: 'absolute',
@@ -444,48 +412,17 @@ const styles = StyleSheet.create({
     right: 0,
     paddingBottom: 20,
     paddingHorizontal: 20,
-    backgroundColor: PLAYER_COLORS.OVERLAY_BACKGROUND,
-    zIndex: 150,
+    backgroundColor: 'rgba(13, 27, 42, 0.6)', // Updated to blue with transparency
+    pointerEvents: 'auto', // Ensure this can receive touch events
+    zIndex: 200, // Higher z-index to ensure it's on top
   },
   progressBarContainer: {
     width: '100%',
-    marginBottom: 12,
-    position: 'relative',
-  },
-  seekableRangeContainer: {
-    position: 'absolute',
-    top: 18,
-    left: 0,
-    right: 0,
-    height: 4,
-    borderRadius: 2,
-    zIndex: 0,
-  },
-  seekableRange: {
-    height: '100%',
-    width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 2,
-  },
-  bufferProgressContainer: {
-    position: 'absolute',
-    top: 18,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: 'transparent',
-    borderRadius: 2,
-    zIndex: 1,
-  },
-  bufferProgress: {
-    height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    borderRadius: 2,
-  },
-  progressSlider: {
-    width: '100%',
     height: 40,
-    zIndex: 2,
+    justifyContent: 'center',
+  },
+  customSeekBar: {
+    width: '100%',
   },
   bottomRow: {
     flexDirection: 'row',
@@ -497,7 +434,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '500',
   },
   controlButtonsContainer: {
@@ -508,10 +445,10 @@ const styles = StyleSheet.create({
   controlButton: {
     padding: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(13, 27, 42, 0.7)', // Updated to blue with transparency
     marginHorizontal: 2,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(173, 216, 230, 0.3)', // Light blue border
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: {
@@ -523,54 +460,30 @@ const styles = StyleSheet.create({
     zIndex: 160,
   },
   activeControlButton: {
-    backgroundColor: `rgba(255, 102, 196, 0.3)`,
+    backgroundColor: 'rgba(52, 152, 219, 0.4)', // Blue active state
     borderWidth: 1,
     borderColor: PLAYER_COLORS.PRIMARY,
   },
-  subtitleIcon: {
-    // Additional styling for subtitle icon if needed
-  },
-  // Legacy styles for compatibility
-  timeControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  slider: {
-    flex: 1,
-    height: 40,
-    marginHorizontal: 10,
-  },
-  bottomButtonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-  },
-  iconButton: {
-    padding: 10,
-  },
   skipIntroContainer: {
     position: 'absolute',
-    top: '30%',
+    bottom: 100,
     right: 20,
-    zIndex: 180,
+    zIndex: 150,
   },
   skipIntroButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `rgba(255, 102, 196, 0.8)`,
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(13, 27, 42, 0.8)', // Updated to blue with transparency
     paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: PLAYER_COLORS.PRIMARY,
   },
   skipIntroText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
+    fontSize: 14,
     marginRight: 4,
-    fontWeight: 'bold',
-  },
-  activeIconButton: {
-    backgroundColor: 'rgba(255, 107, 0, 0.3)',
-    borderRadius: 20,
   },
   iconWrapper: {
     justifyContent: 'center',

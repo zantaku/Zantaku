@@ -4,6 +4,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import type { Subtitle } from '../types';
 import { BlurView } from 'expo-blur';
 import Slider from '@react-native-community/slider';
+import { PLAYER_COLORS, MODAL_STYLES } from '../constants';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -579,61 +580,75 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
 const styles = StyleSheet.create({
   settingsModal: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(13, 27, 42, 0.7)',
     zIndex: 1000,
   },
   settingsContainer: {
     width: '90%',
     maxWidth: 500,
     maxHeight: '80%',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'rgba(13, 27, 42, 0.95)',
     borderRadius: 12,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 230, 0.2)',
   },
   settingsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(173, 216, 230, 0.2)',
   },
   settingsTitle: {
-    color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+    color: 'white',
   },
   closeButton: {
-    padding: 8,
+    padding: 5,
   },
   settingsScrollView: {
-    maxHeight: '90%',
+    maxHeight: '80%',
   },
   settingsContent: {
-    paddingBottom: 24,
+    paddingBottom: 20,
   },
   settingSection: {
-    marginTop: 16,
-    paddingHorizontal: 16,
+    marginTop: 15,
+    paddingHorizontal: 20,
   },
   settingSectionTitle: {
-    color: '#FF6B00',
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 12,
+    color: 'white',
+    marginBottom: 10,
   },
   settingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 15,
   },
   settingLabel: {
+    fontSize: 14,
     color: 'white',
-    fontSize: 16,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkboxContainer: {
+    marginLeft: 10,
   },
   speedOptions: {
     flexDirection: 'row',
@@ -641,14 +656,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   speedOption: {
-    padding: 8,
-    borderRadius: 4,
-    backgroundColor: '#333',
-    marginLeft: 8,
-    marginBottom: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    marginLeft: 5,
+    backgroundColor: 'rgba(173, 216, 230, 0.2)',
   },
   speedOptionSelected: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
   },
   speedOptionText: {
     color: 'white',
@@ -657,26 +672,50 @@ const styles = StyleSheet.create({
   speedOptionTextSelected: {
     fontWeight: 'bold',
   },
+  languageOptionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  languageOption: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    marginLeft: 5,
+    marginBottom: 5,
+    backgroundColor: 'rgba(173, 216, 230, 0.2)',
+  },
+  languageOptionSelected: {
+    backgroundColor: PLAYER_COLORS.PRIMARY,
+  },
+  languageOptionText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  languageTextSelected: {
+    fontWeight: 'bold',
+  },
   audioTrackOptions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
   },
   audioTrackOption: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-    backgroundColor: '#333',
-    marginLeft: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    marginLeft: 5,
+    backgroundColor: 'rgba(173, 216, 230, 0.2)',
   },
   audioTrackOptionSelected: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
   },
   audioTrackContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   audioTrackIcon: {
-    marginRight: 4,
+    marginRight: 5,
+    fontSize: 14,
   },
   audioTrackText: {
     color: 'white',
@@ -686,37 +725,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   audioTrackNote: {
-    marginTop: 8,
-    padding: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
+    marginTop: 5,
+    marginBottom: 10,
   },
   audioTrackNoteText: {
-    color: '#CCC',
+    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 12,
-  },
-  languageOptionsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    maxWidth: '60%',
-  },
-  languageOption: {
-    padding: 8,
-    borderRadius: 4,
-    backgroundColor: '#333',
-    marginLeft: 8,
-    marginBottom: 8,
-  },
-  languageOptionSelected: {
-    backgroundColor: '#FF6B00',
-  },
-  languageOptionText: {
-    color: 'white',
-    fontSize: 14,
-  },
-  languageTextSelected: {
-    fontWeight: 'bold',
+    fontStyle: 'italic',
   },
   subtitlePreviewContainer: {
     width: '100%',
@@ -792,18 +807,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     marginLeft: 4,
-  },
-  checkboxContainer: {
-    padding: 4,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  checkboxLabel: {
-    color: 'white',
-    fontSize: 16,
-    marginLeft: 8,
   },
   settingControl: {
     flexDirection: 'row',

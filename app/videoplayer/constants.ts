@@ -29,15 +29,15 @@ export const M3U8_DOMAINS = {
 
 // Constants for player UI
 export const PLAYER_COLORS = {
-  PRIMARY: '#FF66C4', // Zantaku theme color
-  SECONDARY: '#0F3460',
-  BACKGROUND_DARK: '#1A1A2E',
-  TEXT_LIGHT: '#FFFFFF',
-  TEXT_SECONDARY: 'rgba(255, 255, 255, 0.7)',
-  OVERLAY_BACKGROUND: 'rgba(0, 0, 0, 0.5)',
-  SLIDER_TRACK: 'rgba(255, 255, 255, 0.3)',
-  GRADIENT_START: '#1A1A2E',
-  GRADIENT_END: '#0F3460',
+  PRIMARY: '#3498db', // Main blue accent color
+  SECONDARY: '#2980b9', // Darker blue for secondary elements
+  BACKGROUND_DARK: '#0d1b2a', // Dark blue background
+  TEXT_LIGHT: '#FFFFFF', // White text for readability
+  TEXT_SECONDARY: 'rgba(255, 255, 255, 0.8)', // Slightly higher opacity for better readability
+  OVERLAY_BACKGROUND: 'rgba(13, 27, 42, 0.7)', // Dark blue overlay with transparency
+  SLIDER_TRACK: 'rgba(173, 216, 230, 0.4)', // Light blue track for sliders
+  GRADIENT_START: '#0d1b2a', // Dark blue gradient start
+  GRADIENT_END: '#1b263b', // Slightly lighter blue gradient end
 };
 
 // Constants for player behavior
@@ -45,7 +45,7 @@ export const PLAYER_BEHAVIOR = {
   CONTROLS_HIDE_DELAY: 4000, // ms
   DOUBLE_TAP_SEEK_TIME: 10, // seconds to seek on double tap
   SKIP_INTRO_DURATION: 90, // default seconds to skip for OP/ED
-  SEEK_DEBOUNCE_MS: 300, // ms to debounce seek operations for HLS
+  SEEK_DEBOUNCE_MS: 50, // ms to debounce seek operations for HLS (optimized for responsiveness)
   SEEK_TOLERANCE_MS: 500, // ms tolerance for HLS seeking
 };
 

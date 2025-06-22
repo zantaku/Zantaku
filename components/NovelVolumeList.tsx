@@ -154,6 +154,14 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
     }
 
     if (isDownloaded) {
+      // Add haptic feedback for better UX
+      try {
+        const { Haptics } = require('expo-haptics');
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (error) {
+        // Haptics not available, continue without it
+      }
+      
       router.push(`/novelreader?novelId=${novelId}&volumeId=${volume.id}&title=${encodeURIComponent(mangaTitle.userPreferred)}&volumeTitle=${encodeURIComponent(volume.title)}&downloadUrl=${encodeURIComponent(downloadUrl)}`);
       return;
     }
@@ -407,33 +415,7 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
         </View>
       </View>
 
-      {/* Stats */}
-      <View style={styles.stats}>
-        <View style={styles.statItem}>
-          <Text style={[styles.statNumber, { color: currentTheme.colors.text }]}>
-            {volumes.length}
-          </Text>
-          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
-            Total
-          </Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={[styles.statNumber, { color: '#28A745' }]}>
-            {downloadedVolumes.size}
-          </Text>
-          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
-            Downloaded
-          </Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={[styles.statNumber, { color: '#FFA500' }]}>
-            {downloadingVolumes.size}
-          </Text>
-          <Text style={[styles.statLabel, { color: currentTheme.colors.textSecondary }]}>
-            Downloading
-          </Text>
-        </View>
-      </View>
+
     </View>
   );
 
@@ -671,23 +653,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  stats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  statLabel: {
-    fontSize: 12,
-    marginTop: 2,
-  },
+
   listContainer: {
     paddingBottom: 100,
   },

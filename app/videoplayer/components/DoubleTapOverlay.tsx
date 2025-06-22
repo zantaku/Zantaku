@@ -17,7 +17,7 @@ interface DoubleTapOverlayProps {
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DOUBLE_TAP_DELAY = 300; // ms
+const DOUBLE_TAP_DELAY = 250; // ms - reduced for better responsiveness
 
 const DoubleTapOverlay: React.FC<DoubleTapOverlayProps> = ({
   onSingleTap,

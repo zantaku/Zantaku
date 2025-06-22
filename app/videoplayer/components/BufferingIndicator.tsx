@@ -129,15 +129,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(13, 27, 42, 0.4)',
     zIndex: 1000,
   },
   indicatorContainer: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(13, 27, 42, 0.85)',
     borderRadius: 12,
     padding: 20,
     minWidth: 120,
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 230, 0.3)',
   },
   spinner: {
     marginBottom: 12,
@@ -160,7 +162,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   seekingSubtext: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: PLAYER_COLORS.TEXT_SECONDARY,
     fontSize: 12,
     fontWeight: '400',
     marginBottom: 8,
@@ -169,7 +171,7 @@ const styles = StyleSheet.create({
   seekingBar: {
     width: '100%',
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(173, 216, 230, 0.3)',
     borderRadius: 2,
     overflow: 'hidden',
   },

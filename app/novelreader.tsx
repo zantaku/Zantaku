@@ -174,25 +174,89 @@ interface ManifestItem {
   mediaType: string;
 }
 
-const getStoragePath = (novelId: string, volumeId: string, type: 'root' | 'epub' | 'images' = 'root') => {
+interface CachedVolumeMetadata {
+  novelId: string;
+  volumeId: string;
+  title: string;
+  downloadUrl: string;
+  extractedAt: number;
+  imageMap: Record<string, string>;
+  chapters: Chapter[];
+  toc: TableOfContents[];
+  totalImages: number;
+}
+
+const getStoragePath = (novelId: string, volumeId: string, type: 'root' | 'epub' | 'images' | 'metadata' = 'root') => {
   const isExpoGo = Constants.default.appOwnership === 'expo';
   
-  // Base directory changes based on environment
+  // Use documentDirectory for persistent storage (not cache which can be cleared)
   const baseDir = isExpoGo
-    ? FileSystem.cacheDirectory // Use cache directory for Expo Go
+    ? FileSystem.documentDirectory // Use document directory for Expo Go for persistence
     : Platform.OS === 'android'
       ? FileSystem.documentDirectory // Use document directory for standalone Android
-      : FileSystem.cacheDirectory; // Use cache directory for iOS
+      : FileSystem.documentDirectory; // Use document directory for iOS for persistence
   
   const novelDir = `${baseDir}novels/${novelId}_${volumeId}/`;
   
   switch (type) {
     case 'epub':
-      return `${baseDir}novels/${novelId}_${volumeId}.epub`;
+      return `${novelDir}volume.epub`;
     case 'images':
       return `${novelDir}images/`;
+    case 'metadata':
+      return `${novelDir}metadata.json`;
     default:
       return novelDir;
+  }
+};
+
+// Check if volume is already cached and up to date
+const checkCachedVolume = async (novelId: string, volumeId: string): Promise<CachedVolumeMetadata | null> => {
+  try {
+    const metadataPath = getStoragePath(novelId, volumeId, 'metadata');
+    const metadataInfo = await FileSystem.getInfoAsync(metadataPath);
+    
+    if (!metadataInfo.exists) {
+      console.log('📁 No cached metadata found');
+      return null;
+    }
+    
+    const metadataContent = await FileSystem.readAsStringAsync(metadataPath);
+    const metadata: CachedVolumeMetadata = JSON.parse(metadataContent);
+    
+    // Check if images directory exists and has the expected number of images
+    const imagesDir = getStoragePath(novelId, volumeId, 'images');
+    const imagesDirInfo = await FileSystem.getInfoAsync(imagesDir);
+    
+    if (!imagesDirInfo.exists) {
+      console.log('📁 Images directory missing, cache invalid');
+      return null;
+    }
+    
+    // Verify some images exist
+    const imageFiles = await FileSystem.readDirectoryAsync(imagesDir);
+    if (imageFiles.length !== metadata.totalImages) {
+      console.log(`📁 Image count mismatch: expected ${metadata.totalImages}, found ${imageFiles.length}`);
+      return null;
+    }
+    
+    console.log(`📁 ✅ Found valid cache with ${metadata.chapters.length} chapters and ${metadata.totalImages} images`);
+    return metadata;
+    
+  } catch (error) {
+    console.log('📁 Error checking cached volume:', error);
+    return null;
+  }
+};
+
+// Save volume metadata to cache
+const saveCachedVolume = async (metadata: CachedVolumeMetadata): Promise<void> => {
+  try {
+    const metadataPath = getStoragePath(metadata.novelId, metadata.volumeId, 'metadata');
+    await FileSystem.writeAsStringAsync(metadataPath, JSON.stringify(metadata, null, 2));
+    console.log(`📁 💾 Saved volume metadata with ${metadata.chapters.length} chapters and ${metadata.totalImages} images`);
+  } catch (error) {
+    console.error('📁 Error saving cached volume:', error);
   }
 };
 
@@ -310,11 +374,17 @@ const processChapterContent = (content: string, imageMap?: Map<string, string>) 
     const imgTag = imgMatch[0];
     let src = imgMatch[1];
     
-    console.log(`🖼️ Found image src: ${src}`);
+    // Normalize the src path - remove leading ../ and path components
+    src = src.replace(/^\.\.\//, '').replace(/^.*\//, '');
     
     const altMatch = imgTag.match(/alt="([^"]+)"/);
     const alt = altMatch ? altMatch[1] : '';
     images.push({ src, alt });
+  }
+  
+  // Debug: Log found images in this chapter
+  if (images.length > 0) {
+    console.log(`📸 Found ${images.length} images in chapter:`, images.map(img => img.src));
   }
 
   // For cover pages, we want to keep it simple - just the image
@@ -423,7 +493,7 @@ const processEpub = async (
   epubData: string,
   novelId: string,
   volumeId: string
-): Promise<{ chapters: Chapter[], toc: TableOfContents[], imageMap: Map<string, string> }> => {
+): Promise<{ chapters: Chapter[], toc: TableOfContents[], imageMap: Map<string, string>, metadata: CachedVolumeMetadata }> => {
   try {
     // Convert base64 to ArrayBuffer
     const byteCharacters = atob(epubData);
@@ -489,9 +559,11 @@ const processEpub = async (
       }
     }
 
-    // Extract and save images
+    // Extract and save images with comprehensive mapping
     const imageMap = new Map<string, string>();
     let totalImages = 0;
+    const savedImagePaths = new Set<string>(); // Track all saved image paths for validation
+    
     for (const [id, item] of manifestItems.entries()) {
       if (item.mediaType.startsWith('image/')) {
         totalImages++;
@@ -501,33 +573,59 @@ const processEpub = async (
           const imageData = await imageFile.async('base64');
           
           try {
-            // Get extension from media type or item href
-            let extension = 'jpg'; // default
-            if (item.mediaType.includes('png')) extension = 'png';
-            else if (item.mediaType.includes('jpeg') || item.mediaType.includes('jpg')) extension = 'jpg';
-            else if (item.mediaType.includes('gif')) extension = 'gif';
-            else if (item.mediaType.includes('webp')) extension = 'webp';
-            else {
-              // Fallback to href extension
-              const hrefExt = item.href.split('.').pop()?.toLowerCase();
-              if (hrefExt && ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(hrefExt)) {
-                extension = hrefExt;
-              }
+            // Get the original filename from href, preserving the original name when possible
+            let fileName = item.href.split('/').pop() || id;
+            
+            // Remove any double extensions and normalize
+            fileName = fileName.replace(/\.(png|jpg|jpeg|gif|webp)\.(png|jpg|jpeg|gif|webp)$/i, '.$2');
+            
+            // Ensure we have an extension
+            const hasExtension = /\.(png|jpg|jpeg|gif|webp)$/i.test(fileName);
+            if (!hasExtension) {
+              // Get extension from media type or item href
+              let extension = 'jpg'; // default
+              if (item.mediaType.includes('png')) extension = 'png';
+              else if (item.mediaType.includes('jpeg') || item.mediaType.includes('jpg')) extension = 'jpg';
+              else if (item.mediaType.includes('gif')) extension = 'gif';
+              else if (item.mediaType.includes('webp')) extension = 'webp';
+              fileName = `${fileName}.${extension}`;
             }
             
-            const localImagePath = `${imageDir}${id}.${extension}`;
+            // Normalize jpeg to jpg for consistency
+            fileName = fileName.replace(/\.jpeg$/i, '.jpg');
+            
+            const localImagePath = `${imageDir}${fileName}`;
             
             await FileSystem.writeAsStringAsync(localImagePath, imageData, {
               encoding: FileSystem.EncodingType.Base64
             });
             
-            // On Android, we need to use the full file:// URI
-            const fullPath = Platform.OS === 'android' 
-              ? `file://${localImagePath}`
-              : `file://${localImagePath}`;
+            // Store multiple mappings for this image to handle different reference patterns
+            const fullPath = localImagePath;
             
+            // Map the original href
             imageMap.set(item.href, fullPath);
-            console.log(`📸 Saved image: ${item.href} -> ${fullPath}`);
+            
+            // Map just the filename (for references like "image1.png")
+            imageMap.set(fileName, fullPath);
+            
+            // Map the id (for references that use the manifest id)
+            imageMap.set(id, fullPath);
+            
+            // Map without path components (for references like "../Images/image1.png" -> "image1.png")
+            const baseFileName = fileName.replace(/^.*[\/\\]/, '');
+            imageMap.set(baseFileName, fullPath);
+            
+            savedImagePaths.add(fullPath);
+            
+            console.log(`🖼️ Saved image ${totalImages}:`, {
+              id,
+              href: item.href,
+              fileName,
+              localPath: localImagePath,
+              mediaType: item.mediaType,
+              mappings: [item.href, fileName, id, baseFileName]
+            });
             
             // Only log cover image specifically
             if (id === coverId) {
@@ -536,9 +634,13 @@ const processEpub = async (
           } catch (err) {
             console.error(`Failed to save image ${id}:`, err);
           }
+        } else {
+          console.warn(`Image file not found in EPUB: ${imagePath}`);
         }
       }
     }
+    
+    console.log(`📁 💾 Extracted ${totalImages} images with ${imageMap.size} path mappings`);
     
     // Parse spine order
     const spineItems: string[] = [];
@@ -625,19 +727,13 @@ const processEpub = async (
         let processedContent = content;
         for (const [originalSrc, localPath] of imageMap.entries()) {
           const escapedSrc = originalSrc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // Don't add file:// prefix if localPath already has it
+          const finalPath = localPath.startsWith('file://') ? localPath : `file://${localPath}`;
           processedContent = processedContent.replace(
             new RegExp(`src=["'](?:\\.\\./)?${escapedSrc}["']`, 'g'),
-            `src="${localPath}"`
+            `src="${finalPath}"`
           );
         }
-        
-        // Clean up any remaining double extension artifacts in the content
-        processedContent = processedContent.replace(
-          /(file:\/\/[^"']+\.(png|jpg|jpeg|gif|webp))\.\2/g,
-          '$1'
-        );
-        
-        console.log(`🔄 Replaced ${imageMap.size} image paths and cleaned double extensions`);
         
         // Get title from TOC if available, otherwise process content
         const tocTitle = tocTitleMap.get(href);
@@ -671,10 +767,24 @@ const processEpub = async (
       }
     }
     
+    // Save the processed data to cache
+    const metadata: CachedVolumeMetadata = {
+      novelId,
+      volumeId,
+      title: '', // Will be set by caller
+      downloadUrl: '', // Will be set by caller
+      extractedAt: Date.now(),
+      imageMap: Object.fromEntries(imageMap),
+      chapters,
+      toc,
+      totalImages
+    };
+
     return {
       chapters: chapters,
       toc,
-      imageMap
+      imageMap,
+      metadata
     };
     
   } catch (error) {
@@ -1119,21 +1229,25 @@ const ImageWithRetry = memo(({
       setHasError(false);
       // Force image refresh by adding timestamp
       setCurrentUri(`${uri}?retry=${retryCount + 1}`);
-      console.log(`🔄 Retrying image load (${retryCount + 1}/${maxRetries}):`, uri);
     }
   };
 
   const handleLoad = () => {
     setIsLoading(false);
     setHasError(false);
-    console.log('✅ Image loaded successfully:', uri);
   };
 
   const handleError = (error: any) => {
     setIsLoading(false);
     setHasError(true);
-    console.error('❌ Image loading error:', error.nativeEvent || error);
-    console.log('Failed image URI:', currentUri);
+    
+    // Debug: Log image loading errors for the first few attempts
+    if (retryCount === 0) {
+      console.log(`❌ Image load failed:`, {
+        uri: currentUri,
+        error: error.nativeEvent?.error || error.message || 'Unknown error'
+      });
+    }
     
     // Auto-retry if under limit
     if (retryCount < maxRetries) {
@@ -1223,15 +1337,14 @@ const ChapterContent = memo(({
   onTap?: (x: number) => void;
   onSwipe?: (direction: 'left' | 'right') => void;
 }) => {
-  const processedContent = processChapterContent(chapter.content, imageMap);
+  // Memoize the processed content to prevent re-processing on every render
+  const processedContent = React.useMemo(() => {
+    return processChapterContent(chapter.content, imageMap);
+  }, [chapter.content, imageMap]);
+  
   if (!processedContent) return null;
 
   const { title, paragraphs, images, isCoverPage } = processedContent;
-
-  // Reduce logging for performance
-  if (images.length > 0) {
-    console.log(`📸 Found ${images.length} images in chapter`);
-  }
 
   // Check if this is primarily an image page
   const isImagePage = images.length > 0 && paragraphs.length === 0;
@@ -1239,25 +1352,49 @@ const ChapterContent = memo(({
   const items: ParagraphItem[] = [
     // Only show title if it's not a title page, cover page, or image-only page
     ...(!isTitlePage && !isCoverPage && !isImagePage ? [{ id: 'title', type: 'title' as const, content: title }] : []),
-    ...images.map((img: { src: string; alt: string }, idx: number) => ({
-      id: `image-${idx}`,
-      type: 'image' as const,
-      content: '',
-      imageUri: img.src,
-      imageAlt: img.alt
-    })),
+    ...images.map((img: { src: string; alt: string }, idx: number) => {
+      // Normalize the image path to match what's in imageMap
+      let normalizedSrc = img.src;
+      
+      // Remove any leading path components and normalize
+      const filename = img.src.replace(/^.*[\\/]/, '').replace(/^\.\.\//, '');
+      
+             // Try to find the matching image in imageMap
+       let resolvedUri = img.src;
+       let found = false;
+       if (imageMap) {
+         for (const [key, value] of imageMap.entries()) {
+           const mapFilename = key.replace(/^.*[\\/]/, '');
+           if (mapFilename === filename || key === filename || key.includes(filename)) {
+             resolvedUri = value;
+             found = true;
+             break;
+           }
+         }
+         
+         if (!found) {
+           console.warn(`⚠️ Image not found in imageMap:`, {
+             originalSrc: img.src,
+             filename,
+             availableImages: Array.from(imageMap.keys())
+           });
+         }
+       }
+      
+      return {
+        id: `image-${idx}`,
+        type: 'image' as const,
+        content: '',
+        imageUri: resolvedUri,
+        imageAlt: img.alt
+      };
+    }),
     ...(!isTitlePage && !isCoverPage ? paragraphs.map((p: string, idx: number) => ({
       id: `p-${idx}`,
       type: 'text' as const,
       content: p.trim()
     })) : [])
   ];
-
-  console.log('📋 Chapter items created:', items.length, 'items');
-  console.log('📋 Item types:', items.map(item => `${item.type}(${item.id})`));
-  if (images.length > 0) {
-    console.log('📋 Image URIs:', images.map(img => img.src));
-  }
 
   const renderItem = ({ item }: { item: ParagraphItem }) => {
     switch (item.type) {
@@ -1276,19 +1413,8 @@ const ChapterContent = memo(({
         );
       case 'image':
         if (!item.imageUri) {
-          console.log('❌ No image URI found for image item');
           return null;
         }
-        
-        // Clean up double extensions in the URI
-        let cleanUri = item.imageUri;
-        const doubleExtMatch = cleanUri.match(/(file:\/\/[^"']+\.(png|jpg|jpeg|gif|webp))\.\2/);
-        if (doubleExtMatch) {
-          cleanUri = doubleExtMatch[1];
-          console.log('🧹 Cleaned double extension:', item.imageUri, '->', cleanUri);
-        }
-        
-        console.log('🖼️ Rendering image with URI:', cleanUri);
         
         // Check if this is an image-only page (no text content or only title)
         const textItems = items.filter(i => i.type === 'text');
@@ -1296,7 +1422,10 @@ const ChapterContent = memo(({
         const isImageOnlyPage = items.length === 1 || hasOnlyTitle || textItems.length === 0;
         const isFullScreen = isTitlePage || isCoverPage || isImageOnlyPage;
         
-        console.log('🖼️ Image display mode:', { isImageOnlyPage, isFullScreen, isTitlePage, isCoverPage });
+        // Only log the first few images to avoid spam
+        if (item.id === 'image-0') {
+          console.log(`🖼️ Rendering images in chapter`);
+        }
         
         return (
           <TouchableWithoutFeedback
@@ -1311,7 +1440,7 @@ const ChapterContent = memo(({
               isFullScreen && styles.fullScreenImageContainer
             ]}>
               <ImageWithRetry
-                uri={cleanUri}
+                uri={item.imageUri}
                 style={[
                   styles.chapterImage,
                   isFullScreen ? styles.fullScreenImage : undefined
@@ -1386,12 +1515,25 @@ const ChapterContent = memo(({
     </ScrollView>
     </View>
   );
+}, (prevProps, nextProps) => {
+  // Custom comparison function to prevent unnecessary re-renders
+  return (
+    prevProps.chapter.id === nextProps.chapter.id &&
+    prevProps.fontSize === nextProps.fontSize &&
+    prevProps.lineHeight === nextProps.lineHeight &&
+    prevProps.currentFont === nextProps.currentFont &&
+    prevProps.paragraphSpacing === nextProps.paragraphSpacing &&
+    prevProps.textAlign === nextProps.textAlign &&
+    prevProps.horizontalPadding === nextProps.horizontalPadding &&
+    prevProps.colors === nextProps.colors
+  );
 });
 
 export default function NovelReader() {
   const router = useRouter();
   const { novelId, volumeId, downloadUrl, title, volumeTitle } = useLocalSearchParams<NovelReaderParams>();
   const [loading, setLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState('Loading...');
   const [error, setError] = useState<string | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState(0);
@@ -1541,7 +1683,6 @@ export default function NovelReader() {
   };
 
   useEffect(() => {
-    console.log('Novel Reader Params:', { novelId, volumeId, downloadUrl, title });
     if (!downloadUrl) {
       setError('No download URL provided');
       setLoading(false);
@@ -1551,6 +1692,26 @@ export default function NovelReader() {
     const downloadAndExtractEpub = async () => {
       try {
         setLoading(true);
+        setLoadingMessage('Checking cache...');
+        
+        // Check if we have a valid cached version first
+        const cachedData = await checkCachedVolume(novelId || 'unknown', volumeId || 'unknown');
+        if (cachedData) {
+          console.log('📁 ✅ Loading from cache');
+          setLoadingMessage('Loading from cache...');
+          
+          // Convert imageMap back to Map
+          const imageMapFromCache = new Map(Object.entries(cachedData.imageMap));
+          
+          setChapters(cachedData.chapters);
+          setImageMap(imageMapFromCache);
+          setLoadingMessage('Ready to read!');
+          setLoading(false);
+          return;
+        }
+
+        console.log('📁 No valid cache found, processing...');
+        setLoadingMessage('Preparing download...');
         const fileUri = getStoragePath(novelId || 'unknown', volumeId || 'unknown', 'epub');
         const imageDir = getStoragePath(novelId || 'unknown', volumeId || 'unknown', 'images');
         const novelDir = getStoragePath(novelId || 'unknown', volumeId || 'unknown');
@@ -1584,16 +1745,26 @@ export default function NovelReader() {
             // Check if any files have double extensions (indicates corrupted cache)
             const hasDoubleExtensions = imageFiles.some(file => 
               file.includes('.png.png') || file.includes('.jpg.jpg') || 
-              file.includes('.jpeg.jpg') || file.includes('.gif.gif')
+              file.includes('.jpeg.jpg') || file.includes('.gif.gif') || file.includes('.webp.webp')
             );
             if (hasDoubleExtensions) {
-              console.log('🧹 Detected corrupted cache with double extensions, clearing...');
+              console.log('🧹 Clearing corrupted cache with double extensions...');
               await FileSystem.deleteAsync(novelDir, { idempotent: true });
               needsReprocessing = true;
-              console.log('🧹 Cleared corrupted cache directory');
             }
           } catch (err) {
             console.log('Could not check image directory:', err);
+          }
+        }
+        
+        // For this specific volume, force reprocessing to fix the double extension issue
+        if (volumeId === '15rowF9ZVQLnmKaFhA0wxno4XuRmUEiaR') {
+          console.log('🔧 Force clearing cache for this volume to fix double extension bug...');
+          try {
+            await FileSystem.deleteAsync(novelDir, { idempotent: true });
+            needsReprocessing = true;
+          } catch (err) {
+            console.log('Could not clear cache:', err);
           }
         }
         
@@ -1601,13 +1772,11 @@ export default function NovelReader() {
         await FileSystem.makeDirectoryAsync(novelsDir, { intermediates: true });
         await FileSystem.makeDirectoryAsync(novelDir, { intermediates: true });
         await FileSystem.makeDirectoryAsync(imageDir, { intermediates: true });
-        console.log('📁 Ensured all directories exist');
 
         // Download the file if it doesn't exist or needs reprocessing
         const fileInfo = await FileSystem.getInfoAsync(fileUri);
         if (!fileInfo.exists || needsReprocessing) {
-          console.log('📥 Starting EPUB download from:', decodeURIComponent(downloadUrl));
-          
+          setLoadingMessage('Downloading EPUB file...');
           // Handle Google Drive URLs better
           let processedUrl = decodeURIComponent(downloadUrl);
           if (processedUrl.includes('drive.google.com')) {
@@ -1615,7 +1784,6 @@ export default function NovelReader() {
             const fileIdMatch = processedUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
             if (fileIdMatch) {
               processedUrl = `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}&confirm=t`;
-              console.log('🔗 Converted Google Drive URL:', processedUrl);
             }
           }
           
@@ -1624,55 +1792,47 @@ export default function NovelReader() {
           let attempts = 0;
           const maxAttempts = 3;
           
-          while (!downloadSuccess && attempts < maxAttempts) {
-            attempts++;
-            console.log(`📥 Download attempt ${attempts}/${maxAttempts}`);
-            
-            try {
-              const downloadResumable = FileSystem.createDownloadResumable(
-                processedUrl,
-                fileUri,
-                {
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                      while (!downloadSuccess && attempts < maxAttempts) {
+              attempts++;
+              
+              try {
+                const downloadResumable = FileSystem.createDownloadResumable(
+                  processedUrl,
+                  fileUri,
+                  {
+                    headers: {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
                   }
-                },
-                (downloadProgress) => {
-                  const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
-                  console.log(`📥 Download progress: ${(progress * 100).toFixed(2)}%`);
-                }
-              );
+                );
 
-              const result = await downloadResumable.downloadAsync();
-              if (result) {
-                downloadSuccess = true;
-                console.log('✅ Download completed successfully');
-              } else {
-                throw new Error(`Download attempt ${attempts} failed`);
-              }
-            } catch (downloadError: unknown) {
-              const errorMessage = downloadError instanceof Error ? downloadError.message : String(downloadError);
-              console.error(`❌ Download attempt ${attempts} failed:`, errorMessage);
-              
-              // If it's a Google Drive file and we haven't tried the alternative URL
-              if (attempts === 1 && processedUrl.includes('drive.google.com')) {
-                const fileIdMatch = processedUrl.match(/id=([a-zA-Z0-9-_]+)/);
-                if (fileIdMatch) {
-                  // Try alternative Google Drive download URL
-                  processedUrl = `https://drive.usercontent.google.com/download?id=${fileIdMatch[1]}&export=download&authuser=0&confirm=t`;
-                  console.log('🔄 Trying alternative Google Drive URL:', processedUrl);
-                  continue;
+                const result = await downloadResumable.downloadAsync();
+                if (result) {
+                  downloadSuccess = true;
+                } else {
+                  throw new Error(`Download attempt ${attempts} failed`);
                 }
+              } catch (downloadError: unknown) {
+                const errorMessage = downloadError instanceof Error ? downloadError.message : String(downloadError);
+                
+                // If it's a Google Drive file and we haven't tried the alternative URL
+                if (attempts === 1 && processedUrl.includes('drive.google.com')) {
+                  const fileIdMatch = processedUrl.match(/id=([a-zA-Z0-9-_]+)/);
+                  if (fileIdMatch) {
+                    // Try alternative Google Drive download URL
+                    processedUrl = `https://drive.usercontent.google.com/download?id=${fileIdMatch[1]}&export=download&authuser=0&confirm=t`;
+                    continue;
+                  }
+                }
+                
+                if (attempts === maxAttempts) {
+                  throw new Error(`Download failed after ${maxAttempts} attempts: ${errorMessage}`);
+                }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
               }
-              
-              if (attempts === maxAttempts) {
-                throw new Error(`Download failed after ${maxAttempts} attempts: ${errorMessage}`);
-              }
-              
-              // Wait before retry
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
             }
-          }
           
           // Verify the downloaded file is valid
           const downloadedFileInfo = await FileSystem.getInfoAsync(fileUri);
@@ -1682,15 +1842,39 @@ export default function NovelReader() {
         }
 
         // Read the epub file
-        console.log('📖 Reading EPUB file...');
+        setLoadingMessage('Processing EPUB content...');
         const epubData = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
         
         // Process EPUB using epubjs
-        const { chapters: processedChapters, toc, imageMap: extractedImageMap } = await processEpub(epubData, novelId || 'unknown', volumeId || 'unknown');
-        console.log(`📚 Processed ${processedChapters.length} chapters with ${extractedImageMap.size} images`);
+        setLoadingMessage('Extracting chapters and images...');
+        const { chapters: processedChapters, toc, imageMap: extractedImageMap, metadata } = await processEpub(epubData, novelId || 'unknown', volumeId || 'unknown');
+
+        // Update metadata with additional info and save to cache
+        metadata.title = title || 'Unknown Title';
+        metadata.downloadUrl = downloadUrl || '';
+        await saveCachedVolume(metadata);
 
         setChapters(processedChapters);
         setImageMap(extractedImageMap);
+        setLoadingMessage('Ready to read!');
+        
+        // Debug: Check if image files actually exist and log imageMap contents
+        if (extractedImageMap.size > 0) {
+          console.log(`🗺️ ImageMap contents (${extractedImageMap.size} images):`, Array.from(extractedImageMap.entries()));
+          
+          const firstImage = Array.from(extractedImageMap.values())[0];
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(firstImage);
+            console.log(`🔍 First image file check:`, {
+              path: firstImage,
+              exists: fileInfo.exists,
+              size: fileInfo.exists ? (fileInfo as any).size : 'N/A',
+              uri: fileInfo.uri
+            });
+          } catch (error) {
+            console.log(`🔍 Error checking first image:`, error);
+          }
+        }
 
       } catch (err) {
         console.error('Error processing epub:', err);
@@ -2010,7 +2194,7 @@ export default function NovelReader() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#02A9FF" />
-        <Text style={[styles.loadingText, { color: colors.text }]}>Loading epub...</Text>
+        <Text style={[styles.loadingText, { color: colors.text }]}>{loadingMessage}</Text>
       </View>
     );
   }
@@ -2459,22 +2643,14 @@ export default function NovelReader() {
                   {chapters
                     .map((item, index) => ({ item, originalIndex: index }))
                     .filter(({ item }) => {
-                      try {
-                        // Filter out image-only pages with HTML DOCTYPE titles
-                        const processedContent = processChapterContent(item.content, imageMap);
-                        const hasImages = processedContent?.images && processedContent.images.length > 0;
-                        const hasText = processedContent?.paragraphs && processedContent.paragraphs.length > 0;
-                        const hasHTMLTitle = item.title.includes('DOCTYPE') || 
-                                           item.title.includes('W3C//DTD') || 
-                                           item.title.includes('XHTML') ||
-                                           item.title.includes('<?xml');
-                        
-                        // Hide if it's an image-only page with HTML title or if it has HTML artifacts in title
-                        return !(hasImages && !hasText && hasHTMLTitle) && !hasHTMLTitle;
-                      } catch (error) {
-                        // If processing fails, show the chapter anyway
-                        return true;
-                      }
+                      // Simple filter without re-processing content
+                      const hasHTMLTitle = item.title.includes('DOCTYPE') || 
+                                         item.title.includes('W3C//DTD') || 
+                                         item.title.includes('XHTML') ||
+                                         item.title.includes('<?xml');
+                      
+                      // Hide if it has HTML artifacts in title
+                      return !hasHTMLTitle;
                     })
                     .map(({ item, originalIndex }) => {
                       const isBookmarked = bookmarks.some(b => b.chapter === originalIndex);

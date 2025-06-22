@@ -9,6 +9,7 @@ interface SaveProgressModalProps {
   onCancel: () => void;
   onSave: (rememberChoice: boolean) => void;
   onSaveToAniList?: (rememberChoice: boolean) => void;
+  onExitWithoutSaving?: () => void;
   animeName?: string;
   episodeNumber?: string | number;
   currentTime?: number;
@@ -28,6 +29,7 @@ export default function SaveProgressModal({
   onCancel,
   onSave,
   onSaveToAniList,
+  onExitWithoutSaving,
   animeName,
   episodeNumber,
   currentTime,
@@ -133,8 +135,15 @@ export default function SaveProgressModal({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.buttonRow}>
-          <TouchableOpacity onPress={onCancel} style={styles.noBtn}>
+        <View style={styles.threeButtonRow}>
+          <TouchableOpacity onPress={onCancel} style={styles.cancelBtnSmall}>
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={onExitWithoutSaving || onCancel} 
+            style={styles.noBtn}
+          >
             <Text style={styles.noBtnText}>No</Text>
           </TouchableOpacity>
           
@@ -169,10 +178,12 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '80%',
-    backgroundColor: 'rgba(30, 30, 30, 0.9)',
+    backgroundColor: 'rgba(13, 27, 42, 0.9)',
     borderRadius: 12,
     padding: 20,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 230, 0.2)',
   },
   title: {
     fontSize: 18,
@@ -208,7 +219,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   toggleTrackActive: {
-    backgroundColor: '#02A9FF',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
   },
   toggleThumb: {
     width: 20,
@@ -224,7 +235,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
   },
-  buttonRow: {
+  threeButtonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
@@ -233,13 +244,27 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 16,
   },
+  cancelBtnSmall: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginRight: 4,
+    alignItems: 'center',
+  },
+  cancelBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   noBtn: {
     flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    marginRight: 8,
+    backgroundColor: 'rgba(255, 100, 100, 0.8)',
+    marginHorizontal: 4,
     alignItems: 'center',
   },
   noBtnText: {
@@ -249,11 +274,11 @@ const styles = StyleSheet.create({
   },
   yesBtn: {
     flex: 1,
-    backgroundColor: '#02A9FF',
     paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 8,
-    marginLeft: 8,
+    backgroundColor: PLAYER_COLORS.PRIMARY,
+    marginLeft: 4,
     alignItems: 'center',
   },
   yesBtnText: {
@@ -262,12 +287,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   saveBtn: {
-    backgroundColor: '#02A9FF',
+    width: '100%',
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 8,
-    marginBottom: 10,
-    width: '100%',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
+    marginBottom: 8,
     alignItems: 'center',
   },
   saveBtnText: {
@@ -276,29 +301,23 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   anilistBtn: {
-    backgroundColor: '#02A9FF',
+    width: '100%',
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 8,
-    marginBottom: 10,
-    width: '100%',
+    backgroundColor: PLAYER_COLORS.SECONDARY,
+    marginBottom: 8,
     alignItems: 'center',
   },
   cancelBtn: {
+    width: '100%',
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    marginTop: 6,
     alignItems: 'center',
-    width: '50%',
-  },
-  cancelBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
 }); 

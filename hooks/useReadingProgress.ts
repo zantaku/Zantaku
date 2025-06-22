@@ -20,6 +20,14 @@ export const useReadingProgress = () => {
   const [readingProgress, setReadingProgress] = useState(0);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [hasUpdatedProgress, setHasUpdatedProgress] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  // Update scroll progress directly (for continuous scrolling)
+  const updateScrollProgress = useCallback((progress: number) => {
+    setScrollProgress(progress);
+    // Also update reading progress to match scroll progress
+    setReadingProgress(progress);
+  }, []);
 
   const updateProgress = useCallback((pageIndex: number, totalPages: number) => {
     // Only update if the page index actually changed
@@ -183,7 +191,9 @@ export const useReadingProgress = () => {
     readingProgress,
     currentPageIndex,
     hasUpdatedProgress,
+    scrollProgress,
     updateProgress,
+    updateScrollProgress,
     saveProgress,
     setHasUpdatedProgress,
   };

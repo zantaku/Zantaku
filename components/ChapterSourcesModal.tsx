@@ -109,6 +109,106 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<PageWithHeaders[]>([]);
 
+  // Direct API fallback when no ChapterManager is available
+  const fetchChapterPagesDirectly = useCallback(async (selectedChapter: Chapter) => {
+    logDebug("=== USING DIRECT API FALLBACK ===");
+    logDebug("Selected chapter:", selectedChapter);
+    logDebug("Current provider:", currentProvider);
+    logDebug("Manga slug ID:", mangaSlugId);
+    
+    // Construct proper chapter ID: {mangaId}/chapter-{chapterNumber}
+    const chapterNumber = selectedChapter.number;
+    const properChapterId = mangaSlugId ? `${mangaSlugId}/chapter-${chapterNumber}` : selectedChapter.id;
+    
+    logDebug("Constructed chapter ID:", properChapterId);
+    
+    let imageUrls: PageWithHeaders[] = [];
+    
+    try {
+      if (currentProvider === 'mangafire') {
+        const apiUrl = `${KATANA_API_URL}/api/manga/${mangaSlugId}/chapter-${chapterNumber}`;
+        console.log('🔥 MANGAFIRE API REQUEST:', {
+          url: apiUrl,
+          chapterId: properChapterId,
+          mangaSlugId: mangaSlugId,
+          chapterNumber: chapterNumber,
+          originalChapterId: selectedChapter.id
+        });
+        
+        const response = await fetch(apiUrl);
+        console.log('🔥 MANGAFIRE API RESPONSE:', {
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url,
+          ok: response.ok
+        });
+        
+        const data = await response.json();
+        console.log('🔥 MANGAFIRE API DATA:', data);
+        
+        if (data?.error) {
+          const errorMessage = `${data.error}. ${data.message || ''}`;
+          console.error('🔥 MANGAFIRE API ERROR:', errorMessage);
+          throw new Error(errorMessage);
+        }
+        
+        if (data?.pages && Array.isArray(data.pages)) {
+          imageUrls = data.pages.map((page: any) => ({
+            url: page.url,
+            headers: page.headers || { 'Referer': 'https://mangafire.to' }
+          }));
+          logDebug(`Successfully processed ${imageUrls.length} pages from MangaFire API.`);
+        } else {
+          console.error('🔥 MANGAFIRE INVALID RESPONSE FORMAT:', data);
+          throw new Error("Invalid MangaFire API response format.");
+        }
+      } else {
+        // Fallback to MangaProviderService for other providers
+        console.log('🔧 USING MANGA PROVIDER SERVICE:', {
+          provider: currentProvider,
+          chapterId: properChapterId,
+          mangaSlugId: mangaSlugId,
+          chapterNumber: chapterNumber
+        });
+        
+        try {
+          imageUrls = await MangaProviderService.getChapterPages(properChapterId, currentProvider as any);
+          console.log('🔧 MANGA PROVIDER SERVICE SUCCESS:', `${imageUrls.length} pages`);
+        } catch (providerError) {
+          console.error('🔧 MANGA PROVIDER SERVICE ERROR:', {
+            error: providerError,
+            chapterId: properChapterId,
+            provider: currentProvider
+          });
+          throw providerError;
+        }
+      }
+      
+      if (imageUrls.length === 0) {
+        throw new Error("No pages found for this chapter.");
+      }
+      
+      logDebug(`Setting pages state with ${imageUrls.length} images`);
+      setPages(imageUrls);
+      
+    } catch (err: any) {
+      console.error('💥 DIRECT API CALL COMPLETE ERROR:', {
+        error: err,
+        message: err.message,
+        stack: err.stack,
+        properChapterId: properChapterId,
+        mangaSlugId: mangaSlugId,
+        chapterNumber: chapterNumber,
+        currentProvider: currentProvider,
+        originalChapterId: selectedChapter.id
+      });
+      logError("Direct API call failed:", err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [currentProvider, mangaSlugId]);
+
   const fetchChapterPages = useCallback(async (selectedChapter: Chapter) => {
     setLoading(true);
     setError(null);
@@ -119,9 +219,14 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     logDebug("Has ChapterManager:", !!chapterManager);
     
     if (!chapterManager) {
-      logError("No ChapterManager provided - falling back to legacy method");
-      setError("Chapter navigation not properly initialized");
-      setLoading(false);
+      logError("No ChapterManager provided - using direct API fallback");
+      // Fallback to direct API call without ChapterManager
+      try {
+        await fetchChapterPagesDirectly(selectedChapter);
+      } catch (err: any) {
+        logError("Direct API fallback failed:", err);
+        setError("Failed to load chapter pages");
+      }
       return;
     }
 
@@ -277,6 +382,9 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       // Pass provider information to ensure reader maintains context
       readerCurrentProvider: currentProvider,
       readerMangaSlugId: mangaSlugId,
+      // Pass format and country info for proper reader selection
+      format,
+      countryOfOrigin,
     };
     
     // Add the already-fetched image URLs and headers

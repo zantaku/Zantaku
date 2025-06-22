@@ -19,7 +19,7 @@
 // use react native touchable opacity for touchable opacity
 // use react native touchable without feedback for touchable without feedback
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -99,7 +99,6 @@ const PlayerScreen: React.FC = () => {
   const [bufferProgress, setBufferProgress] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekingPosition, setSeekingPosition] = useState(0);
-  const [lastSeekTime, setLastSeekTime] = useState(0);
   
   // UI state
   const [showControls, setShowControls] = useState(true);
@@ -129,9 +128,50 @@ const PlayerScreen: React.FC = () => {
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const controlsTimeout = useRef<NodeJS.Timeout | null>(null);
+  const lastSeekTime = useRef(0);
+  const lastProgressSave = useRef(0);
 
   // Add ref to prevent multiple loads
   const hasLoadedData = useRef(false);
+  
+  // Memoized video source to prevent unnecessary recalculations
+  const videoSource = useMemo(() => {
+    if (!videoData?.source) return '';
+    
+    const finalUrl = USE_PROXY 
+      ? `${M3U8_PROXY_BASE_URL}${encodeURIComponent(videoData.source)}`
+      : videoData.source;
+    
+    console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
+    console.log(`🔗 Using proxy: ${USE_PROXY ? 'Yes' : 'No'}`);
+    
+    // Log if URL contains quality indicators
+    if (finalUrl.includes('1080') || finalUrl.includes('720') || finalUrl.includes('480')) {
+      console.log(`📺 Quality detected in URL: ${finalUrl.match(/\d+p?/g)?.join(', ')}`);
+    }
+    
+    return finalUrl;
+  }, [videoData?.source]);
+
+  // Memoized subtitle display check
+  const shouldShowSubtitles = useMemo(() => {
+    return currentSubtitle && preferences.subtitlesEnabled && subtitleCues.length > 0;
+  }, [currentSubtitle, preferences.subtitlesEnabled, subtitleCues.length]);
+
+  // Memoized subtitle style
+  const subtitleStyle = useMemo(() => ({
+    fontSize: preferences.subtitleStyle?.fontSize || 18,
+    color: preferences.subtitleStyle?.textColor || '#FFFFFF',
+    fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal' as 'bold' | 'normal',
+  }), [preferences.subtitleStyle]);
+
+  // Memoized display title
+  const displayTitle = useMemo(() => {
+    if (videoData?.animeTitle && videoData?.episodeNumber) {
+      return `${videoData.animeTitle} - Episode ${videoData.episodeNumber}`;
+    }
+    return videoData?.animeTitle || 'Current Episode';
+  }, [videoData?.animeTitle, videoData?.episodeNumber]);
   
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -292,43 +332,50 @@ const PlayerScreen: React.FC = () => {
     return hours * 3600 + minutes * 60 + seconds;
   };
 
-  // Update current subtitle based on time
+  // Update current subtitle based on time - optimized with useMemo
   useEffect(() => {
     if (subtitleCues.length > 0 && preferences.subtitlesEnabled) {
       const currentCue = subtitleCues.find(
         cue => currentTime >= cue.startTime && currentTime <= cue.endTime
       );
-      setCurrentSubtitle(currentCue ? currentCue.text : '');
-    } else {
+      const newSubtitle = currentCue ? currentCue.text : '';
+      
+      // Only update if subtitle actually changed
+      if (newSubtitle !== currentSubtitle) {
+        setCurrentSubtitle(newSubtitle);
+      }
+    } else if (currentSubtitle) {
       setCurrentSubtitle('');
     }
-  }, [currentTime, subtitleCues, preferences.subtitlesEnabled]);
+  }, [currentTime, subtitleCues, preferences.subtitlesEnabled, currentSubtitle]);
 
-  // Check for intro/outro timing
+  // Check for intro/outro timing - optimized
   useEffect(() => {
     if (videoData?.timings) {
       const { intro, outro } = videoData.timings;
       
-      if (intro && currentTime >= intro.start && currentTime <= intro.end) {
-        setShowSkipIntro(true);
-      } else {
-        setShowSkipIntro(false);
+      const shouldShowIntro = !!(intro && currentTime >= intro.start && currentTime <= intro.end);
+      const shouldShowOutro = !!(outro && currentTime >= outro.start && currentTime <= outro.end);
+      
+      if (shouldShowIntro !== showSkipIntro) {
+        setShowSkipIntro(shouldShowIntro);
       }
       
-      if (outro && currentTime >= outro.start && currentTime <= outro.end) {
-        setShowSkipOutro(true);
-      } else {
-        setShowSkipOutro(false);
+      if (shouldShowOutro !== showSkipOutro) {
+        setShowSkipOutro(shouldShowOutro);
       }
     }
-  }, [currentTime, videoData?.timings]);
+  }, [currentTime, videoData?.timings, showSkipIntro, showSkipOutro]);
 
-  // Handle video playback status updates
+  // Handle video playback status updates - optimized
   const handlePlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
     if (status.isLoaded) {
       const currentTimeSeconds = status.positionMillis ? status.positionMillis / 1000 : 0;
       const durationSeconds = status.durationMillis ? status.durationMillis / 1000 : 0;
       const playableDurationSeconds = status.playableDurationMillis ? status.playableDurationMillis / 1000 : 0;
+      
+      // Batch state updates to reduce re-renders
+      const now = Date.now();
       
       setCurrentTime(currentTimeSeconds);
       setDuration(durationSeconds);
@@ -339,7 +386,6 @@ const PlayerScreen: React.FC = () => {
       setIsBuffering(isCurrentlyBuffering);
       
       // Calculate buffer progress (how much is buffered ahead)
-      const bufferAhead = Math.max(0, playableDurationSeconds - currentTimeSeconds);
       const bufferPercentage = durationSeconds > 0 ? (playableDurationSeconds / durationSeconds) * 100 : 0;
       setBufferProgress(bufferPercentage);
       
@@ -350,8 +396,7 @@ const PlayerScreen: React.FC = () => {
       });
       
       // Log quality information periodically (every 30 seconds)
-      const now = Date.now();
-      if (now - lastSeekTime > 30000) {
+      if (now - lastSeekTime.current > 30000) {
         console.log(`📊 Video Quality Status:`);
         console.log(`   Duration: ${Math.round(durationSeconds)}s`);
         console.log(`   Current Time: ${Math.round(currentTimeSeconds)}s`);
@@ -363,17 +408,19 @@ const PlayerScreen: React.FC = () => {
         if (statusWithSize.naturalSize && statusWithSize.naturalSize.width && statusWithSize.naturalSize.height) {
           console.log(`   Video Resolution: ${statusWithSize.naturalSize.width}x${statusWithSize.naturalSize.height}`);
         }
+        lastSeekTime.current = now;
       }
       
       // Auto-save progress (throttled to avoid excessive writes)
       if (videoData?.episodeId && preferences.rememberPosition) {
-        if (now - lastSeekTime > 5000) { // Only save every 5 seconds
+        if (now - lastProgressSave.current > 5000) { // Only save every 5 seconds
           const progressData = {
             currentTime: currentTimeSeconds,
             duration: durationSeconds,
             timestamp: now,
           };
           AsyncStorage.setItem(`${STORAGE_KEYS.VIDEO_PROGRESS}${videoData.episodeId}`, JSON.stringify(progressData));
+          lastProgressSave.current = now;
         }
       }
     } else {
@@ -381,7 +428,7 @@ const PlayerScreen: React.FC = () => {
       setIsBuffering(true);
       console.log('⚠️ Video not loaded - showing buffering indicator');
     }
-  }, [videoData?.episodeId, preferences.rememberPosition, paused, lastSeekTime]);
+  }, [videoData?.episodeId, preferences.rememberPosition, paused]);
 
   // Control handlers
   const handlePlayPause = useCallback(() => {
@@ -394,7 +441,7 @@ const PlayerScreen: React.FC = () => {
     }
   }, [paused]);
 
-  // Debounced seek to reduce buffering
+  // Optimized seek with reduced debounce for better responsiveness
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSeekingRef = useRef(false);
   
@@ -403,14 +450,14 @@ const PlayerScreen: React.FC = () => {
       // Prevent multiple simultaneous seeks
       isSeekingRef.current = true;
       setSeekingPosition(time);
-      setLastSeekTime(Date.now());
+      lastSeekTime.current = Date.now();
       
       // Clear previous timeout
       if (seekTimeoutRef.current) {
         clearTimeout(seekTimeoutRef.current);
       }
       
-      // Debounce the actual seek operation
+      // Optimized debounce for better responsiveness
       seekTimeoutRef.current = setTimeout(() => {
         if (videoRef.current) {
           setIsBuffering(true);
@@ -431,6 +478,27 @@ const PlayerScreen: React.FC = () => {
         }
       }, PLAYER_BEHAVIOR.SEEK_DEBOUNCE_MS);
     }
+  }, []);
+
+  // Handle seek start - called when user starts dragging
+  const handleSeekStart = useCallback(() => {
+    setIsSeeking(true);
+    console.log('🎯 User started seeking');
+  }, []);
+
+  // Handle seek change - called during dragging (real-time updates)
+  const handleSeekChange = useCallback((time: number) => {
+    // Update the seeking position for visual feedback
+    setSeekingPosition(time);
+    // Optionally update current time for immediate visual feedback
+    // setCurrentTime(time); // Uncomment for real-time preview
+    console.log(`🎯 Seeking to ${time.toFixed(1)}s`);
+  }, []);
+
+  // Handle seek end - called when user releases
+  const handleSeekEnd = useCallback(() => {
+    setIsSeeking(false);
+    console.log('🎯 User finished seeking');
   }, []);
 
   const handleSkipForward = useCallback(() => {
@@ -459,6 +527,8 @@ const PlayerScreen: React.FC = () => {
   const toggleControls = useCallback(() => {
     setShowControls(prev => !prev);
   }, []);
+
+  // Auto-hide controls is now handled by VideoControls component to avoid conflicts
 
   // Handle back button (both hardware and UI)
   const handleBackPress = useCallback(() => {
@@ -510,27 +580,8 @@ const PlayerScreen: React.FC = () => {
     }
   }, [videoData?.audioTracks, currentAudioTrack]);
 
-  // Get video source with proxy if needed
-  const getVideoSource = useCallback(() => {
-    if (!videoData?.source) return '';
-    
-    const finalUrl = USE_PROXY 
-      ? `${M3U8_PROXY_BASE_URL}${encodeURIComponent(videoData.source)}`
-      : videoData.source;
-    
-    console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
-    console.log(`🔗 Using proxy: ${USE_PROXY ? 'Yes' : 'No'}`);
-    
-    // Log if URL contains quality indicators
-    if (finalUrl.includes('1080') || finalUrl.includes('720') || finalUrl.includes('480')) {
-      console.log(`📺 Quality detected in URL: ${finalUrl.match(/\d+p?/g)?.join(', ')}`);
-    }
-    
-    return finalUrl;
-  }, [videoData?.source]);
-
   // Handle AniList save
-  const handleSaveToAniListProgress = async (rememberChoice: boolean) => {
+  const handleSaveToAniListProgress = async (rememberChoice: boolean, shouldExit: boolean = true) => {
     if (!videoData || !onSaveToAniList || !videoData.anilistId) {
       console.log('[PLAYER_SCREEN] ⚠️ Cannot save to AniList: missing data');
       return;
@@ -551,16 +602,20 @@ const PlayerScreen: React.FC = () => {
       console.error('[PLAYER_SCREEN] ❌ Failed to save to AniList:', error);
     } finally {
       setShowSaveProgressModal(false);
-      handleExit();
+      if (shouldExit) {
+        handleExit();
+      }
     }
   };
 
   // Handle local save
-  const handleSaveLocalProgress = async (rememberChoice: boolean) => {
+  const handleSaveLocalProgress = async (rememberChoice: boolean, shouldExit: boolean = true) => {
     if (!videoData?.episodeId) {
       console.log('[PLAYER_SCREEN] ⚠️ Cannot save locally: missing episode ID');
       setShowSaveProgressModal(false);
-      handleExit();
+      if (shouldExit) {
+        handleExit();
+      }
       return;
     }
 
@@ -583,7 +638,9 @@ const PlayerScreen: React.FC = () => {
       console.error('[PLAYER_SCREEN] ❌ Failed to save locally:', error);
     } finally {
       setShowSaveProgressModal(false);
-      handleExit();
+      if (shouldExit) {
+        handleExit();
+      }
     }
   };
 
@@ -604,7 +661,7 @@ const PlayerScreen: React.FC = () => {
         ref={videoRef}
         style={styles.video}
         source={{
-          uri: getVideoSource(),
+          uri: videoSource,
           headers: videoData.headers,
         }}
         shouldPlay={!paused}
@@ -655,26 +712,21 @@ const PlayerScreen: React.FC = () => {
         onQualityPress={() => setShowSettingsModal(true)}
         onSpeedPress={() => setShowSpeedOptions(true)}
         bufferProgress={bufferProgress}
-        onSeekStart={() => {
-          setIsSeeking(true);
-          setSeekingPosition(currentTime);
-        }}
-        onSeekEnd={() => {
-          setIsSeeking(false);
-        }}
-        animeTitle={videoData.animeTitle}
+        onSeekStart={handleSeekStart}
+        onSeekChange={handleSeekChange}
+        onSeekEnd={handleSeekEnd}
+        animeTitle={displayTitle}
         episodeNumber={videoData.episodeNumber}
         onBackPress={handleBackPress}
+        showControls={showControls}
+        onToggleControls={toggleControls}
+        disabled={showSettingsModal || showSubtitleOptions || showSpeedOptions || showSaveProgressModal || showExitModal}
       />
 
       {/* Subtitles */}
-      {currentSubtitle && preferences.subtitlesEnabled && subtitleCues.length > 0 && (
+      {shouldShowSubtitles && (
         <View style={[styles.subtitleContainer, { bottom: subtitlePosition.y }]}>
-          <Text style={[styles.subtitleText, {
-            fontSize: preferences.subtitleStyle?.fontSize || 18,
-            color: preferences.subtitleStyle?.textColor || '#FFFFFF',
-            fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal',
-          }]}>
+          <Text style={[styles.subtitleText, subtitleStyle]}>
             {currentSubtitle}
           </Text>
         </View>
@@ -737,8 +789,12 @@ const PlayerScreen: React.FC = () => {
         <SaveProgressModal
           isVisible={showSaveProgressModal}
           onCancel={() => setShowSaveProgressModal(false)}
-          onSave={handleSaveLocalProgress}
-          onSaveToAniList={anilistUser && videoData?.anilistId ? handleSaveToAniListProgress : undefined}
+          onExitWithoutSaving={() => {
+            setShowSaveProgressModal(false);
+            handleExit();
+          }}
+          onSave={(rememberChoice) => handleSaveLocalProgress(rememberChoice, true)}
+          onSaveToAniList={anilistUser && videoData?.anilistId ? (rememberChoice) => handleSaveToAniListProgress(rememberChoice, true) : undefined}
           animeName={videoData.animeTitle}
           episodeNumber={videoData.episodeNumber}
           currentTime={currentTime}
@@ -776,13 +832,13 @@ const PlayerScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
   },
   loadingText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
@@ -791,7 +847,7 @@ const styles = StyleSheet.create({
   video: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
-    backgroundColor: '#000',
+    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
     // Ensure video maintains aspect ratio and quality
     overflow: 'hidden',
   },
@@ -804,7 +860,7 @@ const styles = StyleSheet.create({
   },
   subtitleText: {
     textAlign: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(13, 27, 42, 0.7)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 4,

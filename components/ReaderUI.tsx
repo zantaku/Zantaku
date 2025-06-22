@@ -56,18 +56,18 @@ const ReaderUI: React.FC<ReaderUIProps> = ({
           <FontAwesome5 name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
         <View style={styles.titleContainer}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.mangaTitle} numberOfLines={1}>
             {title.replace(/Chapter \d+:?\s*/, '')}
           </Text>
+          <Text style={styles.title} numberOfLines={1}>
+            Chapter {chapter}
+          </Text>
           <Text style={styles.subtitle}>
-            Chapter {chapter} • Page {currentPageIndex + 1}/{totalPages}
+            {Math.round(readingProgress)}% scrolled
             {isInitialLoading && ` • Loading ${Math.round(loadingProgress)}%`}
           </Text>
         </View>
         <View style={styles.headerButtons}>
-          <View style={styles.progressIndicator}>
-            <Text style={styles.progressText}>{Math.round(readingProgress)}%</Text>
-          </View>
           {onSettings && (
             <TouchableOpacity onPress={onSettings} style={styles.settingsButton}>
               <FontAwesome5 name="cog" size={16} color="#fff" />
@@ -76,7 +76,7 @@ const ReaderUI: React.FC<ReaderUIProps> = ({
         </View>
       </View>
 
-      {/* Progress Bar */}
+      {/* Progress Bar - Shows continuous scroll progress */}
       <View style={styles.progressBarContainer}>
         <View style={[styles.progressBar, { width: `${readingProgress}%` }]} />
       </View>
@@ -150,10 +150,15 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 16,
   },
-  title: {
+  mangaTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#02A9FF',
   },
   subtitle: {
     fontSize: 14,
