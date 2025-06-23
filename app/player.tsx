@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, StatusBar, BackHandler, DeviceEventEmitter, Dimensions, Animated, TouchableOpacity, Text } from 'react-native';
-import { PanGestureHandler, PinchGestureHandler, State } from 'react-native-gesture-handler';
-import { Ionicons } from '@expo/vector-icons';
+import { View, StyleSheet, StatusBar, BackHandler, DeviceEventEmitter } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
 import VideoPlayer from './videoplayer/PlayerScreen';
@@ -11,58 +9,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY, ANILIST_GRAPHQL_ENDPOINT } from '../constants/auth';
 
-// PiP types
-interface PiPState {
-  isActive: boolean;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scale: number;
-}
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// PiP constants
-const PIP_CONSTANTS = {
-  MIN_WIDTH: 150,
-  MAX_WIDTH: 300,
-  MIN_HEIGHT: 85,
-  MAX_HEIGHT: 170,
-  DEFAULT_WIDTH: 200,
-  DEFAULT_HEIGHT: 113,
-  MIN_SCALE: 0.8,
-  MAX_SCALE: 1.5,
-  EDGE_PADDING: 20,
-};
-
-// Player component that forces landscape orientation
+// Player component that forces landscape orientation and supports native PiP
 export default function Player() {
   const { isDarkMode } = useTheme();
   const isLocked = useRef(false);
   const lockTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [isPipSupported, setIsPipSupported] = useState(false);
+  const [isInPipMode, setIsInPipMode] = useState(false);
   const params = useLocalSearchParams();
   const router = useRouter();
-  
-  // PiP state
-  const [pipState, setPipState] = useState<PiPState>({
-    isActive: false,
-    x: SCREEN_WIDTH - PIP_CONSTANTS.DEFAULT_WIDTH - PIP_CONSTANTS.EDGE_PADDING,
-    y: 100,
-    width: PIP_CONSTANTS.DEFAULT_WIDTH,
-    height: PIP_CONSTANTS.DEFAULT_HEIGHT,
-    scale: 1,
-  });
-  
-  // Animation values for PiP
-  const pipAnimation = useRef(new Animated.ValueXY({ x: pipState.x, y: pipState.y })).current;
-  const pipScale = useRef(new Animated.Value(1)).current;
-  const pipOpacity = useRef(new Animated.Value(1)).current;
-  
-  // Gesture refs for PiP
-  const panRef = useRef<PanGestureHandler>(null);
-  const pinchRef = useRef<PinchGestureHandler>(null);
   
   // Add AniList user state
   const [anilistUser, setAnilistUser] = useState<{
@@ -99,112 +55,32 @@ export default function Player() {
     loadAnilistUser();
   }, []);
 
-  // PiP Functions
-  const enterPiP = () => {
-    console.log('[PLAYER] 📱 Entering Picture-in-Picture mode');
-    
-    // Update PiP state
-    setPipState(prev => ({
-      ...prev,
-      isActive: true,
-    }));
-    
-    // Animate to PiP mode
-    Animated.parallel([
-      Animated.timing(pipOpacity, {
-        toValue: 0.9,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.spring(pipScale, {
-        toValue: 1,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    
-    // Force portrait mode for PiP
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    StatusBar.setHidden(false, 'fade');
-  };
-
-  const exitPiP = () => {
-    console.log('[PLAYER] 📱 Exiting Picture-in-Picture mode');
-    
-    // Update PiP state
-    setPipState(prev => ({
-      ...prev,
-      isActive: false,
-    }));
-    
-    // Animate back to fullscreen
-    Animated.parallel([
-      Animated.timing(pipOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.spring(pipScale, {
-        toValue: 1,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    
-    // Return to landscape mode
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    StatusBar.setHidden(true, 'fade');
-  };
-
-  const onPanGestureEvent = Animated.event(
-    [{ nativeEvent: { translationX: pipAnimation.x, translationY: pipAnimation.y } }],
-    { useNativeDriver: false }
-  );
-
-  const onPanHandlerStateChange = (event: any) => {
-    if (event.nativeEvent.state === State.END) {
-      const { translationX, translationY } = event.nativeEvent;
-      
-      // Calculate new position
-      let newX = pipState.x + translationX;
-      let newY = pipState.y + translationY;
-      
-      // Keep within screen bounds
-      newX = Math.max(PIP_CONSTANTS.EDGE_PADDING, Math.min(newX, SCREEN_WIDTH - pipState.width - PIP_CONSTANTS.EDGE_PADDING));
-      newY = Math.max(PIP_CONSTANTS.EDGE_PADDING, Math.min(newY, SCREEN_HEIGHT - pipState.height - PIP_CONSTANTS.EDGE_PADDING));
-      
-      // Snap to edges for better UX
-      if (newX < SCREEN_WIDTH / 2) {
-        newX = PIP_CONSTANTS.EDGE_PADDING; // Snap to left
-      } else {
-        newX = SCREEN_WIDTH - pipState.width - PIP_CONSTANTS.EDGE_PADDING; // Snap to right
+  // Initialize PiP support detection
+  useEffect(() => {
+    const checkPipSupport = async () => {
+      try {
+        // For now, assume PiP is supported on modern devices
+        // The actual PiP functionality will be handled by expo-video in the PlayerScreen
+        setIsPipSupported(true);
+        console.log('[PLAYER] 📱 PiP support initialized');
+      } catch (error) {
+        console.error('[PLAYER] ❌ Error checking PiP support:', error);
+        setIsPipSupported(false);
       }
-      
-      // Update state
-      setPipState(prev => ({ ...prev, x: newX, y: newY }));
-      
-      // Animate to final position
-      Animated.spring(pipAnimation, {
-        toValue: { x: newX, y: newY },
-        useNativeDriver: false,
-      }).start();
-    }
+    };
+
+    checkPipSupport();
+  }, []);
+
+  // PiP Functions - These will be passed to PlayerScreen to handle via expo-video
+  const enterPiP = async () => {
+    console.log('[PLAYER] 📱 PiP enter request - will be handled by video player');
+    // The actual PiP functionality is handled in PlayerScreen.tsx using expo-video
   };
 
-  const onPinchGestureEvent = Animated.event(
-    [{ nativeEvent: { scale: pipScale } }],
-    { useNativeDriver: true }
-  );
-
-  const onPinchHandlerStateChange = (event: any) => {
-    if (event.nativeEvent.state === State.END) {
-      const scale = Math.max(PIP_CONSTANTS.MIN_SCALE, Math.min(event.nativeEvent.scale, PIP_CONSTANTS.MAX_SCALE));
-      
-      setPipState(prev => ({ ...prev, scale }));
-      
-      Animated.spring(pipScale, {
-        toValue: scale,
-        useNativeDriver: true,
-      }).start();
-    }
+  const exitPiP = async () => {
+    console.log('[PLAYER] 📱 PiP exit request - will be handled by video player');
+    // The actual PiP functionality is handled in PlayerScreen.tsx using expo-video
   };
 
   // Handle AniList progress save
@@ -495,96 +371,22 @@ export default function Player() {
   }
 
   console.log('[PLAYER] ✅ Player ready, rendering VideoPlayer component');
-
-    // PiP Component
-  const renderPiPPlayer = () => {
-    if (!pipState.isActive) return null;
-
-    return (
-      <PanGestureHandler
-        ref={panRef}
-        onGestureEvent={onPanGestureEvent}
-        onHandlerStateChange={onPanHandlerStateChange}
-        simultaneousHandlers={pinchRef}
-      >
-        <Animated.View style={[
-          styles.pipContainer,
-          {
-            position: 'absolute',
-            left: pipAnimation.x,
-            top: pipAnimation.y,
-            width: pipState.width,
-            height: pipState.height,
-            transform: [{ scale: pipScale }],
-            opacity: pipOpacity,
-            zIndex: 1000,
-          }
-        ]}>
-          {/* PiP Controls Header */}
-          <View style={styles.pipHeader}>
-            <TouchableOpacity
-              style={styles.pipExpandButton}
-              onPress={exitPiP}
-              accessibilityLabel="Expand to fullscreen"
-            >
-              <Ionicons name="expand-outline" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.pipCloseButton}
-              onPress={() => {
-                console.log('[PLAYER] 📱 Closing PiP mode');
-                // For now, just exit PiP. In a real app, you might pause or navigate away
-                exitPiP();
-              }}
-              accessibilityLabel="Close PiP"
-            >
-              <Ionicons name="close" size={16} color="#fff" />
-            </TouchableOpacity>
-          </View>
-
-          <PinchGestureHandler
-            ref={pinchRef}
-            onGestureEvent={onPinchGestureEvent}
-            onHandlerStateChange={onPinchHandlerStateChange}
-            simultaneousHandlers={panRef}
-          >
-            <Animated.View style={styles.pipVideoContainer}>
-              <PlayerProvider 
-                anilistUser={anilistUser}
-                onSaveToAniList={handleSaveToAniList}
-                onEnterPiP={enterPiP}
-                onExitPiP={exitPiP}
-              >
-                <VideoPlayer />
-              </PlayerProvider>
-            </Animated.View>
-          </PinchGestureHandler>
-        </Animated.View>
-      </PanGestureHandler>
-    );
-  };
+  console.log('[PLAYER] 📱 PiP Status - Supported:', isPipSupported, 'In PiP Mode:', isInPipMode);
 
   return (
     <View style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
-      <StatusBar hidden={!pipState.isActive} />
+      <StatusBar hidden={true} />
       
-             {/* Fullscreen Player */}
-       {!pipState.isActive ? (
-         <PlayerProvider 
-           anilistUser={anilistUser}
-           onSaveToAniList={handleSaveToAniList}
-           onEnterPiP={enterPiP}
-           onExitPiP={exitPiP}
-         >
-           <VideoPlayer />
-         </PlayerProvider>
-       ) : (
-        // Background overlay when in PiP mode
-        <View style={[styles.pipBackground, { backgroundColor: isDarkMode ? '#000' : '#fff' }]} />
-      )}
-      
-      {/* PiP Player */}
-      {renderPiPPlayer()}
+      <PlayerProvider 
+        anilistUser={anilistUser}
+        onSaveToAniList={handleSaveToAniList}
+        onEnterPiP={enterPiP}
+        onExitPiP={exitPiP}
+        isPipSupported={isPipSupported}
+        isInPipMode={isInPipMode}
+      >
+        <VideoPlayer />
+      </PlayerProvider>
     </View>
   );
 }
@@ -596,50 +398,5 @@ const styles = StyleSheet.create({
   loading: {
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  pipContainer: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    backgroundColor: '#000',
-  },
-  pipVideoContainer: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  pipBackground: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pipHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 32,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    zIndex: 1001,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-  },
-  pipExpandButton: {
-    padding: 6,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  pipCloseButton: {
-    padding: 6,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
 });

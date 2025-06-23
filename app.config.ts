@@ -20,7 +20,10 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.vie4e.zantaku"
+      bundleIdentifier: "com.vie4e.zantaku",
+      infoPlist: {
+        UIBackgroundModes: ["audio"]
+      }
     },
     android: {
       adaptiveIcon: {

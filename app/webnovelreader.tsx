@@ -33,10 +33,20 @@ import ChapterSourcesModal from '../components/ChapterSourcesModal';
 const WINDOW_HEIGHT = Dimensions.get('window').height;
 const WINDOW_WIDTH = Dimensions.get('window').width;
 
-// Reduced memory constants for better performance
-const INITIAL_LOAD_COUNT = 2; // Reduced from 5 to 2
-const PRELOAD_BUFFER = 1; // Reduced from 3 to 1
-const MAX_CACHE_SIZE = 20; // Maximum number of images to keep in memory
+// Optimized constants for better performance and reduced flickering
+const INITIAL_LOAD_COUNT = 5;
+const PRELOAD_BUFFER = 2;
+const MAX_CACHE_SIZE = 15;
+const DEFAULT_IMAGE_HEIGHT = Math.floor(WINDOW_WIDTH * 1.4); // Standard webtoon ratio
+
+// Simple debounce utility function
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
+  let timeout: NodeJS.Timeout;
+  return ((...args: any[]) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  }) as T;
+}
 
 interface Chapter {
   id: string;
@@ -46,17 +56,115 @@ interface Chapter {
   source: string;
 }
 
+// Memoized image item component to prevent unnecessary re-renders
+const MemoizedImageItem = React.memo<{
+  imageUrl: string;
+  index: number;
+  imageHeaders: Record<string, string>;
+  onToggleUI: () => void;
+  windowWidth: number;
+}>(({ imageUrl, index, imageHeaders, onToggleUI, windowWidth }) => {
+  const [imageHeight, setImageHeight] = useState(DEFAULT_IMAGE_HEIGHT);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [shouldRetry, setShouldRetry] = useState(0);
+
+  const handleImageLoad = useCallback((event: any) => {
+    const { width, height } = event.source;
+    if (width && height) {
+      const aspectRatio = height / width;
+      const calculatedHeight = Math.floor(windowWidth * aspectRatio);
+      // Clamp height to reasonable bounds
+      const finalHeight = Math.max(200, Math.min(calculatedHeight, WINDOW_HEIGHT * 2));
+      setImageHeight(finalHeight);
+    }
+    setIsLoading(false);
+    setHasError(false);
+  }, [windowWidth]);
+
+  const handleImageError = useCallback(() => {
+    setIsLoading(false);
+    setHasError(true);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setIsLoading(true);
+    setHasError(false);
+    setShouldRetry(prev => prev + 1);
+  }, []);
+
+  // Memoized styles to prevent recalculation
+  const containerStyle = useMemo(() => [
+    styles.imageContainer, 
+    { height: imageHeight }
+  ], [imageHeight]);
+
+  const imageStyle = useMemo(() => ({
+    width: windowWidth,
+    height: imageHeight,
+    backgroundColor: '#000',
+  }), [windowWidth, imageHeight]);
+
+  return (
+    <TouchableOpacity 
+      style={containerStyle} 
+      activeOpacity={1} 
+      onPress={onToggleUI}
+    >
+      <ExpoImage
+        key={`${imageUrl}-${shouldRetry}`} // Force re-render on retry
+        source={{ 
+          uri: imageUrl,
+          headers: imageHeaders 
+        }}
+        style={imageStyle}
+        contentFit="contain"
+        onLoad={handleImageLoad}
+        onError={handleImageError}
+        cachePolicy="memory-disk"
+        placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+        transition={150}
+        priority="high"
+      />
+      
+      {isLoading && (
+        <View style={styles.loadingOverlay}>
+          <Text style={styles.loadingText}>Loading page {index + 1}...</Text>
+        </View>
+      )}
+      
+      {hasError && (
+        <TouchableOpacity 
+          style={styles.errorOverlay}
+          onPress={handleRetry}
+        >
+          <FontAwesome5 name="exclamation-triangle" size={24} color="#ff4444" />
+          <Text style={styles.imageErrorText}>Tap to retry</Text>
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison function to prevent unnecessary re-renders
+  return (
+    prevProps.imageUrl === nextProps.imageUrl &&
+    prevProps.index === nextProps.index &&
+    prevProps.windowWidth === nextProps.windowWidth &&
+    JSON.stringify(prevProps.imageHeaders) === JSON.stringify(nextProps.imageHeaders)
+  );
+});
+
 export default function WebNovelReader() {
   const params = useLocalSearchParams();
   const router = useRouter();
-  const flashListRef = useRef<FlatList<string>>(null);
+  const flatListRef = useRef<FlatList<string>>(null);
   const lastScrollTime = useRef<number>(0);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastUpdatedPage = useRef<number>(-1);
   const mangaIdRef = useRef<string | null>(null);
   const isMounted = useRef(true);
   
-  // State
+  // Simplified state to reduce re-renders
   const [images, setImages] = useState<string[]>([]);
   const [showUI, setShowUI] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,11 +180,8 @@ export default function WebNovelReader() {
   const [showChapterModal, setShowChapterModal] = useState(false);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
 
-  
-  // Progressive loading state - simplified
-  const [loadedImageIndices, setLoadedImageIndices] = useState<Set<number>>(new Set());
+  // Removed progressive loading state that was causing flickering
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState(0);
   
   // Zoom state
   const [isZoomed, setIsZoomed] = useState(false);
@@ -103,7 +208,7 @@ export default function WebNovelReader() {
     showPageNumber: true,
     tapToNavigate: true,
     zoomEnabled: true,
-    preloadPages: 3, // Reduced from 5 to 3
+    preloadPages: 3,
     scrollSpeed: 1.0,
     autoScrollEnabled: false,
     autoScrollSpeed: 2,
@@ -111,7 +216,7 @@ export default function WebNovelReader() {
     appearance: {
       backgroundColor: '#000000',
       pageGap: 8,
-      imageQuality: 'medium' as 'high' | 'medium' | 'low' // Changed from high to medium
+      imageQuality: 'medium' as 'high' | 'medium' | 'low'
     }
   });
 
@@ -132,7 +237,7 @@ export default function WebNovelReader() {
     return mangaIdRef.current || params.mangaId as string || params.anilistId as string;
   }, [params.mangaId, params.anilistId]);
 
-  // Memoized image headers to prevent recreation
+  // Stable memoized image headers to prevent recreation
   const imageHeaders = useMemo(() => {
     // Extract headers from params if available
     const headerKeys = Object.keys(params).filter(key => key.startsWith('header'));
@@ -161,11 +266,26 @@ export default function WebNovelReader() {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       'Origin': 'https://mangakatana.com'
     };
-  }, [params, images.length > 0 ? images[0] : '']); // Only depend on first image
+  }, [params, images[0]]);
 
   // Memoize chapter navigation handlers
-  const nextChapter = useMemo(() => chapterNav.getChapterByType('next'), [chapterNav]);
-  const previousChapter = useMemo(() => chapterNav.getChapterByType('previous'), [chapterNav]);
+  const nextChapter = useMemo(() => {
+    try {
+      return chapterNav.getChapterByType('next');
+    } catch (error) {
+      console.warn('Error getting next chapter:', error);
+      return null;
+    }
+  }, [chapterNav]);
+  
+  const previousChapter = useMemo(() => {
+    try {
+      return chapterNav.getChapterByType('previous');
+    } catch (error) {
+      console.warn('Error getting previous chapter:', error);
+      return null;
+    }
+  }, [chapterNav]);
 
   // Extract mangaId from previous route or params when component mounts
   useEffect(() => {
@@ -226,90 +346,6 @@ export default function WebNovelReader() {
     
     extractMangaId();
   }, [params.mangaId, params.anilistId, params.existingParams]);
-
-  // Optimized progressive loading function with memory management
-  const loadImagesAroundCurrentView = useCallback(async (currentIndex: number) => {
-    if (images.length === 0 || !isMounted.current) return;
-    
-    const indicesToLoad: number[] = [];
-    
-    // Load current view and buffer around it
-    for (let i = Math.max(0, currentIndex - PRELOAD_BUFFER); 
-         i <= Math.min(images.length - 1, currentIndex + PRELOAD_BUFFER); 
-         i++) {
-      if (!loadedImageIndices.has(i)) {
-        indicesToLoad.push(i);
-      }
-    }
-    
-    // Memory management: Remove old images if we exceed cache limit
-    if (loadedImageIndices.size > MAX_CACHE_SIZE) {
-      const indicesToRemove: number[] = [];
-      loadedImageIndices.forEach(index => {
-        if (Math.abs(index - currentIndex) > PRELOAD_BUFFER * 2) {
-          indicesToRemove.push(index);
-        }
-      });
-      
-      if (indicesToRemove.length > 0) {
-        setLoadedImageIndices(prev => {
-          const newSet = new Set(prev);
-          indicesToRemove.forEach(index => newSet.delete(index));
-          return newSet;
-        });
-        
-        // Clear image cache for removed indices
-        indicesToRemove.forEach(index => {
-          if (images[index]) {
-            ExpoImage.clearMemoryCache();
-          }
-        });
-      }
-    }
-    
-    if (indicesToLoad.length > 0) {
-      // Batch load with reduced concurrency
-      const batchSize = 2; // Process only 2 images at a time
-      for (let i = 0; i < indicesToLoad.length; i += batchSize) {
-        if (!isMounted.current) break;
-        
-        const batch = indicesToLoad.slice(i, i + batchSize);
-        const loadPromises = batch.map(async (index) => {
-          if (loadedImageIndices.has(index) || index >= images.length || !isMounted.current) {
-            return;
-          }
-          
-          try {
-            const imageUrl = images[index];
-            
-            await ExpoImage.prefetch(imageUrl, {
-              headers: imageHeaders,
-              cachePolicy: 'memory'
-            });
-            
-            if (isMounted.current) {
-              setLoadedImageIndices(prev => new Set([...prev, index]));
-            }
-          } catch (error) {
-            if (error instanceof Error) {
-              console.warn(`[WebNovelReader] Failed to preload image ${index + 1}:`, error.message);
-            }
-          }
-        });
-        
-        await Promise.allSettled(loadPromises);
-        
-        // Small delay between batches to prevent overwhelming the system
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      
-      // Update loading progress
-      if (isMounted.current) {
-        const totalLoaded = loadedImageIndices.size + indicesToLoad.filter(i => loadedImageIndices.has(i)).length;
-        setLoadingProgress((totalLoaded / images.length) * 100);
-      }
-    }
-  }, [images, imageHeaders, loadedImageIndices]);
 
   // Chapter navigation - optimized
   const handleChapterNavigation = useCallback(async (type: 'next' | 'previous') => {
@@ -429,35 +465,27 @@ export default function WebNovelReader() {
           throw new Error('No images found - check if image params are being passed correctly');
         }
 
-                  console.log(`[WebNovelReader] ✅ Loaded ${imageUrls.length} images for chapter ${params.chapter}`);
-          if (isMounted.current) {
-            setImages(imageUrls);
-            
-            // Mark ALL images as ready to load immediately to fix loading issues
-            const allLoadedSet = new Set<number>();
-            for (let i = 0; i < imageUrls.length; i++) {
-              allLoadedSet.add(i);
-            }
-            setLoadedImageIndices(allLoadedSet);
-            setLoadingProgress(100); // All images ready to load
-            setIsInitialLoading(false);
-            
-            console.log(`[WebNovelReader] ✅ Marked all ${allLoadedSet.size} images as ready to load immediately`);
+        console.log(`[WebNovelReader] ✅ Loaded ${imageUrls.length} images for chapter ${params.chapter}`);
+        if (isMounted.current) {
+          setImages(imageUrls);
+          setIsInitialLoading(false);
+          
+          console.log(`[WebNovelReader] ✅ Images ready for rendering: ${imageUrls.length} images`);
+        }
+        
+        // Set fallback chapter navigation based on chapter number
+        const currentChapterNum = parseFloat(String(params.chapter));
+        if (!isNaN(currentChapterNum) && isMounted.current) {
+          // Always allow previous chapter if not chapter 1
+          if (currentChapterNum > 1) {
+            setLocalHasPreviousChapter(true);
           }
           
-          // Set fallback chapter navigation based on chapter number
-          const currentChapterNum = parseFloat(String(params.chapter));
-          if (!isNaN(currentChapterNum) && isMounted.current) {
-            // Always allow previous chapter if not chapter 1
-            if (currentChapterNum > 1) {
-              setLocalHasPreviousChapter(true);
-            }
-            
-            // Always allow next chapter unless explicitly marked as latest
-            if (params.isLatestChapter !== 'true') {
-              setLocalHasNextChapter(true);
-            }
+          // Always allow next chapter unless explicitly marked as latest
+          if (params.isLatestChapter !== 'true') {
+            setLocalHasNextChapter(true);
           }
+        }
         
       } catch (err) {
         console.error('Error loading images:', err);
@@ -559,8 +587,8 @@ export default function WebNovelReader() {
     
     const now = Date.now();
     
-    // Increased throttle to 200ms for better performance on Android
-    if (now - lastScrollTime.current < 200) {
+    // Throttle scroll events to reduce flickering
+    if (now - lastScrollTime.current < 100) {
       return;
     }
     lastScrollTime.current = now;
@@ -572,7 +600,7 @@ export default function WebNovelReader() {
       clearTimeout(scrollTimeoutRef.current);
     }
 
-    // Debounce the expensive calculations with longer delay
+    // Debounce the expensive calculations
     scrollTimeoutRef.current = setTimeout(() => {
       if (!isMounted.current) return;
       
@@ -583,7 +611,7 @@ export default function WebNovelReader() {
         const scrollProgress = Math.min(100, Math.max(0, (scrollY / totalScrollHeight) * 100));
         
         // Calculate which image we're currently viewing
-        const estimatedImageHeight = WINDOW_WIDTH * 1.4; // Assume typical webtoon aspect ratio
+        const estimatedImageHeight = DEFAULT_IMAGE_HEIGHT;
         const currentPage = Math.floor(scrollY / estimatedImageHeight);
         const validCurrentPage = Math.max(0, Math.min(currentPage, images.length - 1));
         
@@ -596,7 +624,7 @@ export default function WebNovelReader() {
           lastUpdatedPage.current = validCurrentPage;
         }
 
-        // Check if we're at the bottom with larger buffer for better UX
+        // Check if we're at the bottom with buffer for better UX
         const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 200;
         
         if (isAtBottom && (chapterNav.hasNextChapter || localHasNextChapter)) {
@@ -608,8 +636,8 @@ export default function WebNovelReader() {
       } catch (error) {
         console.warn('[WebNovelReader] Error in scroll handler:', error);
       }
-    }, 100); // Increased debounce for better performance
-  }, [images.length, progressTracker, chapterNav.hasNextChapter, localHasNextChapter, handleChapterNavigation, loadImagesAroundCurrentView]);
+    }, 50); // Reduced debounce for better responsiveness
+  }, [images.length, progressTracker, chapterNav.hasNextChapter, localHasNextChapter, handleChapterNavigation]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -620,74 +648,86 @@ export default function WebNovelReader() {
     };
   }, []);
 
-  // Load settings preferences
+  // Stable settings loading to prevent re-renders
   useEffect(() => {
+    let isCancelled = false;
+    
     const loadPreferences = async () => {
       try {
-        const autoSave = await AsyncStorage.getItem('autoSaveProgress');
-        const savedDebugMode = await AsyncStorage.getItem('reader_debug_mode');
-        const savedDebugLevel = await AsyncStorage.getItem('reader_debug_level');
+        const [autoSave, savedDebugMode, savedDebugLevel, webtoonPrefs] = await Promise.all([
+          AsyncStorage.getItem('autoSaveProgress'),
+          AsyncStorage.getItem('reader_debug_mode'),
+          AsyncStorage.getItem('reader_debug_level'),
+          AsyncStorage.getItem('webtoon_reader_preferences')
+        ]);
+        
+        if (isCancelled) return;
         
         setShouldAutoSave(autoSave === 'true');
         setDebugMode(savedDebugMode === 'true');
         setDebugLevel(savedDebugLevel ? parseInt(savedDebugLevel) : 1);
+        
+        if (webtoonPrefs) {
+          try {
+            const preferences = JSON.parse(webtoonPrefs);
+            setWebtoonReaderPreferences(preferences);
+            setDebugMode(preferences.debugMode);
+          } catch (error) {
+            console.error('Error parsing webtoon reader preferences:', error);
+          }
+        }
       } catch (err) {
         console.error('Error loading preferences:', err);
       }
     };
+    
     loadPreferences();
+    
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
-  // Save settings when they change
-  useEffect(() => {
-    const savePreferences = async () => {
+  // Debounced settings save to prevent excessive writes
+  const savePreferencesDebounced = useMemo(
+    () => debounce(async (autoSave: boolean, debug: boolean, level: number, prefs: typeof webtoonReaderPreferences) => {
       try {
-        await AsyncStorage.setItem('autoSaveProgress', shouldAutoSave.toString());
-        await AsyncStorage.setItem('reader_debug_mode', debugMode.toString());
-        await AsyncStorage.setItem('reader_debug_level', debugLevel.toString());
+        await Promise.all([
+          AsyncStorage.setItem('autoSaveProgress', autoSave.toString()),
+          AsyncStorage.setItem('reader_debug_mode', debug.toString()),
+          AsyncStorage.setItem('reader_debug_level', level.toString()),
+          AsyncStorage.setItem('webtoon_reader_preferences', JSON.stringify(prefs))
+        ]);
       } catch (err) {
         console.error('Error saving preferences:', err);
       }
-    };
-    savePreferences();
-  }, [shouldAutoSave, debugMode, debugLevel]);
-
-  // Load webtoon reader preferences
-  useEffect(() => {
-    const loadWebtoonReaderPreferences = async () => {
-      try {
-        const saved = await AsyncStorage.getItem('webtoon_reader_preferences');
-        if (saved) {
-          const preferences = JSON.parse(saved);
-          setWebtoonReaderPreferences(preferences);
-          setDebugMode(preferences.debugMode);
-        }
-      } catch (error) {
-        console.error('Error loading webtoon reader preferences:', error);
-      }
-    };
-    loadWebtoonReaderPreferences();
-  }, []);
+    }, 500),
+    []
+  );
 
   // Save webtoon reader preferences function
   const saveWebtoonReaderPreferences = useCallback(async (preferences: typeof webtoonReaderPreferences) => {
-    try {
-      await AsyncStorage.setItem('webtoon_reader_preferences', JSON.stringify(preferences));
-      setWebtoonReaderPreferences(preferences);
-      setDebugMode(preferences.debugMode);
-    } catch (error) {
-      console.error('Error saving webtoon reader preferences:', error);
-    }
-  }, []);
+    setWebtoonReaderPreferences(preferences);
+    setDebugMode(preferences.debugMode);
+    savePreferencesDebounced(shouldAutoSave, preferences.debugMode, debugLevel, preferences);
+  }, [shouldAutoSave, debugLevel, savePreferencesDebounced]);
 
-  // Toggle functions
+  // Toggle functions with debounced saves
   const toggleDebugMode = useCallback(() => {
-    setDebugMode(prev => !prev);
-  }, []);
+    setDebugMode(prev => {
+      const newValue = !prev;
+      savePreferencesDebounced(shouldAutoSave, newValue, debugLevel, webtoonReaderPreferences);
+      return newValue;
+    });
+  }, [shouldAutoSave, debugLevel, webtoonReaderPreferences, savePreferencesDebounced]);
 
   const toggleAutoSave = useCallback(() => {
-    setShouldAutoSave(prev => !prev);
-  }, []);
+    setShouldAutoSave(prev => {
+      const newValue = !prev;
+      savePreferencesDebounced(newValue, debugMode, debugLevel, webtoonReaderPreferences);
+      return newValue;
+    });
+  }, [debugMode, debugLevel, webtoonReaderPreferences, savePreferencesDebounced]);
 
   // Save progress and navigate
   const handleSaveAndNavigate = useCallback(async () => {
@@ -724,108 +764,8 @@ export default function WebNovelReader() {
     }
   }, [progressTracker, params, isIncognito, images.length, navigationType, selectedChapter, getCurrentMangaId]);
 
-  // Webtoon-style image rendering with dynamic heights
-  const renderItem = useCallback(({ item: imageUrl, index }: { item: string, index: number }) => {
-    if (!isMounted.current) return null;
-    
-    const imageState = imageLoader.getImageState(index);
-    
-    // All images should load immediately (progressive loading disabled for stability)
-    const shouldLoad = true;
-    
-    // Calculate height based on image dimensions
-    let dynamicHeight = WINDOW_WIDTH; // Default to square if no dimensions yet
-    
-    if (imageState.height) {
-      // We have height from previous calculation
-      dynamicHeight = imageState.height;
-    } else {
-      // No dimensions yet, use fallback
-      dynamicHeight = 600;
-    }
-    
-    // Clamp height to reasonable bounds for webtoons (no minimum for proper display)
-    dynamicHeight = Math.min(dynamicHeight, WINDOW_HEIGHT * 3); // Allow very tall panels
-    
-    return (
-      <TouchableOpacity 
-        style={[styles.imageContainer, { height: dynamicHeight }]} 
-        activeOpacity={1} 
-        onPress={toggleUI}
-      >
-        {shouldLoad ? (
-          <ExpoImage
-            source={{ 
-              uri: imageUrl,
-              headers: imageHeaders 
-            }}
-            style={{
-              width: WINDOW_WIDTH,
-              height: dynamicHeight,
-              backgroundColor: '#000',
-              alignSelf: 'stretch',
-            }}
-            contentFit="contain" // Using contain to show full image while filling width
-            onLoadStart={() => {
-              if (isMounted.current) {
-                imageLoader.handleImageLoadStart(index);
-                console.log(`[WebNovelReader] 🔄 Loading image ${index + 1}/${images.length}`);
-              }
-            }}
-            onLoad={(event) => {
-              if (isMounted.current) {
-                const { width, height } = event.source;
-                imageLoader.handleImageLoadSuccess(index, width, height);
-                
-                // Log the actual aspect ratio for debugging
-                const actualRatio = width / height;
-                console.log(`[WebNovelReader] ✅ Loaded image ${index + 1}/${images.length} (${width}x${height}, ratio: ${actualRatio.toFixed(2)})`);
-              }
-            }}
-            onError={(error) => {
-              if (isMounted.current) {
-                console.error(`[WebNovelReader] ❌ Failed to load image ${index + 1}/${images.length}:`, error);
-                imageLoader.handleImageLoadError(index);
-              }
-            }}
-            cachePolicy="memory"
-            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-            transition={200}
-          />
-        ) : (
-          <View style={[styles.placeholderContainer, { height: dynamicHeight }]}>
-            <Text style={styles.placeholderText}>Loading page {index + 1}...</Text>
-          </View>
-        )}
-        
-        {imageState.isLoading && shouldLoad && (
-          <View style={styles.loadingOverlay}>
-            <Text style={styles.loadingText}>Loading page {index + 1}...</Text>
-          </View>
-        )}
-        
-        {imageState.hasError && shouldLoad && (
-          <TouchableOpacity 
-            style={styles.errorOverlay}
-            onPress={() => {
-              if (isMounted.current) {
-                console.log(`[WebNovelReader] Retrying image ${index + 1}`);
-                imageLoader.retryImage(index);
-              }
-            }}
-          >
-            <FontAwesome5 name="exclamation-triangle" size={24} color="#ff4444" />
-            <Text style={styles.imageErrorText}>Tap to retry</Text>
-          </TouchableOpacity>
-        )}
-      </TouchableOpacity>
-    );
-  }, [imageHeaders, imageLoader, loadedImageIndices]);
-
-  const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
-
   // Render settings modal
-  const renderSettingsModal = () => {
+  const renderSettingsModal = useCallback(() => {
     const renderDropdownMenu = () => {
       if (!showDebugDropdown) return null;
       
@@ -1240,7 +1180,24 @@ export default function WebNovelReader() {
         </View>
       </Modal>
     );
-  };
+  }, [isDarkMode, theme, showSettingsModal, showDebugDropdown, debugLevel, webtoonReaderPreferences, shouldAutoSave, debugMode, saveWebtoonReaderPreferences]);
+
+  // Memoized container style to prevent re-calculations
+  const containerStyle = useMemo(() => [styles.container], []);
+
+  // Memoized render item function to prevent recreation
+  const renderItem = useCallback(({ item: imageUrl, index }: { item: string, index: number }) => (
+    <MemoizedImageItem
+      imageUrl={imageUrl}
+      index={index}
+      imageHeaders={imageHeaders}
+      onToggleUI={toggleUI}
+      windowWidth={WINDOW_WIDTH}
+    />
+  ), [imageHeaders, toggleUI]);
+
+  // Memoized key extractor
+  const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
 
   if (error) {
     return (
@@ -1264,31 +1221,37 @@ export default function WebNovelReader() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={containerStyle}>
       <FlatList
-        ref={flashListRef}
+        ref={flatListRef}
         data={images}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
-        scrollEventThrottle={200}
+        scrollEventThrottle={100}
         scrollEnabled={true}
-        // Performance optimizations for Android - increased for better loading
-        initialNumToRender={10}
-        maxToRenderPerBatch={5}
-        windowSize={10}
-        removeClippedSubviews={true}
-        updateCellsBatchingPeriod={100}
-        // Remove getItemLayout for dynamic heights
-        // Memory optimization
+        // Optimized performance settings to reduce flickering
+        initialNumToRender={3}
+        maxToRenderPerBatch={2}
+        windowSize={5}
+        removeClippedSubviews={false}
+        updateCellsBatchingPeriod={50}
         legacyImplementation={false}
         disableVirtualization={false}
-        // Webtoon-specific optimizations
+        // Stable scrolling behavior
         bounces={true}
         bouncesZoom={false}
         alwaysBounceVertical={true}
         decelerationRate="normal"
+        // Reduce layout thrashing
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+          autoscrollToTopThreshold: 10
+        }}
+        // Improve scroll performance
+        onScrollToIndexFailed={() => {}}
+        getItemLayout={undefined}
       />
 
       <ReaderUI
@@ -1307,7 +1270,7 @@ export default function WebNovelReader() {
         onPreviousChapter={() => handleChapterNavigation('previous')}
         onSettings={() => setShowSettingsModal(true)}
         isInitialLoading={isInitialLoading}
-        loadingProgress={loadingProgress}
+        loadingProgress={100}
       />
 
       {/* Save Progress Modal */}
@@ -1787,12 +1750,10 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   imageContainer: {
-    position: 'relative',
     width: WINDOW_WIDTH,
     backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   mangaImage: {
     width: WINDOW_WIDTH,

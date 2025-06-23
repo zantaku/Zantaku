@@ -64,6 +64,7 @@ import {
   USE_PROXY,
   STORAGE_KEYS,
   DEBUG,
+  AUTO_DETECT_TIMING,
 } from './constants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -83,9 +84,9 @@ interface VideoData {
 const PlayerScreen: React.FC = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { preferences, setPreferences, anilistUser, onSaveToAniList, onEnterPiP } = usePlayerContext();
+  const { preferences, setPreferences, anilistUser, onSaveToAniList, onEnterPiP, isPipSupported, isInPipMode } = usePlayerContext();
   
-  // System PiP functionality
+  // Enhanced System PiP functionality for true system-wide PiP
   const handleSystemPiP = async () => {
     try {
       console.log('[SYSTEM PiP] 🚀 Attempting to enter native Picture-in-Picture mode...');
@@ -94,42 +95,36 @@ const PlayerScreen: React.FC = () => {
       const isSupported = ExpoVideo.isPictureInPictureSupported();
       
       if (!isSupported) {
-        Alert.alert(
-          'PiP Not Supported',
-          'Picture-in-Picture is not supported on this device or is disabled in settings.\n\nOn Android: Go to Settings → Apps → Kamilist → Picture-in-picture → Allow',
-          [{ text: 'OK' }]
-        );
-        return;
+        console.log('[SYSTEM PiP] ⚠️ PiP not supported on this device');
+        // Don't show alert, just silently fail for better UX
+        return false;
       }
       
-      // Try to enter PiP mode using VideoView
-      if (videoRef.current) {
-        try {
-          await videoRef.current.startPictureInPicture();
-          setPipMode(true);
-          console.log('[SYSTEM PiP] ✅ Successfully entered native Picture-in-Picture mode!');
-        } catch (pipError) {
-          console.error('[SYSTEM PiP] ❌ Failed to enter PiP mode:', pipError);
-          Alert.alert(
-            'PiP Failed',
-            'Unable to enter Picture-in-Picture mode. Make sure PiP is enabled in your device settings and try again.',
-            [{ text: 'OK' }]
-          );
-        }
-      } else {
-        Alert.alert(
-          'Player Not Ready',
-          'Video player is not ready for Picture-in-Picture mode. Try again in a moment.',
-          [{ text: 'OK' }]
-        );
-      }
+             // Try to enter PiP mode using VideoView ref (most reliable method)
+       if (videoRef.current && videoRef.current.startPictureInPicture) {
+         try {
+           await videoRef.current.startPictureInPicture();
+           setPipMode(true);
+           console.log('[SYSTEM PiP] ✅ Successfully entered native Picture-in-Picture mode!');
+           return true;
+         } catch (pipError) {
+           console.error('[SYSTEM PiP] ❌ Failed to enter PiP mode:', pipError);
+           
+           // Show user-friendly message
+           Alert.alert(
+             'Picture-in-Picture',
+             'Unable to enter Picture-in-Picture mode. This feature may not be available on your device.',
+             [{ text: 'OK' }]
+           );
+           return false;
+         }
+       } else {
+         console.log('[SYSTEM PiP] ⚠️ Video player not ready or PiP method not available');
+         return false;
+       }
     } catch (error) {
       console.error('[SYSTEM PiP] ❌ Error with system PiP:', error);
-      Alert.alert(
-        'PiP Error',
-        'Unable to access Picture-in-Picture features.',
-        [{ text: 'OK' }]
-      );
+      return false;
     }
   };
 
@@ -143,6 +138,8 @@ const PlayerScreen: React.FC = () => {
     console.log('[SYSTEM PiP] 📱 Exited system Picture-in-Picture mode');
     setPipMode(false);
   }, []);
+
+
   
   // Video refs and state
   const videoRef = useRef<any>(null);
@@ -190,6 +187,12 @@ const PlayerScreen: React.FC = () => {
   // Timing and skip state
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
+  
+  // Auto-detected timing state (when source doesn't provide timing data)
+  const [autoDetectedTiming, setAutoDetectedTiming] = useState<{
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  } | null>(null);
   
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -272,6 +275,35 @@ const PlayerScreen: React.FC = () => {
       return () => clearInterval(timeUpdateInterval);
     }
   }, [videoPlayer]); // Only depend on videoPlayer creation
+
+  // Auto-enter PiP when app goes to background (for seamless UX)
+  useEffect(() => {
+    const { AppState } = require('react-native');
+    
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'background' && videoPlayer && !paused && videoData) {
+        console.log('[AUTO PiP] 🔄 App going to background, attempting auto-PiP...');
+        // Small delay to ensure app state transition is complete
+        setTimeout(() => {
+          handleSystemPiP().then((success) => {
+            if (success) {
+              console.log('[AUTO PiP] ✅ Auto-PiP successful');
+            } else {
+              console.log('[AUTO PiP] ❌ Auto-PiP failed');
+            }
+          });
+        }, 100);
+      }
+    };
+
+    const subscription = AppState?.addEventListener?.('change', handleAppStateChange);
+    
+    return () => {
+      if (subscription) {
+        subscription.remove();
+      }
+    };
+  }, [videoPlayer, paused, videoData, handleSystemPiP]);
 
   // Sync preferences when videoPlayer is created or preferences change
   const lastVolumeRef = useRef(preferences.volume);
@@ -512,6 +544,100 @@ const PlayerScreen: React.FC = () => {
     }
   }, [currentTime, videoData?.timings, showSkipIntro, showSkipOutro]);
 
+  // Auto-detect intro/outro timing when not provided by source
+  useEffect(() => {
+    console.log('[AUTO-DETECT] 🔍 Checking conditions:', {
+      hasTimings: !!videoData?.timings,
+      duration,
+      autoDetectEnabled: AUTO_DETECT_TIMING.ENABLED,
+      hasAutoDetected: !!autoDetectedTiming
+    });
+    
+    if (!videoData?.timings && duration > 0 && AUTO_DETECT_TIMING.ENABLED && !autoDetectedTiming) {
+      console.log('[AUTO-DETECT] 🎯 No timing data provided, auto-detecting intro/outro...');
+      
+      const detectedTiming: { intro?: { start: number; end: number }; outro?: { start: number; end: number } } = {};
+      
+      // Auto-detect intro timing
+      if (duration > AUTO_DETECT_TIMING.INTRO.END) {
+        detectedTiming.intro = {
+          start: AUTO_DETECT_TIMING.INTRO.START,
+          end: AUTO_DETECT_TIMING.INTRO.END
+        };
+        console.log('[AUTO-DETECT] 🎵 Detected intro timing:', detectedTiming.intro);
+      }
+      
+      // Auto-detect outro timing based on episode duration
+      if (duration > AUTO_DETECT_TIMING.OUTRO.START_OFFSET_FROM_END + AUTO_DETECT_TIMING.OUTRO.MIN_DURATION) {
+        const outroStart = duration - AUTO_DETECT_TIMING.OUTRO.START_OFFSET_FROM_END;
+        const outroEnd = duration - AUTO_DETECT_TIMING.OUTRO.END_OFFSET_FROM_END;
+        
+        if (outroEnd > outroStart && (outroEnd - outroStart) >= AUTO_DETECT_TIMING.OUTRO.MIN_DURATION) {
+          detectedTiming.outro = {
+            start: outroStart,
+            end: outroEnd
+          };
+          console.log('[AUTO-DETECT] 🎶 Detected outro timing:', detectedTiming.outro);
+        }
+      }
+      
+      if (detectedTiming.intro || detectedTiming.outro) {
+        setAutoDetectedTiming(detectedTiming);
+        console.log('[AUTO-DETECT] ✅ Auto-detection complete:', detectedTiming);
+      } else {
+        console.log('[AUTO-DETECT] ❌ No timing detected - duration too short?');
+      }
+    }
+  }, [duration, videoData?.timings, autoDetectedTiming]);
+
+  // Check for intro/outro timing using both provided and auto-detected data
+  useEffect(() => {
+    // Use provided timing data if available, otherwise use auto-detected
+    const timingData = videoData?.timings || autoDetectedTiming;
+    
+    console.log('[SKIP] 🔍 Checking skip buttons:', {
+      currentTime,
+      timingData,
+      showSkipIntro,
+      showSkipOutro
+    });
+    
+    if (timingData) {
+      const { intro, outro } = timingData;
+      
+      const shouldShowIntro = !!(intro && currentTime >= intro.start && currentTime <= intro.end);
+      const shouldShowOutro = !!(outro && currentTime >= outro.start && currentTime <= outro.end);
+      
+      console.log('[SKIP] 📊 Skip button logic:', {
+        intro,
+        outro,
+        shouldShowIntro,
+        shouldShowOutro,
+        currentTime
+      });
+      
+      if (shouldShowIntro !== showSkipIntro) {
+        setShowSkipIntro(shouldShowIntro);
+        if (shouldShowIntro) {
+          console.log('[SKIP] 🎵 Showing skip intro button');
+        } else {
+          console.log('[SKIP] 🎵 Hiding skip intro button');
+        }
+      }
+      
+      if (shouldShowOutro !== showSkipOutro) {
+        setShowSkipOutro(shouldShowOutro);
+        if (shouldShowOutro) {
+          console.log('[SKIP] 🎶 Showing skip outro button');
+        } else {
+          console.log('[SKIP] 🎶 Hiding skip outro button');
+        }
+      }
+    } else {
+      console.log('[SKIP] ⚠️ No timing data available for skip buttons');
+    }
+  }, [currentTime, videoData?.timings, autoDetectedTiming, showSkipIntro, showSkipOutro]);
+
   // No longer needed - using expo-video's built-in event system
 
   // Control handlers - Updated for expo-video
@@ -598,16 +724,34 @@ const PlayerScreen: React.FC = () => {
   }, [currentTime, handleSeek]);
 
   const handleSkipIntro = useCallback(() => {
-    if (videoData?.timings?.intro) {
-      handleSeek(videoData.timings.intro.end);
+    // Use provided timing data if available, otherwise use auto-detected
+    const timingData = videoData?.timings || autoDetectedTiming;
+    
+    if (timingData?.intro) {
+      console.log('[SKIP] ⏭️ Skipping intro to:', timingData.intro.end);
+      handleSeek(timingData.intro.end);
+    } else {
+      // Fallback: skip default intro duration from current time
+      const skipTo = Math.min(currentTime + PLAYER_BEHAVIOR.SKIP_INTRO_DURATION, duration);
+      console.log('[SKIP] ⏭️ Fallback intro skip to:', skipTo);
+      handleSeek(skipTo);
     }
-  }, [videoData?.timings, handleSeek]);
+  }, [videoData?.timings, autoDetectedTiming, handleSeek, currentTime, duration]);
 
   const handleSkipOutro = useCallback(() => {
-    if (videoData?.timings?.outro) {
-      handleSeek(videoData.timings.outro.end);
+    // Use provided timing data if available, otherwise use auto-detected
+    const timingData = videoData?.timings || autoDetectedTiming;
+    
+    if (timingData?.outro) {
+      console.log('[SKIP] ⏭️ Skipping outro to:', timingData.outro.end);
+      handleSeek(timingData.outro.end);
+    } else {
+      // Fallback: skip to near the end
+      const skipTo = Math.max(duration - 30, currentTime + 30); // Skip to 30s before end or 30s forward
+      console.log('[SKIP] ⏭️ Fallback outro skip to:', skipTo);
+      handleSeek(skipTo);
     }
-  }, [videoData?.timings, handleSeek]);
+  }, [videoData?.timings, autoDetectedTiming, handleSeek, currentTime, duration]);
 
   // Toggle controls visibility
   const toggleControls = useCallback(() => {
@@ -851,6 +995,8 @@ const PlayerScreen: React.FC = () => {
         onToggleFullscreen={handleToggleFullscreen}
         onSkipIntro={showSkipIntro ? handleSkipIntro : undefined}
         showSkipIntro={showSkipIntro}
+        onSkipOutro={showSkipOutro ? handleSkipOutro : undefined}
+        showSkipOutro={showSkipOutro}
         progress={progress}
         onSettingsPress={() => setShowSettingsModal(true)}
         onSubtitlePress={() => setShowSubtitleOptions(true)}
@@ -866,8 +1012,10 @@ const PlayerScreen: React.FC = () => {
         showControls={showControls}
         onToggleControls={toggleControls}
         disabled={showSettingsModal || showSubtitleOptions || showSpeedOptions || showSaveProgressModal || showExitModal}
-        onPiPPress={onEnterPiP}
+        onVideoFitPress={handleToggleFullscreen}
         onSystemPiPPress={handleSystemPiP}
+        timingMarkers={videoData?.timings || autoDetectedTiming || undefined}
+        showMarkers={preferences?.markerSettings?.showMarkers !== false}
       />
 
       {/* Subtitles */}

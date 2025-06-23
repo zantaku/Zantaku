@@ -9,6 +9,9 @@ buildscript {
         kotlinVersion = findProperty('android.kotlinVersion') ?: '1.9.25'
 
         ndkVersion = "26.1.10909125"
+        
+        // Remove ffmpeg-kit package configuration to avoid dependency resolution
+        // ffmpegKitPackage = "https"
     }
     repositories {
         google()
@@ -37,5 +40,10 @@ allprojects {
         google()
         mavenCentral()
         maven { url 'https://www.jitpack.io' }
+        
+        // Add flatDir repository for local AAR files
+        flatDir {
+            dirs "$rootDir/libs"
+        }
     }
 }

@@ -2,6 +2,8 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+import java.net.URL
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -141,6 +143,13 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    
+    // Add repository for accessing local AAR files
+    repositories {
+        flatDir {
+            dirs "$rootDir/libs"
+        }
+    }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
@@ -190,4 +199,40 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // Add ffmpeg-kit dependencies using local AAR and required companion library
+    implementation(name: 'ffmpeg-kit-https', ext: 'aar')
+    implementation 'com.arthenica:smart-exception-java:0.2.1'
+}
+
+// Add script to download FFmpeg Kit AAR from alternative source
+afterEvaluate {
+    def aarUrl = 'https://github.com/NooruddinLakhani/ffmpeg-kit-full-gpl/releases/download/v1.0.0/ffmpeg-kit-full-gpl.aar'
+    def aarFile = file("${rootDir}/libs/ffmpeg-kit-https.aar")
+
+    tasks.register("downloadFFmpegKitAar") {
+        doLast {
+            if (!aarFile.parentFile.exists()) {
+                println "📁 Creating directory: ${aarFile.parentFile.absolutePath}"
+                aarFile.parentFile.mkdirs()
+            }
+            if (!aarFile.exists()) {
+                println "⏬ Downloading FFmpeg Kit AAR from $aarUrl..."
+                try {
+                    new URL(aarUrl).withInputStream { i ->
+                        aarFile.withOutputStream { it << i }
+                    }
+                    println "✅ FFmpeg Kit AAR downloaded to ${aarFile.absolutePath}"
+                } catch (Exception e) {
+                    println "❌ Failed to download FFmpeg Kit AAR: ${e.message}"
+                    println "Please manually download the AAR file and place it at ${aarFile.absolutePath}"
+                }
+            } else {
+                println "ℹ️ FFmpeg Kit AAR already exists at ${aarFile.absolutePath}"
+            }
+        }
+    }
+
+    // Make sure the AAR is downloaded before compilation begins
+    preBuild.dependsOn("downloadFFmpegKitAar")
 }

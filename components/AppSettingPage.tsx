@@ -172,6 +172,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
   // Social media links
   const socialLinks = [
     { icon: 'discord', url: 'https://discord.gg/Pm7KyBYdA5', color: '#5865F2' },
+    { icon: 'telegram', url: 'https://t.me/zantakuapp', color: '#0088CC' },
     { icon: 'github', url: 'https://github.com/zantaku/', color: '#333333' },
     { icon: 'reddit', url: 'https://www.reddit.com/r/Zantaku/', color: '#FF4500' },
     { icon: 'youtube', url: 'https://www.youtube.com/@Zantaku', color: '#FF0000' },
@@ -234,12 +235,16 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
           (!user || user.isAnonymous) && styles.copyrightSectionGuest
         ]}>
           <TouchableOpacity 
-            style={styles.footerContent}
-            onPress={() => router.push('https://www.zantaku.com')}
+            style={[styles.footerContent, { backgroundColor: currentTheme.colors.surface || 'rgba(0,0,0,0.02)' }]}
+            onPress={() => openLink('https://www.zantaku.com')}
+            activeOpacity={0.7}
           >
             <Logo width={120} height={40} variant="auto" />
             <Text style={[styles.versionText, { color: currentTheme.colors.textSecondary }]}>
-              Early Access V1.5
+              Public Beta V1.5
+            </Text>
+            <Text style={[styles.tapHintText, { color: currentTheme.colors.textSecondary }]}>
+              Tap to visit website
             </Text>
           </TouchableOpacity>
           
@@ -248,8 +253,12 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
             {socialLinks.map((social, index) => (
               <TouchableOpacity
                 key={index}
-                style={styles.socialButton}
+                style={[
+                  styles.socialButton,
+                  { backgroundColor: `${social.color}15` }
+                ]}
                 onPress={() => openLink(social.url)}
+                activeOpacity={0.6}
               >
                 <FontAwesome5 name={social.icon} size={22} color={social.color} />
               </TouchableOpacity>
@@ -330,10 +339,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     marginVertical: 16,
+    flexWrap: 'wrap',
   },
   socialButton: {
-    marginHorizontal: 12,
-    padding: 8,
+    marginHorizontal: 8,
+    marginVertical: 4,
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 48,
+    minHeight: 48,
   },
   copyrightText: {
     fontSize: 12,
@@ -343,6 +359,16 @@ const styles = StyleSheet.create({
   footerContent: {
     alignItems: 'center',
     marginBottom: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    minWidth: 200,
+  },
+  tapHintText: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.6,
+    fontStyle: 'italic',
   },
   versionText: {
     fontSize: 14,

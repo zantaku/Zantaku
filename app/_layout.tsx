@@ -226,6 +226,40 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
+          name="notifications"
+          options={{
+            headerTransparent: true,
+            headerBlurEffect: isDarkMode ? 'dark' : 'light',
+            headerBackground: () => (
+              <BlurView 
+                tint={isDarkMode ? 'dark' : 'light'} 
+                intensity={100} 
+                style={StyleSheet.absoluteFill} 
+              />
+            ),
+            headerTitle: () => (
+              <View style={styles.headerTitle}>
+                <Text 
+                  style={[styles.headerTitleText, { color: currentTheme.colors.text }]}
+                  numberOfLines={1}
+                >
+                  Notifications
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <TouchableOpacity 
+                style={styles.headerButton}
+                onPress={() => DeviceEventEmitter.emit('clearNotifications')}
+              >
+                <Text style={[{ color: currentTheme.colors.text, fontSize: 16, fontWeight: '600' }]}>
+                  Clear
+                </Text>
+              </TouchableOpacity>
+            ),
+          }}
+        />
+        <Stack.Screen
           name="theme"
           options={{
             headerShown: false,

@@ -46,6 +46,8 @@ interface PlayerContextType {
   }) => Promise<boolean>;
   onEnterPiP?: () => void;
   onExitPiP?: () => void;
+  isPipSupported?: boolean;
+  isInPipMode?: boolean;
 }
 
 const defaultPreferences: PlayerPreferences = {
@@ -80,7 +82,9 @@ export const PlayerContext = createContext<PlayerContextType>({
   setAnilistUser: () => {},
   onSaveToAniList: undefined,
   onEnterPiP: undefined,
-  onExitPiP: undefined
+  onExitPiP: undefined,
+  isPipSupported: false,
+  isInPipMode: false
 });
 
 export const usePlayerContext = () => useContext(PlayerContext);
@@ -96,7 +100,9 @@ export const PlayerProvider: React.FC<{
   }) => Promise<boolean>;
   onEnterPiP?: () => void;
   onExitPiP?: () => void;
-}> = ({ children, anilistUser: initialAnilistUser, onSaveToAniList, onEnterPiP, onExitPiP }) => {
+  isPipSupported?: boolean;
+  isInPipMode?: boolean;
+}> = ({ children, anilistUser: initialAnilistUser, onSaveToAniList, onEnterPiP, onExitPiP, isPipSupported = false, isInPipMode = false }) => {
   const [preferences, setPreferences] = useState<PlayerPreferences>(defaultPreferences);
   const [anilistUser, setAnilistUser] = useState<AniListUser | null>(initialAnilistUser || null);
 
@@ -108,7 +114,9 @@ export const PlayerProvider: React.FC<{
       setAnilistUser,
       onSaveToAniList,
       onEnterPiP,
-      onExitPiP
+      onExitPiP,
+      isPipSupported,
+      isInPipMode
     }}>
       {children}
     </PlayerContext.Provider>

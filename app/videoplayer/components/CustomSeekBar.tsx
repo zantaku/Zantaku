@@ -24,6 +24,11 @@ interface CustomSeekBarProps {
   onSeek: (time: number) => void;
   disabled?: boolean;
   style?: any;
+  timingMarkers?: {
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  };
+  showMarkers?: boolean;
 }
 
 const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
@@ -36,6 +41,8 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
   onSeek,
   disabled = false,
   style,
+  timingMarkers,
+  showMarkers = false,
 }) => {
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekTime, setSeekTime] = useState(0);
@@ -250,6 +257,37 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
             ]}
           />
           
+          {/* Timing Markers */}
+          {showMarkers && timingMarkers && duration > 0 && (
+            <>
+              {/* Intro marker */}
+              {timingMarkers.intro && (
+                <View
+                  style={[
+                    styles.introMarker,
+                    {
+                      left: `${(timingMarkers.intro.start / duration) * 100}%`,
+                      width: `${((timingMarkers.intro.end - timingMarkers.intro.start) / duration) * 100}%`,
+                    },
+                  ]}
+                />
+              )}
+              
+              {/* Outro marker */}
+              {timingMarkers.outro && (
+                <View
+                  style={[
+                    styles.outroMarker,
+                    {
+                      left: `${(timingMarkers.outro.start / duration) * 100}%`,
+                      width: `${((timingMarkers.outro.end - timingMarkers.outro.start) / duration) * 100}%`,
+                    },
+                  ]}
+                />
+              )}
+            </>
+          )}
+          
           {/* Current progress */}
           <View
             style={[
@@ -361,6 +399,22 @@ const styles = StyleSheet.create({
     backgroundColor: PLAYER_COLORS.PRIMARY,
     transform: [{ translateY: -15 }],
     pointerEvents: 'none',
+  },
+  introMarker: {
+    position: 'absolute',
+    left: 8,
+    height: 4,
+    backgroundColor: '#FF6B35', // Orange for intro
+    borderRadius: 2,
+    opacity: 0.8,
+  },
+  outroMarker: {
+    position: 'absolute',
+    left: 8,
+    height: 4,
+    backgroundColor: '#9B59B6', // Purple for outro
+    borderRadius: 2,
+    opacity: 0.8,
   },
 });
 

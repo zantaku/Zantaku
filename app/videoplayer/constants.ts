@@ -42,7 +42,7 @@ export const PLAYER_COLORS = {
 
 // Constants for player behavior
 export const PLAYER_BEHAVIOR = {
-  CONTROLS_HIDE_DELAY: 4000, // ms
+  CONTROLS_HIDE_DELAY: 8000, // ms - increased from 4s to 8s for better UX
   DOUBLE_TAP_SEEK_TIME: 10, // seconds to seek on double tap
   SKIP_INTRO_DURATION: 90, // default seconds to skip for OP/ED
   SEEK_DEBOUNCE_MS: 50, // ms to debounce seek operations for HLS (optimized for responsiveness)
@@ -113,6 +113,34 @@ export const DEFAULT_TIMING_MARKERS = {
     START: 1290, // 21:30 - typical anime outro start (assuming 24min episode)
     END: 1380, // 23:00
   },
+};
+
+// Auto-detection settings for intro/outro when not provided by source
+export const AUTO_DETECT_TIMING = {
+  // Enable auto-detection for sources that don't provide timing data
+  ENABLED: true,
+  
+  // Intro detection - typically at the beginning
+  INTRO: {
+    START: 5, // Start checking after 5 seconds (was 30) - for immediate visibility
+    END: 120, // Typical anime intro is 90-120 seconds
+    MIN_DURATION: 60, // Minimum intro duration to consider valid
+  },
+  
+  // Outro detection - typically near the end
+  OUTRO: {
+    // Calculate based on episode duration (will be set dynamically)
+    START_OFFSET_FROM_END: 180, // Start checking 3 minutes before end
+    END_OFFSET_FROM_END: 30, // End 30 seconds before actual end
+    MIN_DURATION: 60, // Minimum outro duration to consider valid
+  },
+  
+  // Common anime episode durations for better detection
+  COMMON_DURATIONS: {
+    SHORT: 24 * 60, // 24 minutes
+    STANDARD: 23.5 * 60, // 23.5 minutes  
+    LONG: 25 * 60, // 25 minutes
+  }
 };
 
 // Anime quotes for modals

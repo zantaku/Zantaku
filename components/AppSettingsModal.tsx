@@ -11,7 +11,8 @@ import {
   Image,
   ImageBackground,
   Switch,
-  ActivityIndicator
+  ActivityIndicator,
+  DeviceEventEmitter
 } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
@@ -62,6 +63,10 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   
+  // Notification state
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  
   // Bottom sheet ref
   const bottomSheetRef = useRef<BottomSheet>(null);
   
@@ -72,14 +77,35 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
   useEffect(() => {
     if (visible) {
       bottomSheetRef.current?.expand();
-      if (user && !user.isAnonymous && !randomAnime && !randomManga) {
-        fetchRandomMedia();
+      if (user && !user.isAnonymous) {
+        if (!randomAnime && !randomManga) {
+          fetchRandomMedia();
+        }
         checkVerificationStatus();
+        fetchUnreadNotificationCount();
       }
     } else {
       bottomSheetRef.current?.close();
     }
   }, [visible, user]);
+
+  // Listen for notification events to update badge count
+  useEffect(() => {
+    const notificationReadListener = DeviceEventEmitter.addListener('notificationRead', () => {
+      // Decrease count by 1
+      setUnreadNotificationCount(prev => Math.max(0, prev - 1));
+    });
+
+    const notificationsClearedListener = DeviceEventEmitter.addListener('notificationsCleared', () => {
+      // Set count to 0
+      setUnreadNotificationCount(0);
+    });
+
+    return () => {
+      notificationReadListener.remove();
+      notificationsClearedListener.remove();
+    };
+  }, []);
   
   // Check user verification status
   const checkVerificationStatus = async () => {
@@ -307,6 +333,125 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
     }
   };
   
+  // Fetch unread notification count
+  const fetchUnreadNotificationCount = async () => {
+    if (!user || loadingNotifications) return;
+    
+    try {
+      setLoadingNotifications(true);
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      if (!token) {
+        console.log("No auth token available");
+        setLoadingNotifications(false);
+        return;
+      }
+      
+      // Query to get recent notifications - we'll count them as "unread" for display
+      const query = `
+        query {
+          Page(page: 1, perPage: 20) {
+            pageInfo {
+              total
+            }
+            notifications {
+              ... on AiringNotification {
+                id
+                createdAt
+                episode
+                media {
+                  title {
+                    userPreferred
+                  }
+                }
+              }
+              ... on MediaDataChangeNotification {
+                id
+                createdAt
+                media {
+                  title {
+                    userPreferred
+                  }
+                }
+              }
+              ... on ActivityLikeNotification {
+                id
+                createdAt
+                user {
+                  name
+                }
+              }
+              ... on ActivityReplyNotification {
+                id
+                createdAt
+                user {
+                  name
+                }
+              }
+              ... on FollowingNotification {
+                id
+                createdAt
+                user {
+                  name
+                }
+              }
+              ... on ActivityMessageNotification {
+                id
+                createdAt
+                user {
+                  name
+                }
+              }
+            }
+          }
+        }
+      `;
+      
+      console.log("Fetching notification count...");
+      const response = await axios.post(
+        ANILIST_GRAPHQL_ENDPOINT,
+        {
+          query
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
+      
+      if (response.data?.errors) {
+        console.error('GraphQL errors:', response.data.errors);
+        return;
+      }
+      
+      const notifications = response.data?.data?.Page?.notifications || [];
+      
+      // Filter notifications from the last 7 days to show as "new"
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      const recentNotifications = notifications.filter((notif: any) => {
+        const notifTime = notif.createdAt * 1000;
+        return notifTime > sevenDaysAgo;
+      });
+      
+      const unreadCount = recentNotifications.length;
+      setUnreadNotificationCount(Math.min(unreadCount, 99)); // Cap at 99 for display
+      
+      console.log(`Found ${unreadCount} recent notifications`);
+      
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
+      // Set a default count if there's an error but user is authenticated
+      if (user && !user.isAnonymous) {
+        setUnreadNotificationCount(0);
+      }
+    } finally {
+      setLoadingNotifications(false);
+    }
+  };
+  
   // Rendering backdrop component
   const renderBackdrop = useCallback(
     (props: any) => (
@@ -353,6 +498,12 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
   const navigateToActivities = () => {
     onClose();
     router.push('/activitiespage');
+  };
+
+  // Add function to navigate to notifications
+  const navigateToNotifications = () => {
+    onClose();
+    router.push('/notifications');
   };
 
   // Get the best available image from a media entry
@@ -470,25 +621,50 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
                 </TouchableOpacity>
               </View>
             </View>
-            <TouchableOpacity 
-              style={[
-                styles.logoutButton,
-                user?.isAnonymous && { backgroundColor: 'rgba(2, 169, 255, 0.1)' }
-              ]}
-              onPress={user?.isAnonymous ? handleLogin : handleSignOut}
-            >
-              <Text style={[
-                styles.logoutText,
-                user?.isAnonymous && { color: '#02A9FF' }
-              ]}>
-                {user?.isAnonymous ? 'Login with AniList' : 'Logout'}
-              </Text>
-              <FontAwesome5 
-                name="chevron-right" 
-                size={14} 
-                color={user?.isAnonymous ? '#02A9FF' : '#FF3B30'} 
-              />
-            </TouchableOpacity>
+            
+            <View style={styles.profileActions}>
+              {/* Notification Bell - Only show for logged in users */}
+              {!user?.isAnonymous && (
+                <TouchableOpacity 
+                  style={styles.notificationButton}
+                  onPress={navigateToNotifications}
+                >
+                  <FontAwesome5 
+                    name="bell" 
+                    size={18} 
+                    color={isDarkMode ? '#FFFFFF' : '#333333'} 
+                  />
+                  {unreadNotificationCount > 0 && (
+                    <View style={styles.notificationBadge}>
+                      <Text style={styles.notificationBadgeText}>
+                        {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+              
+              {/* Logout/Login Button */}
+              <TouchableOpacity 
+                style={[
+                  styles.logoutButton,
+                  user?.isAnonymous && { backgroundColor: 'rgba(2, 169, 255, 0.1)' }
+                ]}
+                onPress={user?.isAnonymous ? handleLogin : handleSignOut}
+              >
+                <Text style={[
+                  styles.logoutText,
+                  user?.isAnonymous && { color: '#02A9FF' }
+                ]}>
+                  {user?.isAnonymous ? 'Login with AniList' : 'Logout'}
+                </Text>
+                <FontAwesome5 
+                  name="chevron-right" 
+                  size={14} 
+                  color={user?.isAnonymous ? '#02A9FF' : '#FF3B30'} 
+                />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Quick Access Buttons - Only show for logged in users */}
@@ -807,6 +983,36 @@ const styles = StyleSheet.create({
   clickableText: {
     textDecorationLine: 'none',
     opacity: 0.95,
+  },
+
+  // Profile Actions Styles
+  profileActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  notificationButton: {
+    padding: 8,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  notificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

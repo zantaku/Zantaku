@@ -17,6 +17,8 @@ interface VideoControlsProps {
   onToggleFullscreen: () => void;
   onSkipIntro?: () => void;
   showSkipIntro?: boolean;
+  onSkipOutro?: () => void;
+  showSkipOutro?: boolean;
   progress: VideoProgressData;
   onSettingsPress?: () => void;
   onSubtitlePress?: () => void;
@@ -34,6 +36,12 @@ interface VideoControlsProps {
   disabled?: boolean;
   onPiPPress?: () => void;
   onSystemPiPPress?: () => void;
+  onVideoFitPress?: () => void;
+  timingMarkers?: {
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  };
+  showMarkers?: boolean;
 }
 
 const VideoControls = ({
@@ -47,6 +55,8 @@ const VideoControls = ({
   onToggleFullscreen,
   onSkipIntro,
   showSkipIntro = false,
+  onSkipOutro,
+  showSkipOutro = false,
   progress,
   onSettingsPress,
   onSubtitlePress,
@@ -63,7 +73,10 @@ const VideoControls = ({
   onToggleControls,
   disabled = false,
   onPiPPress,
-  onSystemPiPPress
+  onSystemPiPPress,
+  onVideoFitPress,
+  timingMarkers,
+  showMarkers = false
 }: VideoControlsProps) => {
   const { preferences } = usePlayerContext();
   const [isSeeking, setIsSeeking] = useState(false);
@@ -244,6 +257,26 @@ const VideoControls = ({
         </Animated.View>
       )}
       
+      {/* Skip Outro Button */}
+      {showSkipOutro && (
+        <Animated.View 
+          style={[
+            styles.skipOutroContainer,
+            { opacity: fadeAnim }
+          ]}
+        >
+          <TouchableOpacity 
+            style={styles.skipOutroButton}
+            onPress={onSkipOutro}
+          >
+            <Text style={styles.skipOutroText}>Skip Outro</Text>
+            <View style={styles.iconWrapper}>
+              <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+      
       {/* Bottom Controls */}
       <Animated.View 
         style={[
@@ -264,6 +297,8 @@ const VideoControls = ({
             onSeek={onSeek}
             disabled={duration === 0}
             style={styles.customSeekBar}
+            timingMarkers={timingMarkers}
+            showMarkers={showMarkers}
           />
         </View>
         
@@ -276,9 +311,9 @@ const VideoControls = ({
             </Text>
           </View>
           
-                  {/* Control Buttons - Right Side */}
-<View style={styles.controlButtonsContainer}>
-              {/* Subtitles */}
+          {/* Control Buttons - Right Side */}
+          <View style={styles.controlButtonsContainer}>
+            {/* Subtitles */}
             <TouchableOpacity 
               style={[
                 styles.controlButton,
@@ -296,27 +331,27 @@ const VideoControls = ({
               </View>
             </TouchableOpacity>
             
-            {/* Playback Speed */}
+            {/* Video Fit/Scale */}
             <TouchableOpacity 
               style={styles.controlButton} 
-              onPress={onSpeedPress}
-              accessibilityLabel="Speed"
+              onPress={onVideoFitPress}
+              accessibilityLabel="Video Fit/Scale"
             >
               <View style={styles.iconWrapper}>
                 <Ionicons 
-                  name="speedometer" 
+                  name="resize" 
                   size={24} 
                   color={PLAYER_COLORS.TEXT_LIGHT} 
                 />
               </View>
             </TouchableOpacity>
             
-            {/* System Picture-in-Picture Toggle - SECOND TO LAST BUTTON */}
+            {/* System Picture-in-Picture */}
             {onSystemPiPPress && (
               <TouchableOpacity 
                 style={styles.controlButton} 
                 onPress={onSystemPiPPress}
-                accessibilityLabel="System Picture in Picture"
+                accessibilityLabel="Picture in Picture"
               >
                 <View style={styles.iconWrapper}>
                   <Ionicons 
@@ -327,40 +362,7 @@ const VideoControls = ({
                 </View>
               </TouchableOpacity>
             )}
-            
-            {/* Fullscreen Toggle - LAST BUTTON */}
-            <TouchableOpacity 
-              style={styles.controlButton} 
-              onPress={onToggleFullscreen}
-              accessibilityLabel="Fullscreen"
-            >
-              <View style={styles.iconWrapper}>
-                <Ionicons 
-                  name="resize-outline" 
-                  size={24} 
-                  color={PLAYER_COLORS.TEXT_LIGHT} 
-                />
-              </View>
-            </TouchableOpacity>
-            
-            {/* In-App Picture-in-Picture Toggle - MOVED TO HIDDEN */}
-            {false && onPiPPress && (
-              <TouchableOpacity 
-                style={styles.controlButton} 
-                onPress={onPiPPress}
-                accessibilityLabel="In-App Picture in Picture"
-              >
-                <View style={styles.iconWrapper}>
-                  <Ionicons 
-                    name="contract-outline" 
-                    size={24} 
-                    color={PLAYER_COLORS.TEXT_LIGHT} 
-                  />
-                </View>
-              </TouchableOpacity>
-            )}
-</View>
-
+          </View>
         </View>
       </Animated.View>
     </View>
@@ -519,6 +521,27 @@ const styles = StyleSheet.create({
     borderColor: PLAYER_COLORS.PRIMARY,
   },
   skipIntroText: {
+    color: PLAYER_COLORS.TEXT_LIGHT,
+    fontSize: 14,
+    marginRight: 4,
+  },
+  skipOutroContainer: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    zIndex: 150,
+  },
+  skipOutroButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(13, 27, 42, 0.8)', // Updated to blue with transparency
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: PLAYER_COLORS.PRIMARY,
+  },
+  skipOutroText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
     fontSize: 14,
     marginRight: 4,
