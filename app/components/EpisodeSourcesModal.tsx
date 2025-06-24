@@ -21,6 +21,8 @@ import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { ScrollView } from 'react-native';
 import { animeProviderManager } from '../../api/proxy/providers/anime';
+import { zoroProvider } from '../../api/proxy/providers/anime/zorohianime';
+import { animePaheProvider } from '../../api/proxy/providers/anime/animepahe';
 
 const ShimmerPlaceholder = createShimmerPlaceholder(ExpoLinearGradient);
 const AnimatedLinearGradient = Reanimated.createAnimatedComponent(ExpoLinearGradient);
@@ -438,7 +440,8 @@ export default function EpisodeSourcesModal({
   malId,
   anilistId,
   autoSelectSource = false,
-  mangaTitle
+  mangaTitle,
+  currentProvider
 }: {
   visible: boolean;
   episodeId: string;
@@ -450,6 +453,7 @@ export default function EpisodeSourcesModal({
   anilistId?: string;
   autoSelectSource?: boolean;
   mangaTitle?: string;
+  currentProvider?: string;
 }) {
   // Load source settings
   const sourceSettings = useSourceSettings();
@@ -479,6 +483,7 @@ export default function EpisodeSourcesModal({
     url: string;
     isDefault: boolean;
     headers: Record<string, string>;
+    isZoroServer?: boolean;
   }[]>([]);
   
   // Extract episode number from the episode ID
@@ -666,12 +671,13 @@ export default function EpisodeSourcesModal({
     const shouldAutoSelect = sourceSettings.autoSelectSource && autoSelectSource;
     
     try {
-      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (Provider Manager) ===`);
+      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (PROVIDER SEPARATION) ===`);
       console.log(`📡 Fetching ${type.toUpperCase()} sources for episode ${episodeId}`);
       console.log(`📺 Anime title:`, animeTitle);
       console.log(`🆔 AniList ID:`, anilistId);
       console.log(`🔄 Auto-select mode: ${shouldAutoSelect ? 'ON' : 'OFF'} (from settings)`);
       console.log(`🎯 Provider priority: ${sourceSettings.providerPriority.join(' → ')}`);
+      console.log(`🎯 Default provider: ${sourceSettings.defaultProvider}`);
       
       setError(null);
       setLoading(true);
@@ -690,21 +696,92 @@ export default function EpisodeSourcesModal({
       
       console.log(`📺 Episode number:`, episodeNum);
       
-      if (!anilistId) {
-        throw new Error('AniList ID is required for fetching sources');
+      // Determine which providers to try based on settings and availability
+      // If currentProvider is specified, use that first, otherwise use settings
+      const providersToTry = currentProvider 
+        ? [currentProvider] // Use the provider selected in EpisodeList
+        : shouldAutoSelect && !sourceSettings.defaultProvider 
+          ? sourceSettings.providerPriority 
+          : sourceSettings.defaultProvider 
+            ? [sourceSettings.defaultProvider]
+            : sourceSettings.providerPriority;
+          
+      console.log(`🎯 Providers to try: ${providersToTry.join(' → ')}`);
+      
+      let watchResult: any = null;
+      let successfulProvider: string = '';
+      
+      // Try each provider in order
+      for (const provider of providersToTry) {
+        try {
+          console.log(`🔄 Trying provider: ${provider}`);
+          
+          if (provider === 'zoro') {
+            // ZoroHiAnime Provider - uses new HiAnime endpoints
+            if (!anilistId) {
+              console.log(`❌ Skipping Zoro: AniList ID required`);
+              continue;
+            }
+            
+            console.log(`📡 [ZORO] Fetching ${type} data for AniList ID: ${anilistId}, Episode: ${episodeNum}`);
+            
+            const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub');
+            
+            if (zoroWatchData && zoroWatchData.sources && zoroWatchData.sources.length > 0) {
+              console.log(`✅ [ZORO] Found ${zoroWatchData.sources.length} sources`);
+              watchResult = {
+                success: true,
+                provider: 'zoro',
+                data: zoroWatchData
+              };
+              successfulProvider = 'Zoro/HiAnime';
+              break;
+            } else {
+              console.log(`❌ [ZORO] No sources found`);
+            }
+            
+          } else if (provider === 'animepahe') {
+            // AnimePahe Provider - uses Consumet API
+            if (!animeTitle) {
+              console.log(`❌ Skipping AnimePahe: Anime title required`);
+              continue;
+            }
+            
+            console.log(`📡 [ANIMEPAHE] Fetching ${type} data for anime: ${animeTitle}, Episode: ${episodeNum}`);
+            
+            // First get the anime ID from AnimePahe
+            const animeId = await animePaheProvider.getAnimeIdByTitle(animeTitle);
+            if (!animeId) {
+              console.log(`❌ [ANIMEPAHE] Could not find anime ID for: ${animeTitle}`);
+              continue;
+            }
+            
+            console.log(`✅ [ANIMEPAHE] Found anime ID: ${animeId}`);
+            
+            // Get watch data using anime ID and episode number
+            const paheWatchData = await animePaheProvider.getWatchData(animeId, parseInt(episodeNum), type === 'dub');
+            
+            if (paheWatchData && paheWatchData.sources && paheWatchData.sources.length > 0) {
+              console.log(`✅ [ANIMEPAHE] Found ${paheWatchData.sources.length} sources`);
+              watchResult = {
+                success: true,
+                provider: 'animepahe',
+                data: paheWatchData
+              };
+              successfulProvider = 'AnimePahe';
+              break;
+            } else {
+              console.log(`❌ [ANIMEPAHE] No sources found`);
+            }
+          }
+          
+        } catch (providerError) {
+          console.error(`❌ [${provider.toUpperCase()}] Error:`, providerError);
+          continue;
+        }
       }
       
-      // Use the provider manager to get watch data with fallback
-      const watchResult = await animeProviderManager.getWatchDataWithFallback(
-        episodeId,
-        anilistId,
-        animeTitle,
-        parseInt(episodeNum),
-        type,
-        shouldAutoSelect,
-        shouldAutoSelect ? undefined : sourceSettings.defaultProvider
-      );
-      
+      // Check if we found any sources
       if (!watchResult || !watchResult.success) {
         console.log(`❌ No sources found from any provider`);
         
@@ -715,12 +792,12 @@ export default function EpisodeSourcesModal({
           return fetchSources(episodeId, 'sub');
         }
         
-        throw new Error(watchResult?.error || `No ${type.toUpperCase()} sources found`);
+        throw new Error(`No ${type.toUpperCase()} sources found from any provider`);
       }
       
-      console.log(`✅ Found sources from provider: ${watchResult.provider}`);
+      console.log(`✅ Found sources from provider: ${successfulProvider}`);
       console.log(`📊 Sources available: ${watchResult.data.sources.length}`);
-      console.log(`📊 Subtitles available: ${watchResult.data.subtitles.length}`);
+      console.log(`📊 Subtitles available: ${watchResult.data.subtitles?.length || 0}`);
       
       // Create direct references to API data
       let directTimings: VideoTimings | undefined = undefined;
@@ -782,16 +859,73 @@ export default function EpisodeSourcesModal({
         console.log(`📊 Should show selection: ${shouldShowSelection}`);
         
         if (shouldShowSelection) {
-          // For manual selection with multiple sources, prepare quality options
-          const qualityOptions = formattedSources.map((source: Source) => ({
-            quality: source.quality || 'default',
-            url: source.url,
-            isDefault: source.quality === 'default' || source.quality === '1080p',
-            headers: source.headers
-          }));
+          // Check if this is from Zoro provider and get both SUB/DUB servers
+          const isZoroProvider = successfulProvider.includes('Zoro') || successfulProvider.includes('HiAnime');
           
-          // Sort qualities in descending order (highest first)
+          if (isZoroProvider && anilistId) {
+            console.log(`📊 Zoro provider detected, checking for SUB/DUB server options...`);
+            
+            try {
+              // Get all server options for both SUB and DUB
+              const allServerOptions = await zoroProvider.getAllServerOptions(episodeId);
+              
+              if (allServerOptions.sub.length > 0 || allServerOptions.dub.length > 0) {
+                console.log(`📊 Found SUB servers: ${allServerOptions.sub.length}, DUB servers: ${allServerOptions.dub.length}`);
+                
+                // Store all server options for the modal
+                setAvailableQualities([]);
+                setSubtitles(directSubtitles);
+                setTimings(directTimings || null);
+                
+                // Set special flag for Zoro multi-server view
+                setShowQualitySelection(true);
+                setLoading(false);
+                
+                // Store server options in state (we'll use a different approach)
+                (window as any).zoroServerOptions = {
+                  sub: allServerOptions.sub,
+                  dub: allServerOptions.dub,
+                  subtitles: directSubtitles,
+                  timings: directTimings
+                };
+                
+                console.log(`📊 Prepared Zoro server selection with SUB/DUB sections`);
+                return;
+              }
+            } catch (error) {
+              console.warn(`❌ Failed to get Zoro server options, falling back to regular selection:`, error);
+            }
+          }
+          
+          // Fallback to regular quality selection for non-Zoro or if Zoro server fetch failed
+          const qualityOptions = formattedSources.map((source: Source, index: number) => {
+            // Check if this is from Zoro provider (has server name in quality)
+            const isZoroSource = source.quality && source.quality.includes('HD-');
+            
+            return {
+              quality: source.quality || `Source ${index + 1}`,
+              url: source.url,
+              isDefault: index === 0, // First source is default
+              headers: source.headers,
+              isZoroServer: isZoroSource
+            };
+          });
+          
+          // Sort sources: Zoro servers first (HD-1, HD-2, etc.), then others
           qualityOptions.sort((a: typeof qualityOptions[0], b: typeof qualityOptions[0]) => {
+            if (a.isZoroServer && !b.isZoroServer) return -1;
+            if (!a.isZoroServer && b.isZoroServer) return 1;
+            
+            if (a.isZoroServer && b.isZoroServer) {
+              // Sort HD servers numerically (HD-1, HD-2, HD-3)
+              const getHDNumber = (quality: string) => {
+                const match = quality.match(/HD-(\d+)/);
+                return match ? parseInt(match[1], 10) : 999;
+              };
+              return getHDNumber(a.quality) - getHDNumber(b.quality);
+            }
+            
+            // For non-Zoro sources, sort by quality numbers
             const getQualityNumber = (q: string) => {
               const match = q.match(/(\d+)p/);
               return match ? parseInt(match[1], 10) : 0;
@@ -807,11 +941,11 @@ export default function EpisodeSourcesModal({
           setSubtitles(directSubtitles);
           setTimings(directTimings || null);
           
-          console.log(`📊 Prepared ${qualityOptions.length} quality options for user selection`);
+          console.log(`📊 Prepared ${qualityOptions.length} server/quality options for user selection`);
           return;
         } else {
           // Auto-select mode or single source - proceed with automatic selection
-          setPillMessage(`Loading ${type} version from ${watchResult.provider}...`);
+          setPillMessage(`Loading ${type} version from ${successfulProvider}...`);
           
           // Prefer HLS (m3u8) streams if available and setting is enabled
           let selectedSource: Source | null = null;
@@ -819,14 +953,16 @@ export default function EpisodeSourcesModal({
           if (sourceSettings.preferHLSStreams) {
             selectedSource = formattedSources.find((source: Source) => source.isM3U8) || null;
             if (selectedSource) {
-              console.log(`✅ Selected HLS (m3u8) stream for ${type} from ${watchResult.provider}`);
+              console.log(`✅ Selected HLS (m3u8) stream for ${type} from ${successfulProvider}`);
             }
           }
           
           // Fallback to first available source if no HLS found or HLS not preferred
           if (!selectedSource) {
             selectedSource = formattedSources[0];
-            console.log(`✅ Selected ${selectedSource.isM3U8 ? 'HLS' : 'direct'} stream for ${type} from ${watchResult.provider}`);
+            if (selectedSource) {
+              console.log(`✅ Selected ${selectedSource.isM3U8 ? 'HLS' : 'direct'} stream for ${type} from ${successfulProvider}`);
+            }
           }
           
           if (selectedSource) {
@@ -851,7 +987,7 @@ export default function EpisodeSourcesModal({
 
       // Update pill message to reflect current status
       if (shouldAutoSelect) {
-        setPillMessage(`Found episode ${episodeNum} from ${watchResult.provider}...`);
+        setPillMessage(`Found episode ${episodeNum} from ${successfulProvider}...`);
       }
     } catch (error) {
       console.error(`❌ Error:`, error);
@@ -1036,8 +1172,138 @@ export default function EpisodeSourcesModal({
     fetchSources(episodeId, selectedType);
   };
 
+  // Handle Zoro server selection for SUB/DUB
+  const handleZoroServerSelect = async (server: any, serverType: 'sub' | 'dub') => {
+    try {
+      console.log(`[ZoroServerSelect] Selected ${server.name} (${serverType})`);
+      
+      // Get watch data for this specific server
+      const watchData = await zoroProvider.getWatchData(episodeId, serverType === 'dub');
+      
+      if (watchData && watchData.sources && watchData.sources.length > 0) {
+        // Find the source from this specific server
+        const serverSource = watchData.sources.find((source: any) => 
+          source.quality && source.quality.includes(server.name)
+        ) || watchData.sources[0];
+        
+        const formattedSource = formatSourceWithHeaders(serverSource, watchData.headers || {}, serverType);
+        
+        // Get stored data
+        const storedData = (window as any).zoroServerOptions;
+        const directSubtitles = storedData?.subtitles || [];
+        const directTimings = storedData?.timings;
+        
+        handleDirectSourceSelect(formattedSource, directSubtitles, directTimings, anilistId);
+      } else {
+        throw new Error(`No sources available from ${server.name}`);
+      }
+    } catch (error) {
+      console.error(`[ZoroServerSelect] Error selecting ${server.name}:`, error);
+      setError(`Failed to load ${server.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   // Add new component for quality selection
   const QualitySelectionView = () => {
+    // Check if we have Zoro server options stored
+    const zoroOptions = (window as any).zoroServerOptions;
+    const hasZoroOptions = zoroOptions && (zoroOptions.sub.length > 0 || zoroOptions.dub.length > 0);
+    
+    if (hasZoroOptions) {
+      // Render Zoro SUB/DUB server selection
+      return (
+        <View style={styles.qualitySelectionContainer}>
+          <Text style={styles.title}>🔥 HiAnime Servers</Text>
+          <Text style={styles.subtitle}>
+            Choose your preferred server and audio type
+          </Text>
+          
+          <ScrollView style={styles.zoroScrollContainer} showsVerticalScrollIndicator={false}>
+            {/* SUB Section */}
+            {zoroOptions.sub.length > 0 && (
+              <View style={styles.serverSection}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>💬 SUB</Text>
+                  <Text style={styles.sectionCount}>{zoroOptions.sub.length} servers</Text>
+                </View>
+                <View style={styles.serverGrid}>
+                  {zoroOptions.sub.map((server: any, index: number) => (
+                    <ReanimatedTouchableOpacity
+                      key={`sub-${index}`}
+                      style={[
+                        styles.serverButton,
+                        index === 0 && styles.defaultServerButton
+                      ]}
+                      onPress={() => handleZoroServerSelect(server, 'sub')}
+                    >
+                      <View style={styles.serverButtonContent}>
+                        <Text style={styles.serverButtonText}>{server.name}</Text>
+                        {index === 0 && (
+                          <View style={styles.recommendedBadge}>
+                            <Text style={styles.recommendedText}>Recommended</Text>
+                          </View>
+                        )}
+                      </View>
+                    </ReanimatedTouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+            
+            {/* DUB Section */}
+            {zoroOptions.dub.length > 0 && (
+              <View style={styles.serverSection}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>🎤 DUB</Text>
+                  <Text style={styles.sectionCount}>{zoroOptions.dub.length} servers</Text>
+                </View>
+                <View style={styles.serverGrid}>
+                  {zoroOptions.dub.map((server: any, index: number) => (
+                    <ReanimatedTouchableOpacity
+                      key={`dub-${index}`}
+                      style={[
+                        styles.serverButton,
+                        styles.dubServerButton,
+                        index === 0 && styles.defaultServerButton
+                      ]}
+                      onPress={() => handleZoroServerSelect(server, 'dub')}
+                    >
+                      <View style={styles.serverButtonContent}>
+                        <Text style={styles.serverButtonText}>{server.name}</Text>
+                        {index === 0 && (
+                          <View style={styles.recommendedBadge}>
+                            <Text style={styles.recommendedText}>Recommended</Text>
+                          </View>
+                        )}
+                      </View>
+                    </ReanimatedTouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+            
+            <View style={styles.selectionFooter}>
+              <Text style={styles.footerHint}>
+                🎬 All servers provide HLS streaming with auto quality adaptation
+              </Text>
+            </View>
+          </ScrollView>
+          
+          <ReanimatedTouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              setShowQualitySelection(false);
+              // Clear stored options
+              delete (window as any).zoroServerOptions;
+            }}
+          >
+            <Text style={styles.backButtonText}>← Go Back</Text>
+          </ReanimatedTouchableOpacity>
+        </View>
+      );
+    }
+    
+    // Fallback to regular quality selection
     return (
       <View style={styles.qualitySelectionContainer}>
         <Text style={styles.title}>Multiple Sources Found</Text>
@@ -1055,7 +1321,8 @@ export default function EpisodeSourcesModal({
               key={`quality-${index}`}
               style={[
                 styles.qualityButton,
-                quality.isDefault && styles.defaultQualityButton
+                quality.isDefault && styles.defaultQualityButton,
+                quality.isZoroServer && styles.zoroServerButton
               ]}
               onPress={() => {
                 // Create source object from selected quality
@@ -1071,24 +1338,29 @@ export default function EpisodeSourcesModal({
                 handleSourceSelect(selectedSource);
               }}
             >
-                              <View style={styles.qualityButtonContent}>
-                  <View style={styles.qualityInfo}>
-                    <View>
-                      <Text style={styles.qualityLabel}>{quality.quality}</Text>
-                      <View style={styles.sourceTypeContainer}>
-                        <Text style={styles.sourceTypeText}>
-                          {quality.url.includes('.m3u8') ? '🎬 HLS Stream' : '📺 Direct Stream'}
-                        </Text>
-                        {quality.isDefault && (
-                          <View style={styles.recommendedBadge}>
-                            <Text style={styles.recommendedText}>Recommended</Text>
-                          </View>
-                        )}
-                      </View>
+              <View style={styles.qualityButtonContent}>
+                <View style={styles.qualityInfo}>
+                  <View>
+                    <Text style={styles.qualityLabel}>{quality.quality}</Text>
+                    <View style={styles.sourceTypeContainer}>
+                      <Text style={styles.sourceTypeText}>
+                        {quality.isZoroServer ? '🔥 HiAnime Server' : quality.url.includes('.m3u8') ? '🎬 HLS Stream' : '📺 Direct Stream'}
+                      </Text>
+                      {quality.isDefault && (
+                        <View style={styles.recommendedBadge}>
+                          <Text style={styles.recommendedText}>Recommended</Text>
+                        </View>
+                      )}
+                      {quality.isZoroServer && !quality.isDefault && (
+                        <View style={styles.serverBadge}>
+                          <Text style={styles.serverText}>HiAnime</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
-                  <FontAwesome5 name="play-circle" size={20} color="#02A9FF" />
                 </View>
+                <FontAwesome5 name="play-circle" size={20} color="#02A9FF" />
+              </View>
             </ReanimatedTouchableOpacity>
           ))}
         </ScrollView>
@@ -1114,7 +1386,7 @@ export default function EpisodeSourcesModal({
 
   // Add function to check availability of both sub and dub
   const checkAvailability = useCallback(async (episodeId: string, anilistId: string) => {
-    if (!anilistId) return { sub: false, dub: false };
+    if (!anilistId && !animeTitle) return { sub: false, dub: false };
     
     try {
       // Extract episode number
@@ -1129,19 +1401,34 @@ export default function EpisodeSourcesModal({
       
       console.log(`🔍 Checking SUB/DUB availability for episode ${episodeNum}`);
       
-      // Use provider manager to check availability
-      const availability = await animeProviderManager.checkEpisodeAvailability(
-        anilistId,
-        animeTitle,
-        parseInt(episodeNum)
-      );
+      let subAvailable = false;
+      let dubAvailable = false;
       
-      // Check if any provider has sub/dub available
-      const subAvailable = Object.values(availability).some(available => available);
-      const dubAvailable = Object.values(availability).some(available => available);
+      // Check Zoro provider if AniList ID is available
+      if (anilistId) {
+        try {
+          const subCheck = await zoroProvider.checkEpisodeAvailability(anilistId, parseInt(episodeNum));
+          subAvailable = subCheck.sub;
+          dubAvailable = subCheck.dub;
+          console.log(`📊 [ZORO] Availability: SUB=${subAvailable}, DUB=${dubAvailable}`);
+        } catch (error) {
+          console.log(`❌ [ZORO] Availability check failed:`, error);
+        }
+      }
       
-      console.log(`📊 Availability check: SUB=${subAvailable}, DUB=${dubAvailable}`);
-      console.log(`📊 Provider availability:`, availability);
+      // Check AnimePahe provider if anime title is available
+      if (animeTitle && (!subAvailable || !dubAvailable)) {
+        try {
+          const paheAvailable = await animePaheProvider.checkEpisodeAvailability(animeTitle, parseInt(episodeNum));
+          if (!subAvailable) subAvailable = paheAvailable;
+          if (!dubAvailable) dubAvailable = paheAvailable; // AnimePahe supports both
+          console.log(`📊 [ANIMEPAHE] Availability: SUB=${paheAvailable}, DUB=${paheAvailable}`);
+        } catch (error) {
+          console.log(`❌ [ANIMEPAHE] Availability check failed:`, error);
+        }
+      }
+      
+      console.log(`📊 Final availability: SUB=${subAvailable}, DUB=${dubAvailable}`);
       
       return { sub: subAvailable, dub: dubAvailable };
     } catch (error) {
@@ -1710,5 +1997,77 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  zoroServerButton: {
+    borderColor: '#FF6B6B',
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+  },
+  serverBadge: {
+    backgroundColor: '#FF6B6B',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  serverText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  zoroScrollContainer: {
+    maxHeight: 400,
+    width: '100%',
+    marginVertical: 16,
+  },
+  serverSection: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  sectionCount: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  serverGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  serverButton: {
+    backgroundColor: 'rgba(30, 30, 30, 0.6)',
+    borderRadius: 12,
+    padding: 12,
+    minWidth: 80,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  defaultServerButton: {
+    borderColor: '#02A9FF',
+    backgroundColor: 'rgba(2, 169, 255, 0.1)',
+  },
+  dubServerButton: {
+    borderColor: '#FF6B6B',
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+  },
+  serverButtonContent: {
+    alignItems: 'center',
+  },
+  serverButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

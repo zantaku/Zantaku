@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { CONSUMET_API_URL } from '../../../../app/constants/api';
+import { AUTO_DETECT_TIMING } from '../../../../app/videoplayer/constants';
 import { Episode, Source, Subtitle, VideoTimings, WatchResponse } from './zorohianime';
 
 export class AnimePaheProvider {

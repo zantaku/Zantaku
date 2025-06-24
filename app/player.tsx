@@ -203,20 +203,47 @@ export default function Player() {
       }
       
       // Log any direct URL parameters that might contain video data
-      if (params.url) {
-        console.log('🎬 Direct video URL from params:', typeof params.url === 'string' ? params.url.substring(0, 50) + '...' : params.url);
+      if (params.source) {
+        console.log('🎬 Direct video source from params:', typeof params.source === 'string' ? params.source.substring(0, 50) + '...' : params.source);
       }
       
       if (params.headers) {
-        console.log('📋 Headers from params:', params.headers);
+        console.log('📋 Headers from params (raw):', params.headers);
+        try {
+          if (typeof params.headers === 'string' && params.headers.trim()) {
+            const parsedHeaders = JSON.parse(params.headers);
+            console.log('📋 Headers from params (parsed):', JSON.stringify(parsedHeaders, null, 2));
+          }
+        } catch (error) {
+          console.log('⚠️ Failed to parse headers from params:', error);
+        }
       }
       
       if (params.subtitles) {
-        console.log('🎯 Subtitles from params:', params.subtitles);
+        console.log('🎯 Subtitles from params (raw):', typeof params.subtitles);
+        try {
+          if (typeof params.subtitles === 'string' && params.subtitles.trim()) {
+            const parsedSubtitles = JSON.parse(params.subtitles);
+            console.log('🎯 Subtitles from params (parsed):', `${parsedSubtitles.length} subtitles`);
+            if (parsedSubtitles.length > 0) {
+              console.log('🎯 Subtitle languages from params:', parsedSubtitles.map((s: any) => s.lang).join(', '));
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ Failed to parse subtitles from params:', error);
+        }
       }
       
       if (params.timings) {
-        console.log('⏱️ Timings from params:', params.timings);
+        console.log('⏱️ Timings from params (raw):', typeof params.timings);
+        try {
+          if (typeof params.timings === 'string' && params.timings.trim()) {
+            const parsedTimings = JSON.parse(params.timings);
+            console.log('⏱️ Timings from params (parsed):', JSON.stringify(parsedTimings, null, 2));
+          }
+        } catch (error) {
+          console.log('⚠️ Failed to parse timings from params:', error);
+        }
       }
       
       console.log('=== END PLAYER COMPONENT DEBUG ===\n');

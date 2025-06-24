@@ -94,6 +94,35 @@ export class AnimeProviderManager {
   }
 
   /**
+   * Get episodes from only the selected provider
+   */
+  async getEpisodesFromSingleProvider(
+    selectedProvider: ProviderType,
+    anilistId?: string,
+    animeTitle?: string,
+    mangaTitle?: string,
+    isDub: boolean = false
+  ): Promise<ProviderResult> {
+    const searchTitle = mangaTitle || animeTitle;
+    
+    console.log(`[ProviderManager] Fetching episodes from ${selectedProvider} only`);
+    
+    if (selectedProvider === 'zoro' && anilistId) {
+      return await this.getEpisodesFromProvider('zoro', anilistId, undefined, isDub);
+    } else if (selectedProvider === 'animepahe' && searchTitle) {
+      return await this.getEpisodesFromProvider('animepahe', undefined, searchTitle, isDub);
+    } else {
+      console.warn(`[ProviderManager] Cannot fetch from ${selectedProvider}: missing required parameters`);
+      return {
+        provider: selectedProvider,
+        episodes: [],
+        success: false,
+        error: `Cannot fetch from ${selectedProvider}: missing required parameters`
+      };
+    }
+  }
+
+  /**
    * Merge episodes from multiple providers
    */
   mergeEpisodesFromProviders(providerResults: ProviderResult[], coverImage?: string): Episode[] {

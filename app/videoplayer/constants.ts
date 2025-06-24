@@ -1,5 +1,5 @@
 // Proxy configuration
-export const M3U8_PROXY_BASE_URL = 'https://m3u8-proxy-liard.vercel.app/m3u8-proxy?url=';
+export const M3U8_PROXY_BASE_URL = 'https://proxys.ciphertv.dev/proxy?url=';
 export const USE_PROXY = false; // Set to false for direct playback by default
 
 // Network speed thresholds in bytes per second

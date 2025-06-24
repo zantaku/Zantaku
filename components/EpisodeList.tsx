@@ -18,6 +18,7 @@ import {
   saveEpisodesToCache,
 } from '../utils/episodeOptimization';
 import { animeProviderManager } from '../api/proxy/providers/anime';
+import { zoroProvider } from '../api/proxy/providers/anime/zorohianime';
 
 // Hook to load source settings
 const useSourceSettings = () => {
@@ -376,6 +377,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     
     // Provider and search modal state
     const [currentProvider, setCurrentProvider] = useState<string>('animepahe');
+    const [providerInitialized, setProviderInitialized] = useState<boolean>(false);
     const [showCorrectAnimeModal, setShowCorrectAnimeModal] = useState(false);
     const [currentAnimeTitle, setCurrentAnimeTitle] = useState<string>('');
     const [showProviderDropdown, setShowProviderDropdown] = useState(false);
@@ -438,47 +440,100 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         }
     }, []);
 
-    const fetchHiAnimeEpisodes = useCallback(async () => {
+    const fetchEpisodesFromProvider = useCallback(async (forceRefresh: boolean = false) => {
         const searchTitle = mangaTitle || animeTitle;
-        if (!searchTitle || !anilistId || hiAnimeEpisodesLoaded || isBackgroundRefreshing) {
+        if (!searchTitle || !anilistId || (!forceRefresh && hiAnimeEpisodesLoaded) || isBackgroundRefreshing) {
             return; // Prevent multiple simultaneous fetches
         }
 
         setIsBackgroundRefreshing(true);
         try {
-            console.log(`[EpisodeList] Fetching episodes from multiple providers for: ${searchTitle}`);
+            console.log(`[EpisodeList] Fetching episodes from ${currentProvider} provider for: ${searchTitle}`);
             
-            // Get episodes from all available providers
-            const providerResults = await animeProviderManager.getEpisodesFromAllProviders(
+            // Get episodes from the selected provider only
+            const providerResult = await animeProviderManager.getEpisodesFromSingleProvider(
+                currentProvider as 'zoro' | 'animepahe',
                 anilistId, 
                 animeTitle, 
                 mangaTitle
             );
 
-            console.log(`[EpisodeList] Provider results:`, providerResults.map(r => ({
-                provider: r.provider,
-                success: r.success,
-                episodeCount: r.episodes.length,
-                error: r.error
-            })));
+            console.log(`[EpisodeList] Provider result from ${currentProvider}:`, {
+                provider: providerResult.provider,
+                success: providerResult.success,
+                episodeCount: providerResult.episodes.length,
+                error: providerResult.error
+            });
 
-            // Merge episodes from all providers
-            const newEpisodes = animeProviderManager.mergeEpisodesFromProviders(providerResults, coverImage);
-
-            if (newEpisodes.length > 0) {
-                console.log(`[EpisodeList] Merged ${newEpisodes.length} episodes from providers`);
-                setEpisodes(newEpisodes);
-                await saveEpisodesToCache(newEpisodes, anilistId, malId, animeTitle);
+            if (providerResult.success && providerResult.episodes.length > 0) {
+                console.log(`[EpisodeList] Got ${providerResult.episodes.length} episodes from ${currentProvider}`);
+                
+                let episodesWithAvailability = providerResult.episodes;
+                
+                // If using zoro provider, fetch detailed availability information
+                if (currentProvider === 'zoro') {
+                    console.log(`[EpisodeList] Fetching availability information for zoro provider...`);
+                    
+                    try {
+                        // Get SUB and DUB episodes separately to determine availability
+                        const [subEpisodes, dubEpisodes] = await Promise.allSettled([
+                            zoroProvider.getEpisodes(anilistId, false), // SUB
+                            zoroProvider.getEpisodes(anilistId, true)   // DUB
+                        ]);
+                        
+                        const availableSubEpisodes = subEpisodes.status === 'fulfilled' ? subEpisodes.value : [];
+                        const availableDubEpisodes = dubEpisodes.status === 'fulfilled' ? dubEpisodes.value : [];
+                        
+                        console.log(`[EpisodeList] Zoro availability - SUB: ${availableSubEpisodes.length}, DUB: ${availableDubEpisodes.length}`);
+                        
+                        // Create lookup maps for faster checking
+                        const subEpisodeNumbers = new Set(availableSubEpisodes.map(ep => ep.number));
+                        const dubEpisodeNumbers = new Set(availableDubEpisodes.map(ep => ep.number));
+                        
+                        // Update episodes with availability information
+                        episodesWithAvailability = providerResult.episodes.map(episode => ({
+                            ...episode,
+                            isSubbed: subEpisodeNumbers.has(episode.number),
+                            isDubbed: dubEpisodeNumbers.has(episode.number),
+                            provider: 'Zoro/HiAnime'
+                        }));
+                        
+                        console.log(`[EpisodeList] Updated episodes with availability:`, {
+                            totalEpisodes: episodesWithAvailability.length,
+                            subbedCount: episodesWithAvailability.filter(ep => ep.isSubbed).length,
+                            dubbedCount: episodesWithAvailability.filter(ep => ep.isDubbed).length
+                        });
+                        
+                    } catch (availabilityError) {
+                        console.warn(`[EpisodeList] Failed to fetch zoro availability:`, availabilityError);
+                        // Fallback: assume all episodes have both SUB and DUB available
+                        episodesWithAvailability = providerResult.episodes.map(episode => ({
+                            ...episode,
+                            isSubbed: true,
+                            isDubbed: true,
+                            provider: 'Zoro/HiAnime'
+                        }));
+                    }
+                }
+                
+                setEpisodes(episodesWithAvailability);
+                await saveEpisodesToCache(episodesWithAvailability, anilistId, malId, animeTitle);
+            } else {
+                console.warn(`[EpisodeList] Failed to get episodes from ${currentProvider}:`, providerResult.error);
+                // If the selected provider fails, keep existing episodes but show an error
+                if (providerResult.error) {
+                    console.error(`Provider ${currentProvider} error:`, providerResult.error);
+                }
             }
             
             setHiAnimeEpisodesLoaded(true); // Always mark as loaded after attempt
         } catch (error) {
-            console.error('Error fetching episodes from providers:', error);
+            console.error('Error fetching episodes from provider:', error);
             setHiAnimeEpisodesLoaded(true); // Mark as loaded even on error to prevent infinite retries
         } finally {
             setIsBackgroundRefreshing(false);
         }
-    }, [mangaTitle, animeTitle, anilistId, malId, episodes, coverImage, hiAnimeEpisodesLoaded, isBackgroundRefreshing]);
+    }, [mangaTitle, animeTitle, anilistId, malId, coverImage, hiAnimeEpisodesLoaded, isBackgroundRefreshing, currentProvider]);
 
     const fetchAiringSchedule = useCallback(async () => {
         if (!anilistId) return;
@@ -530,8 +585,9 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 const settings = JSON.parse(val);
                 setCurrentProvider(settings.defaultProvider || 'animepahe');
             }
+            setProviderInitialized(true);
         });
-        // Reset HiAnime episodes loaded flag when anime changes
+        // Reset episodes loaded flag when anime changes
         setHiAnimeEpisodesLoaded(false);
         setCurrentAnimeTitle(animeTitle);
     }, [fetchUserProgress, fetchAiringSchedule, anilistId]);
@@ -540,13 +596,6 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         if (initialEpisodes && initialEpisodes.length > 0) {
             setEpisodes(initialEpisodes);
             setIsLoading(false);
-            // Only fetch HiAnime episodes if we haven't loaded them yet and we have initial episodes
-            if (!hiAnimeEpisodesLoaded && !isBackgroundRefreshing && !fetchTimeoutRef.current) {
-                fetchTimeoutRef.current = setTimeout(() => {
-                    fetchHiAnimeEpisodes();
-                    fetchTimeoutRef.current = null;
-                }, 1000); // Fetch supplementary sources after a delay
-            }
         }
         
         // Cleanup timeout on unmount or when dependencies change
@@ -557,6 +606,17 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
             }
         };
     }, [initialEpisodes]);
+
+    // Separate effect to fetch episodes only after provider is initialized
+    useEffect(() => {
+        if (providerInitialized && initialEpisodes && initialEpisodes.length > 0 && !hiAnimeEpisodesLoaded && !isBackgroundRefreshing && !fetchTimeoutRef.current) {
+            console.log(`[EpisodeList] Provider initialized (${currentProvider}), scheduling episode fetch...`);
+            fetchTimeoutRef.current = setTimeout(() => {
+                fetchEpisodesFromProvider();
+                fetchTimeoutRef.current = null;
+            }, 1000); // Fetch episodes after a delay
+        }
+    }, [providerInitialized, initialEpisodes, hiAnimeEpisodesLoaded, isBackgroundRefreshing, currentProvider, fetchEpisodesFromProvider]);
 
     useEffect(() => {
         if (episodes && episodes.length > 0) {
@@ -578,9 +638,27 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
     useEffect(() => {
         if (hiAnimeEpisodesLoaded) {
-            console.log('HiAnime episodes have been loaded successfully');
+            console.log(`Episodes from ${currentProvider} have been loaded successfully`);
         }
-    }, [hiAnimeEpisodesLoaded]);
+    }, [hiAnimeEpisodesLoaded, currentProvider]);
+
+    // Watch for provider changes and re-fetch episodes
+    const prevProviderRef = useRef<string>('');
+    useEffect(() => {
+        if (providerInitialized) {
+            if (prevProviderRef.current === '') {
+                // First time initialization - set the reference but don't fetch
+                prevProviderRef.current = currentProvider;
+                console.log(`[EpisodeList] Initial provider set to: ${currentProvider}`);
+            } else if (currentProvider !== prevProviderRef.current && hiAnimeEpisodesLoaded) {
+                // Provider actually changed - fetch new episodes
+                console.log(`[EpisodeList] Provider changed from ${prevProviderRef.current} to ${currentProvider}, fetching episodes...`);
+                setHiAnimeEpisodesLoaded(false);
+                fetchEpisodesFromProvider(true);
+                prevProviderRef.current = currentProvider;
+            }
+        }
+    }, [currentProvider, hiAnimeEpisodesLoaded, fetchEpisodesFromProvider, providerInitialized]);
     // #endregion
 
     // #region Handlers & Callbacks
@@ -589,8 +667,54 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         setModalVisible(true);
     }, []);
 
-    const handleSourceSelect = useCallback((sourceUrl: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string) => {
+    const handleSourceSelect = useCallback(async (sourceUrl: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string) => {
         if (!selectedEpisode) return;
+        
+        console.log('\n=== EPISODE LIST SOURCE SELECT DEBUG ===');
+        console.log('🎬 Source URL:', sourceUrl ? sourceUrl.substring(0, 50) + '...' : 'none');
+        console.log('📋 Headers received:', headers ? JSON.stringify(headers, null, 2) : 'none');
+        console.log('🎯 Subtitles received:', subtitles ? `${subtitles.length} subtitles` : 'none');
+        console.log('⏱️ Timings received:', timings ? JSON.stringify(timings, null, 2) : 'none');
+        console.log('🔑 DataKey from modal:', dataKey || 'none');
+        console.log('📝 Episode info:', {
+            episodeId,
+            episodeNumber,
+            selectedEpisodeNumber: selectedEpisode.number,
+            anilistId: anilistIdParam || anilistId
+        });
+        
+        // Generate a new dataKey if none provided (fallback)
+        const finalDataKey = dataKey || `episodelist_${Date.now()}`;
+        
+        try {
+            // Store complete video data for the player to access
+            const completeVideoData = {
+                source: sourceUrl,
+                headers: headers || {},
+                episodeId: episodeId,
+                episodeNumber: episodeNumber || selectedEpisode.number.toString(),
+                subtitles: subtitles || [],
+                timings: timings || null,
+                anilistId: anilistIdParam || anilistId || '',
+                animeTitle: animeTitle || '',
+                timestamp: Date.now()
+            };
+            
+            await AsyncStorage.setItem(finalDataKey, JSON.stringify(completeVideoData));
+            console.log('✅ [EPISODE LIST] Successfully stored complete video data with key:', finalDataKey);
+            console.log('📊 [EPISODE LIST] Stored data summary:', {
+                hasSource: Boolean(completeVideoData.source),
+                hasHeaders: Boolean(completeVideoData.headers && Object.keys(completeVideoData.headers).length > 0),
+                subtitleCount: completeVideoData.subtitles.length,
+                hasTimings: Boolean(completeVideoData.timings),
+                anilistId: completeVideoData.anilistId
+            });
+            
+        } catch (error) {
+            console.error('❌ [EPISODE LIST] Error storing video data:', error);
+        }
+        
+        // Navigate to player with complete params
         router.push({
             pathname: '/player',
             params: {
@@ -599,9 +723,17 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 title: animeTitle,
                 episodeNumber: selectedEpisode.number.toString(),
                 anilistId: anilistIdParam || anilistId || '',
-                dataKey: dataKey || ''
+                dataKey: finalDataKey,
+                // Also pass direct params as backup
+                headers: headers ? JSON.stringify(headers) : '',
+                subtitles: subtitles ? JSON.stringify(subtitles) : '',
+                timings: timings ? JSON.stringify(timings) : ''
             }
         });
+        
+        console.log('🚀 [EPISODE LIST] Navigated to player with complete data');
+        console.log('=== END EPISODE LIST SOURCE SELECT DEBUG ===\n');
+        
         setModalVisible(false);
         setSelectedEpisode(null);
         if (currentProgress < selectedEpisode.number) {
@@ -640,8 +772,8 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
         AsyncStorage.setItem('animeProviderSettings', JSON.stringify(settings));
         // Trigger re-fetch with new provider
         setHiAnimeEpisodesLoaded(false);
-        fetchHiAnimeEpisodes();
-    }, [fetchHiAnimeEpisodes]);
+        fetchEpisodesFromProvider(true); // Force refresh with new provider
+    }, [fetchEpisodesFromProvider]);
 
     const handleAnimeChange = useCallback(() => {
         setShowCorrectAnimeModal(true);
@@ -821,10 +953,19 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     }
     
     if (!isLoading && episodes.length === 0) {
+        if (isBackgroundRefreshing) {
+            return (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={currentTheme.colors.primary} />
+                    <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>Loading episodes from {getProviderName(currentProvider)}...</Text>
+                </View>
+            );
+        }
+        
         return (
             <View style={styles.emptyEpisodes}>
                 <FontAwesome5 name="video-slash" size={48} color={isDarkMode ? '#666' : '#ccc'} />
-                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>No episodes available for this series yet.</Text>
+                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>No episodes available from {getProviderName(currentProvider)} for this series yet.</Text>
             </View>
         );
     }
@@ -858,7 +999,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                     </View>
                 </View>
                 {renderHeader()}
-                {isBackgroundRefreshing && <View style={styles.backgroundRefreshIndicator}><ActivityIndicator size="small" color="#02A9FF" /><Text style={styles.backgroundRefreshText}>Updating...</Text></View>}
+                {isBackgroundRefreshing && <View style={styles.backgroundRefreshIndicator}><ActivityIndicator size="small" color="#02A9FF" /><Text style={styles.backgroundRefreshText}>Updating from {getProviderName(currentProvider)}...</Text></View>}
             </View>
 
             <FlashList
@@ -874,7 +1015,11 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
 
             <EpisodeSourcesModal
                 visible={modalVisible}
-                episodeId={selectedEpisode ? `${anilistId}?ep=${selectedEpisode.number}` : ''}
+                episodeId={selectedEpisode ? (
+                    currentProvider === 'zoro' 
+                        ? selectedEpisode.id  // Use actual episode ID for Zoro (e.g., "episode$1304")
+                        : `${anilistId}?ep=${selectedEpisode.number}`  // Keep legacy format for other providers
+                ) : ''}
                 animeTitle={animeTitle}
                 onClose={() => setModalVisible(false)}
                 onSelectSource={handleSourceSelect}
@@ -882,6 +1027,7 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 anilistId={anilistId}
                 malId={malId}
                 mangaTitle={mangaTitle}
+                currentProvider={currentProvider}
             />
 
             <CorrectAnimeSearchModal

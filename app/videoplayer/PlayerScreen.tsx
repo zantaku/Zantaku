@@ -203,16 +203,41 @@ const PlayerScreen: React.FC = () => {
   // Add ref to prevent multiple loads
   const hasLoadedData = useRef(false);
   
-  // Memoized video source to prevent unnecessary recalculations
+  // Detect provider from episode ID or source URL
+  const detectedProvider = useMemo(() => {
+    if (!videoData) return 'unknown';
+    
+    // Check episode ID format for Zoro
+    if (videoData.episodeId?.includes('$episode$')) {
+      return 'zoro';
+    }
+    
+    // Check source URL patterns
+    if (videoData.source?.includes('sunshinerays') || 
+        videoData.source?.includes('thunderwave') ||
+        videoData.source?.includes('megacloud')) {
+      return 'zoro';
+    }
+    
+    // Default to animepahe for other sources
+    return 'animepahe';
+  }, [videoData?.episodeId, videoData?.source]);
+
+  // Provider-specific URL handling
   const videoSource = useMemo(() => {
     if (!videoData?.source) return '';
     
-    const finalUrl = USE_PROXY 
-      ? `${M3U8_PROXY_BASE_URL}${encodeURIComponent(videoData.source)}`
-      : videoData.source;
+    // Both providers use direct streaming - shih.kaoru.cat already handles Zoro proxying
+    const finalUrl = videoData.source;
     
     console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
-    console.log(`🔗 Using proxy: ${USE_PROXY ? 'Yes' : 'No'}`);
+    console.log(`🔗 Provider: ${detectedProvider.toUpperCase()}`);
+    
+    if (detectedProvider === 'zoro') {
+      console.log(`🔒 [ZORO] Using M3U8 from shih.kaoru.cat (already proxied)`);
+    } else {
+      console.log(`🔓 [ANIMEPAHE] Using direct stream`);
+    }
     
     // Log if URL contains quality indicators
     if (finalUrl.includes('1080') || finalUrl.includes('720') || finalUrl.includes('480')) {
@@ -220,13 +245,28 @@ const PlayerScreen: React.FC = () => {
     }
     
     return finalUrl;
-  }, [videoData?.source]);
+  }, [videoData?.source, detectedProvider]);
+
+  // Provider-specific headers configuration
+  const videoHeaders = useMemo(() => {
+    if (!videoData?.headers) return {};
+    
+    // TEST: Try without headers for Zoro to see if that's the issue
+    if (detectedProvider === 'zoro') {
+      console.log(`🧪 [ZORO] Testing without headers (React Native limitation)`);
+      return {}; // No headers for testing
+    }
+    
+    // AnimePahe: uses direct streaming with original headers
+    console.log(`📋 [${detectedProvider.toUpperCase()}] Using headers:`, videoData.headers);
+    return videoData.headers;
+  }, [videoData?.headers, detectedProvider]);
 
   // Create expo-video player for system PiP
   const videoPlayer = useVideoPlayer(
     videoData && videoSource ? {
       uri: videoSource,
-      headers: videoData.headers || {}
+      headers: videoHeaders
     } : null,
     (player) => {
       if (player && videoData) {
@@ -235,7 +275,71 @@ const PlayerScreen: React.FC = () => {
         player.volume = preferences.volume;
         player.playbackRate = playbackSpeed;
         player.timeUpdateEventInterval = 500; // Update every 500ms
-        console.log('[EXPO-VIDEO] 🎬 Player created and configured');
+        
+        console.log(`[EXPO-VIDEO] 🎬 Player created and configured for ${detectedProvider.toUpperCase()}`);
+        console.log(`[EXPO-VIDEO] 📡 Using ${videoHeaders && Object.keys(videoHeaders).length > 0 ? 'custom' : 'no'} headers`);
+        if (detectedProvider === 'zoro') {
+          console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from shih.kaoru.cat (pre-processed)`);
+        }
+        
+        // Monitor video status and errors via polling
+        const monitorVideoStatus = () => {
+          try {
+            const status = player.status;
+            const currentTime = player.currentTime || 0;
+            const duration = player.duration || 0;
+            
+            console.log(`[EXPO-VIDEO] 📊 Status check:`, {
+              status: status,
+              provider: detectedProvider,
+              currentTime: currentTime.toFixed(2),
+              duration: duration.toFixed(2),
+              playing: player.playing,
+              timestamp: new Date().toISOString()
+            });
+            
+            // Check for specific error status
+            if (status === 'error') {
+              console.error(`🔥 [VIDEO ERROR] ===================`);
+              console.error(`[EXPO-VIDEO] ❌ Video failed to load:`, {
+                provider: detectedProvider,
+                sourceUrl: videoSource.substring(0, 100) + '...',
+                status: status,
+                headers: videoHeaders,
+                episodeId: videoData?.episodeId,
+                timestamp: new Date().toISOString()
+              });
+              console.error(`🔥 [VIDEO ERROR END] ===================`);
+            }
+            
+            // Log successful load
+            if (status === 'readyToPlay' || (duration > 0 && status === 'loading')) {
+              console.log(`[EXPO-VIDEO] ✅ Video loaded successfully for ${detectedProvider.toUpperCase()}`);
+            }
+            
+            // Check for stalled loading
+            if (status === 'loading' && duration === 0) {
+              console.warn(`[EXPO-VIDEO] ⚠️ Video stuck in loading state for ${detectedProvider.toUpperCase()}`);
+            }
+            
+          } catch (err) {
+            console.error(`[EXPO-VIDEO] ❌ Error monitoring video status:`, err);
+          }
+        };
+        
+        // Start monitoring after a short delay
+        setTimeout(() => {
+          monitorVideoStatus();
+          // Check status every 2 seconds for the first 10 seconds
+          const statusInterval = setInterval(() => {
+            monitorVideoStatus();
+          }, 2000);
+          
+          // Stop monitoring after 10 seconds
+          setTimeout(() => {
+            clearInterval(statusInterval);
+          }, 10000);
+        }, 1000);
       }
     }
   );
@@ -243,11 +347,43 @@ const PlayerScreen: React.FC = () => {
   // Simplified time update using refs to prevent infinite loops
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
+  const timeUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   useEffect(() => {
-    if (videoPlayer) {
-      const timeUpdateInterval = setInterval(() => {
+    // Clear any existing interval
+    if (timeUpdateIntervalRef.current) {
+      clearInterval(timeUpdateIntervalRef.current);
+      timeUpdateIntervalRef.current = null;
+    }
+    
+    if (videoPlayer && videoData) {
+      console.log('[EXPO-VIDEO] ⏰ Setting up time update interval for video player');
+      
+      timeUpdateIntervalRef.current = setInterval(() => {
         try {
+          // Check if videoPlayer is still valid and not released
+          if (!videoPlayer) {
+            console.warn('[EXPO-VIDEO] Video player is no longer valid, stopping time updates');
+            if (timeUpdateIntervalRef.current) {
+              clearInterval(timeUpdateIntervalRef.current);
+              timeUpdateIntervalRef.current = null;
+            }
+            return;
+          }
+          
+          // Check for error status during playback
+          if (videoPlayer.status === 'error') {
+            console.error('🔥 [PLAYBACK ERROR] ===================');
+            console.error('[EXPO-VIDEO] ❌ Video error detected during playback:', {
+              provider: detectedProvider,
+              status: videoPlayer.status,
+              currentTime: videoPlayer.currentTime || 0,
+              duration: videoPlayer.duration || 0,
+              playing: videoPlayer.playing
+            });
+            console.error('🔥 [PLAYBACK ERROR END] ===================');
+          }
+          
           const newTime = videoPlayer.currentTime || 0;
           const newDuration = videoPlayer.duration || 0;
           const isPlaying = videoPlayer.playing || false;
@@ -262,19 +398,42 @@ const PlayerScreen: React.FC = () => {
           if (newDuration > 0 && lastDurationRef.current === 0) {
             lastDurationRef.current = newDuration;
             setDuration(newDuration);
+            console.log('[EXPO-VIDEO] ✅ Video duration set:', newDuration);
           }
           
           // Update paused state
           setPaused(!isPlaying);
           
-        } catch (error) {
-          console.warn('[EXPO-VIDEO] Time update error:', error);
+        } catch (error: any) {
+          console.error('🔥 [TIME UPDATE ERROR] ===================');
+          console.error('[EXPO-VIDEO] ❌ Time update error:', {
+            provider: detectedProvider,
+            error: error?.message || error,
+            errorStack: error?.stack?.split('\n').slice(0, 3).join('\n'),
+            playerStatus: videoPlayer?.status,
+            timestamp: new Date().toISOString()
+          });
+          console.error('🔥 [TIME UPDATE ERROR END] ===================');
+          
+          // If we get a "shared object released" error, stop the interval
+          if (error?.message?.includes('shared object') || error?.message?.includes('released')) {
+            console.warn('[EXPO-VIDEO] 🛑 Stopping time updates due to released player object');
+            if (timeUpdateIntervalRef.current) {
+              clearInterval(timeUpdateIntervalRef.current);
+              timeUpdateIntervalRef.current = null;
+            }
+          }
         }
       }, 500); // Update every 500ms
       
-      return () => clearInterval(timeUpdateInterval);
+      return () => {
+        if (timeUpdateIntervalRef.current) {
+          clearInterval(timeUpdateIntervalRef.current);
+          timeUpdateIntervalRef.current = null;
+        }
+      };
     }
-  }, [videoPlayer]); // Only depend on videoPlayer creation
+  }, [videoPlayer, videoData]); // Depend on both videoPlayer and videoData
 
   // Auto-enter PiP when app goes to background (for seamless UX)
   useEffect(() => {
