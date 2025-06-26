@@ -10,8 +10,8 @@ buildscript {
 
         ndkVersion = "26.1.10909125"
         
-        // Remove ffmpeg-kit package configuration to avoid dependency resolution
-        // ffmpegKitPackage = "https"
+        // Set ffmpeg-kit package configuration to use https package  
+        ffmpegKitPackage = "https"
     }
     repositories {
         google()
@@ -41,9 +41,9 @@ allprojects {
         mavenCentral()
         maven { url 'https://www.jitpack.io' }
         
-        // Add flatDir repository for local AAR files
-        flatDir {
-            dirs "$rootDir/libs"
-        }
+        // Removed flatDir repository - using official dependencies now
+        // flatDir {
+        //     dirs "$rootDir/libs"
+        // }
     }
 }

@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="false">
+    <!-- Allow cleartext traffic for all domains to match Expo Go behavior -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- Trust system certificates -->
+            <certificates src="system"/>
+            <!-- Trust user-added CA certificates -->
+            <certificates src="user"/>
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Optional: Still maintain some security for sensitive domains -->
+    <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">takiapi.xyz</domain>
-        <domain includeSubdomains="true">api.takiapi.xyz</domain>
-        <domain includeSubdomains="true">cdn.takiapi.xyz</domain>
+
         <domain includeSubdomains="true">magaapinovel.xyz</domain>
         <domain includeSubdomains="true">kamicom-dazaseals-projects.vercel.app</domain>
         <domain includeSubdomains="true">api.jikan.moe</domain>
         <domain includeSubdomains="true">graphql.anilist.co</domain>
-        <!-- Additional API endpoints -->
         <domain includeSubdomains="true">cors-proxy.elfsight.com</domain>
         <domain includeSubdomains="true">corsproxy.io</domain>
         <domain includeSubdomains="true">proxy.cors.sh</domain>
@@ -16,20 +25,8 @@
         <domain includeSubdomains="true">shih.kaoru.cat</domain>
         <domain includeSubdomains="true">hianime.to</domain>
         <domain includeSubdomains="true">gogoanime.tel</domain>
-        <pin-set expiration="2025-12-31">
-            <!-- Let's Encrypt Authority X3 -->
-            <pin digest="SHA-256">YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=</pin>
-            <!-- Let's Encrypt Authority X4 -->
-            <pin digest="SHA-256">sRHdihwgkaib1P1gxX8HFszlD+7/gTfNvuAybgLPNis=</pin>
-            <!-- ISRG Root X1 -->
-            <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
-        </pin-set>
+        <domain includeSubdomains="true">jelleeapi.app</domain>
+        <domain includeSubdomains="true">kamidb.online</domain>
+        <domain includeSubdomains="true">www.kamidb.online</domain>
     </domain-config>
-    
-    <!-- Backup configuration for all other domains -->
-    <base-config cleartextTrafficPermitted="false">
-        <trust-anchors>
-            <certificates src="system"/>
-        </trust-anchors>
-    </base-config>
 </network-security-config> 

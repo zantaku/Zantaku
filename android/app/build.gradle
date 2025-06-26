@@ -156,17 +156,23 @@ android {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
+        // Exclude problematic FFmpeg Kit language files with invalid paths
+        excludes += [
+            '**/language/**',
+            '**/ash_approx_any.txt',
+            '/language/**'
+        ]
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
     
-    // Add repository for accessing local AAR files
-    repositories {
-        flatDir {
-            dirs "$rootDir/libs"
-        }
-    }
+    // Repository configuration - using official dependencies now
+    // repositories {
+    //     flatDir {
+    //         dirs "$rootDir/libs"
+    //     }
+    // }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
@@ -217,9 +223,9 @@ dependencies {
         implementation jscFlavor
     }
     
-    // Add ffmpeg-kit dependencies using local AAR and required companion library
-    implementation(name: 'ffmpeg-kit-https', ext: 'aar')
-    implementation 'com.arthenica:smart-exception-java:0.2.1'
+    // FFmpeg Kit removed - project has been retired and dependencies are no longer available
+    // implementation 'com.arthenica:ffmpeg-kit-https:6.0'
+    // implementation 'com.arthenica:smart-exception-java:0.2.1'
     
     // Enhanced networking libraries for better API reliability
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -278,8 +284,8 @@ afterEvaluate {
         }
     }
 
-    // Make sure the AAR is downloaded before compilation begins
-    preBuild.dependsOn("downloadFFmpegKitAar")
+    // Disabled: Make sure the AAR is downloaded before compilation begins
+    // preBuild.dependsOn("downloadFFmpegKitAar")
     
     // Verify API endpoints before release builds
     tasks.matching { it.name.contains("Release") }.configureEach {

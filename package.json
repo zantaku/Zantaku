@@ -15,7 +15,7 @@
     "postbuild:android:prod-disabled": "node ./scripts/obfuscate.js",
     "build:prod": "cross-env NODE_ENV=production eas build --platform android",
     "build:preview": "cross-env NODE_ENV=production eas build --platform android --profile preview",
-    "postinstall": "patch-package && cd android && .\\gradlew :app:downloadFFmpegKitAar"
+    "postinstall": "patch-package"
   },
   "jest": {
     "preset": "jest-expo"
@@ -85,7 +85,7 @@
     "expo-web-browser": "~14.0.2",
     "express": "^4.21.2",
     "fast-xml-parser": "^4.5.1",
-    "ffmpeg-kit-react-native": "^6.0.2",
+
     "graphql": "^16.10.0",
     "he": "^1.2.0",
     "jszip": "^3.10.1",

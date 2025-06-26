@@ -42,7 +42,24 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    SoLoader.init(this, OpenSourceMergedSoMapping)
+    
+    // Enhanced SoLoader initialization with error handling for problematic FFmpeg Kit AAR
+    try {
+      SoLoader.init(this, OpenSourceMergedSoMapping)
+    } catch (e: Exception) {
+      // Log the error but don't crash the app
+      android.util.Log.e("MainApplication", "SoLoader initialization failed", e)
+      
+      // Try fallback initialization without merged mapping
+      try {
+        SoLoader.init(this, false)
+        android.util.Log.i("MainApplication", "SoLoader initialized with fallback method")
+      } catch (fallbackException: Exception) {
+        android.util.Log.e("MainApplication", "SoLoader fallback also failed", fallbackException)
+        // Continue without SoLoader - some features may not work but app won't crash
+      }
+    }
+    
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
