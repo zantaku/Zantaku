@@ -515,7 +515,7 @@ export default function EpisodeSourcesModal({
       }
       
       // Debug log for URL format detection
-      console.log(`URL Format: Detected animeId=${animeIdMatch}, episodeNumber=${epNum}`);
+      console.log(`🎬 [EPISODE DETECTION] episodeId="${episodeId}" => animeId="${animeIdMatch}", episodeNumber="${epNum}"`);
     }
   }, [episodeId]);
 
@@ -565,8 +565,13 @@ export default function EpisodeSourcesModal({
       // Always fetch sources for the preferred type when modal opens
       setLoading(true);
       // Use source settings to determine initial type and auto-select behavior
-      const initialType = sourceSettings.preferredType || preferredType || 'sub';
+      let initialType = sourceSettings.preferredType || preferredType || 'sub';
       const shouldAutoSelect = sourceSettings.autoSelectSource;
+      
+      // For AnimePahe, force SUB type since it doesn't support DUB
+      if (currentProvider === 'animepahe') {
+        initialType = 'sub';
+      }
       
       setType(initialType);
       setPillVisible(shouldAutoSelect);
@@ -575,7 +580,12 @@ export default function EpisodeSourcesModal({
         setPillMessage(`Loading ${initialType} version...`);
       }
       
-      fetchSources(episodeId, initialType);
+      // For AnimePahe, automatically start fetching SUB sources without showing selection
+      if (currentProvider === 'animepahe') {
+        fetchSources(episodeId, 'sub');
+      } else {
+        fetchSources(episodeId, initialType);
+      }
     } else {
       fadeAnim.setValue(0);
       scaleAnim.setValue(0.95);
@@ -1026,6 +1036,7 @@ export default function EpisodeSourcesModal({
     console.log('[SOURCE SELECT DEBUG] Source URL:', source.url.substring(0, 50) + '...');
     console.log('[SOURCE SELECT DEBUG] Episode ID:', episodeId);
     console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumber || '');
+    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumber ? parseInt(episodeNumber) : undefined);
     console.log('[SOURCE SELECT DEBUG] Anime ID:', animeId || '');
     console.log('[SOURCE SELECT DEBUG] AniList ID:', anilistId || 'Not provided');
     console.log('[SOURCE SELECT DEBUG] URL Format:', episodeId.includes('/') ? 'New (animeId/episodeNumber)' : 'Legacy');
@@ -1071,7 +1082,7 @@ export default function EpisodeSourcesModal({
       source: source.url,
       headers: source.headers,
       episodeId: episodeId,
-      episodeNumber: episodeNumber || '',
+      episodeNumber: episodeNumber ? parseInt(episodeNumber) : undefined,
       subtitles: directSubtitles || [],
       timings: directTimings || null,
       anilistId: anilistId || '',
@@ -1110,6 +1121,7 @@ export default function EpisodeSourcesModal({
     console.log('[SOURCE SELECT DEBUG] Source URL:', source.url.substring(0, 50) + '...');
     console.log('[SOURCE SELECT DEBUG] Episode ID:', episodeId);
     console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumber || '');
+    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumber ? parseInt(episodeNumber) : undefined);
     console.log('[SOURCE SELECT DEBUG] Anime ID:', animeId || '');
     console.log('[SOURCE SELECT DEBUG] AniList ID:', anilistId || 'Not provided');
     
@@ -1143,7 +1155,7 @@ export default function EpisodeSourcesModal({
       source: source.url,
       headers: source.headers,
       episodeId: episodeId,
-      episodeNumber: episodeNumber || '',
+      episodeNumber: episodeNumber ? parseInt(episodeNumber) : undefined,
       subtitles: currentSubtitles || [],
       timings: videoTimings || null,
       anilistId: anilistId || '',
@@ -1210,84 +1222,64 @@ export default function EpisodeSourcesModal({
     const hasZoroOptions = zoroOptions && (zoroOptions.sub.length > 0 || zoroOptions.dub.length > 0);
     
     if (hasZoroOptions) {
-      // Render Zoro SUB/DUB server selection
+      // Get the servers for the currently selected type (sub or dub)
+      const currentServers = type === 'dub' ? zoroOptions.dub : zoroOptions.sub;
+      
+      // Render Zoro server selection for the selected type only
       return (
         <View style={styles.qualitySelectionContainer}>
           <Text style={styles.title}>🔥 HiAnime Servers</Text>
           <Text style={styles.subtitle}>
-            Choose your preferred server and audio type
+            Choose your preferred server for {type === 'dub' ? 'dubbed' : 'subbed'} version
           </Text>
           
-          <ScrollView style={styles.zoroScrollContainer} showsVerticalScrollIndicator={false}>
-            {/* SUB Section */}
-            {zoroOptions.sub.length > 0 && (
-              <View style={styles.serverSection}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>💬 SUB</Text>
-                  <Text style={styles.sectionCount}>{zoroOptions.sub.length} servers</Text>
-                </View>
-                <View style={styles.serverGrid}>
-                  {zoroOptions.sub.map((server: any, index: number) => (
-                    <ReanimatedTouchableOpacity
-                      key={`sub-${index}`}
-                      style={[
-                        styles.serverButton,
-                        index === 0 && styles.defaultServerButton
-                      ]}
-                      onPress={() => handleZoroServerSelect(server, 'sub')}
-                    >
-                      <View style={styles.serverButtonContent}>
-                        <Text style={styles.serverButtonText}>{server.name}</Text>
+          <View style={styles.sourceCountBadge}>
+            <Text style={styles.sourceCountText}>{currentServers.length} {type.toUpperCase()} Servers Available</Text>
+          </View>
+          
+          <ScrollView style={styles.qualityList} showsVerticalScrollIndicator={false}>
+            {currentServers.map((server: any, index: number) => (
+              <ReanimatedTouchableOpacity
+                key={`${type}-${index}`}
+                style={[
+                  styles.qualityButton,
+                  index === 0 && styles.defaultQualityButton,
+                  styles.zoroServerButton
+                ]}
+                onPress={() => handleZoroServerSelect(server, type)}
+              >
+                <View style={styles.qualityButtonContent}>
+                  <View style={styles.qualityInfo}>
+                    <View>
+                      <Text style={styles.qualityLabel}>{server.name}</Text>
+                      <View style={styles.sourceTypeContainer}>
+                        <Text style={styles.sourceTypeText}>
+                          🔥 HiAnime Server
+                        </Text>
                         {index === 0 && (
                           <View style={styles.recommendedBadge}>
                             <Text style={styles.recommendedText}>Recommended</Text>
                           </View>
                         )}
-                      </View>
-                    </ReanimatedTouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-            
-            {/* DUB Section */}
-            {zoroOptions.dub.length > 0 && (
-              <View style={styles.serverSection}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>🎤 DUB</Text>
-                  <Text style={styles.sectionCount}>{zoroOptions.dub.length} servers</Text>
-                </View>
-                <View style={styles.serverGrid}>
-                  {zoroOptions.dub.map((server: any, index: number) => (
-                    <ReanimatedTouchableOpacity
-                      key={`dub-${index}`}
-                      style={[
-                        styles.serverButton,
-                        styles.dubServerButton,
-                        index === 0 && styles.defaultServerButton
-                      ]}
-                      onPress={() => handleZoroServerSelect(server, 'dub')}
-                    >
-                      <View style={styles.serverButtonContent}>
-                        <Text style={styles.serverButtonText}>{server.name}</Text>
-                        {index === 0 && (
-                          <View style={styles.recommendedBadge}>
-                            <Text style={styles.recommendedText}>Recommended</Text>
+                        {index !== 0 && (
+                          <View style={styles.serverBadge}>
+                            <Text style={styles.serverText}>HiAnime</Text>
                           </View>
                         )}
                       </View>
-                    </ReanimatedTouchableOpacity>
-                  ))}
+                    </View>
+                  </View>
+                  <FontAwesome5 name="play-circle" size={20} color="#02A9FF" />
                 </View>
-              </View>
-            )}
-            
-            <View style={styles.selectionFooter}>
-              <Text style={styles.footerHint}>
-                🎬 All servers provide HLS streaming with auto quality adaptation
-              </Text>
-            </View>
+              </ReanimatedTouchableOpacity>
+            ))}
           </ScrollView>
+          
+          <View style={styles.selectionFooter}>
+            <Text style={styles.footerHint}>
+              🎬 All servers provide HLS streaming with auto quality adaptation
+            </Text>
+          </View>
           
           <ReanimatedTouchableOpacity
             style={styles.backButton}
@@ -1493,6 +1485,13 @@ export default function EpisodeSourcesModal({
             ) : (
               // Type selection UI 
               <View style={styles.typeSelection}>
+                <ReanimatedTouchableOpacity 
+                  style={styles.closeButtonTop}
+                  onPress={onClose}
+                >
+                  <FontAwesome5 name="times" size={18} color="#FFFFFF" />
+                </ReanimatedTouchableOpacity>
+                
                 <Text style={styles.title}>Choose Your Experience!</Text>
                 <Text style={styles.subtitle}>Select your preferred version</Text>
                 <View style={styles.buttonContainer}>
@@ -1501,12 +1500,21 @@ export default function EpisodeSourcesModal({
                     isSelected={type === 'sub'}
                     onPress={() => handleTypeSelect('sub')}
                   />
-                  <VersionButton
-                    type="dub"
-                    isSelected={type === 'dub'}
-                    onPress={() => handleTypeSelect('dub')}
-                  />
+                  {/* Only show DUB option if the provider supports it */}
+                  {currentProvider !== 'animepahe' && (
+                    <VersionButton
+                      type="dub"
+                      isSelected={type === 'dub'}
+                      onPress={() => handleTypeSelect('dub')}
+                    />
+                  )}
                 </View>
+                {/* Show a note for providers that only support SUB */}
+                {currentProvider === 'animepahe' && (
+                  <Text style={[styles.subtitle, { marginTop: 16, fontSize: 14, opacity: 0.6 }]}>
+                    AnimePahe only provides subtitled content
+                  </Text>
+                )}
               </View>
             )}
           </Animated.View>
@@ -2069,5 +2077,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  closeButtonTop: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
 });

@@ -19,6 +19,10 @@ interface SettingsModalProps {
       textColor: string;
       backgroundOpacity: number;
       boldText: boolean;
+      positionY?: number;
+      outlineWidth?: number;
+      outlineColor?: string;
+      textAlign?: string;
     };
     markerSettings: {
       showMarkers: boolean;
@@ -254,25 +258,35 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             )}
 
-            {/* After the language selection, add subtitle appearance customization */}
+                        {/* Enhanced Subtitle Appearance Customization */}
             {preferences.subtitlesEnabled && (
               <View style={styles.settingRow}>
                 <Text style={styles.settingLabel}>Subtitle Appearance</Text>
                 
-                {/* Subtitle Preview */}
+                {/* Enhanced Subtitle Preview */}
                 <View style={styles.subtitlePreviewContainer}>
-                  <BlurView intensity={40 * (preferences.subtitleStyle?.backgroundOpacity || 0.7)} tint="dark" style={styles.subtitlePreviewBox}>
+                  <View style={[
+                    styles.subtitlePreviewBox,
+                    {
+                      backgroundColor: preferences.subtitleStyle?.backgroundColor || 'rgba(0, 0, 0, 0.7)',
+                      opacity: preferences.subtitleStyle?.backgroundOpacity || 0.7,
+                    }
+                  ]}>
                     <Text style={[
                       styles.subtitlePreviewText,
                       { 
                         fontSize: preferences.subtitleStyle?.fontSize || 18,
                         color: preferences.subtitleStyle?.textColor || '#FFFFFF',
-                        fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal'
+                        fontWeight: preferences.subtitleStyle?.boldText ? 'bold' : 'normal',
+                        textShadowColor: preferences.subtitleStyle?.outlineColor || 'rgba(0, 0, 0, 0.8)',
+                        textShadowOffset: { width: 1, height: 1 },
+                        textShadowRadius: preferences.subtitleStyle?.outlineWidth || 2,
+                        textAlign: (preferences.subtitleStyle?.textAlign as 'left' | 'center' | 'right') || 'center',
                       }
                     ]}>
                       {previewText}
                     </Text>
-                  </BlurView>
+                  </View>
                 </View>
                 
                 {/* Font Size */}
@@ -285,7 +299,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Slider
                       style={{ width: '100%', height: 40 }}
                       minimumValue={12}
-                      maximumValue={30}
+                      maximumValue={32}
                       step={1}
                       value={preferences.subtitleStyle?.fontSize || 18}
                       onValueChange={(value) => {
@@ -339,6 +353,38 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   </View>
                 </View>
                 
+                {/* Subtitle Position */}
+                <View style={styles.subSettingRow}>
+                  <View style={styles.subSettingLabelContainer}>
+                    <MaterialIcons name="vertical-align-bottom" size={20} color="#FFF" />
+                    <Text style={styles.subSettingLabel}>Vertical Position</Text>
+                  </View>
+                  <View style={styles.sliderContainer}>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={50}
+                      maximumValue={300}
+                      step={10}
+                      value={preferences.subtitleStyle?.positionY || 120}
+                      onValueChange={(value) => {
+                        setPreferences({
+                          ...preferences,
+                          subtitleStyle: {
+                            ...preferences.subtitleStyle,
+                            positionY: value
+                          }
+                        });
+                      }}
+                      minimumTrackTintColor="#FF6B00"
+                      maximumTrackTintColor="#666666"
+                      thumbTintColor="#FF6B00"
+                    />
+                    <Text style={styles.sliderValue}>
+                      {preferences.subtitleStyle?.positionY || 120}px
+                    </Text>
+                  </View>
+                </View>
+                
                 {/* Text Color */}
                 <View style={styles.subSettingRow}>
                   <View style={styles.subSettingLabelContainer}>
@@ -346,7 +392,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Text style={styles.subSettingLabel}>Text Color</Text>
                   </View>
                   <View style={styles.colorOptions}>
-                    {['#FFFFFF', '#FFFF00', '#00FFFF', '#FF9900', '#66FF66'].map(color => (
+                    {['#FFFFFF', '#FFFF00', '#00FFFF', '#FF9900', '#66FF66', '#FF6B9D', '#C79AFE'].map(color => (
                       <TouchableOpacity
                         key={`color-${color}`}
                         style={[
@@ -365,6 +411,73 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         }}
                       />
                     ))}
+                  </View>
+                </View>
+                
+                {/* Background Color */}
+                <View style={styles.subSettingRow}>
+                  <View style={styles.subSettingLabelContainer}>
+                    <MaterialIcons name="format-color-fill" size={20} color="#FFF" />
+                    <Text style={styles.subSettingLabel}>Background Color</Text>
+                  </View>
+                  <View style={styles.colorOptions}>
+                    {[
+                      { color: 'rgba(0, 0, 0, 0.7)', display: '#000000' },
+                      { color: 'rgba(13, 27, 42, 0.7)', display: '#0D1B2A' },
+                      { color: 'rgba(33, 33, 33, 0.7)', display: '#212121' },
+                      { color: 'rgba(64, 64, 64, 0.7)', display: '#404040' },
+                      { color: 'rgba(0, 0, 128, 0.7)', display: '#000080' }
+                    ].map((bg, index) => (
+                      <TouchableOpacity
+                        key={`bg-color-${index}`}
+                        style={[
+                          styles.colorOption,
+                          { backgroundColor: bg.display },
+                          (preferences.subtitleStyle?.backgroundColor || 'rgba(0, 0, 0, 0.7)') === bg.color && styles.colorOptionSelected
+                        ]}
+                        onPress={() => {
+                          setPreferences({
+                            ...preferences,
+                            subtitleStyle: {
+                              ...preferences.subtitleStyle,
+                              backgroundColor: bg.color
+                            }
+                          });
+                        }}
+                      />
+                    ))}
+                  </View>
+                </View>
+                
+                {/* Outline/Shadow Settings */}
+                <View style={styles.subSettingRow}>
+                  <View style={styles.subSettingLabelContainer}>
+                    <MaterialIcons name="text-fields" size={20} color="#FFF" />
+                    <Text style={styles.subSettingLabel}>Outline Width</Text>
+                  </View>
+                  <View style={styles.sliderContainer}>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={4}
+                      step={0.5}
+                      value={preferences.subtitleStyle?.outlineWidth || 2}
+                      onValueChange={(value) => {
+                        setPreferences({
+                          ...preferences,
+                          subtitleStyle: {
+                            ...preferences.subtitleStyle,
+                            outlineWidth: value
+                          }
+                        });
+                      }}
+                      minimumTrackTintColor="#FF6B00"
+                      maximumTrackTintColor="#666666"
+                      thumbTintColor="#FF6B00"
+                    />
+                    <Text style={styles.sliderValue}>
+                      {preferences.subtitleStyle?.outlineWidth || 2}px
+                    </Text>
                   </View>
                 </View>
                 
@@ -394,6 +507,44 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   </TouchableOpacity>
                 </View>
                 
+                {/* Text Alignment */}
+                <View style={styles.subSettingRow}>
+                  <View style={styles.subSettingLabelContainer}>
+                    <MaterialIcons name="format-align-center" size={20} color="#FFF" />
+                    <Text style={styles.subSettingLabel}>Text Alignment</Text>
+                  </View>
+                  <View style={styles.alignmentOptions}>
+                    {[
+                      { value: 'left', icon: 'format-align-left' },
+                      { value: 'center', icon: 'format-align-center' },
+                      { value: 'right', icon: 'format-align-right' }
+                    ].map(alignment => (
+                      <TouchableOpacity
+                        key={alignment.value}
+                        style={[
+                          styles.alignmentOption,
+                          (preferences.subtitleStyle?.textAlign || 'center') === alignment.value && styles.alignmentOptionSelected
+                        ]}
+                        onPress={() => {
+                          setPreferences({
+                            ...preferences,
+                            subtitleStyle: {
+                              ...preferences.subtitleStyle,
+                              textAlign: alignment.value
+                            }
+                          });
+                        }}
+                      >
+                        <MaterialIcons 
+                          name={alignment.icon as any} 
+                          size={20} 
+                          color={(preferences.subtitleStyle?.textAlign || 'center') === alignment.value ? '#FF6B00' : 'white'} 
+                        />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                
                 {/* Reset Button */}
                 <TouchableOpacity
                   style={styles.resetButton}
@@ -405,7 +556,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         backgroundColor: 'rgba(0, 0, 0, 0.7)',
                         textColor: '#FFFFFF',
                         backgroundOpacity: 0.7,
-                        boldText: false
+                        boldText: false,
+                        positionY: 120,
+                        outlineWidth: 2,
+                        outlineColor: 'rgba(0, 0, 0, 0.8)',
+                        textAlign: 'center'
                       }
                     });
                   }}
@@ -807,6 +962,22 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     marginLeft: 4,
+  },
+  alignmentOptions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  alignmentOption: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  alignmentOptionSelected: {
+    backgroundColor: '#FF6B00',
+    borderColor: '#FF6B00',
   },
   settingControl: {
     flexDirection: 'row',

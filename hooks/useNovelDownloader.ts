@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from 'react';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import JSZip from 'jszip';
+import { validateEpub } from '../utils/epubValidator';
 
 interface DownloadState {
   progress: number;
@@ -13,6 +15,87 @@ export interface NovelVolume {
   title: string;
   number: string;
 }
+
+interface RepairResult {
+  success: boolean;
+  message: string;
+  repaired: boolean;
+}
+
+const validateAndRepairEpub = async (fileUri: string): Promise<RepairResult> => {
+  try {
+    // Read the file
+    const fileContent = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+    
+    // Convert base64 to ArrayBuffer
+    const byteCharacters = atob(fileContent);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const arrayBuffer = new Uint8Array(byteNumbers).buffer;
+
+    // Load the EPUB with JSZip
+    const zip = new JSZip();
+    await zip.loadAsync(arrayBuffer);
+    
+    // Validate EPUB structure
+    const validation = await validateEpub(zip);
+    
+    if (validation.isValid) {
+      return { success: true, message: 'EPUB is valid', repaired: false };
+    }
+
+    console.log('📚 EPUB validation issues:', validation.issues);
+
+    // Attempt repairs based on common issues
+    let repaired = false;
+    const repairedZip = new JSZip();
+
+    // 1. Fix missing mimetype file
+    if (validation.issues.includes('Missing mimetype file')) {
+      await repairedZip.file('mimetype', 'application/epub+zip');
+      repaired = true;
+    }
+
+    // 2. Fix missing container.xml
+    if (validation.issues.includes('Missing container.xml')) {
+      const containerXml = `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`;
+      await repairedZip.folder('META-INF')?.file('container.xml', containerXml);
+      repaired = true;
+    }
+
+    // If repairs were made, save the repaired file
+    if (repaired) {
+      const repairedContent = await repairedZip.generateAsync({ type: 'base64' });
+      await FileSystem.writeAsStringAsync(fileUri, repairedContent, { encoding: FileSystem.EncodingType.Base64 });
+      
+      // Validate again after repairs
+      const revalidation = await validateEpub(repairedZip);
+      if (revalidation.isValid) {
+        return { success: true, message: 'EPUB repaired successfully', repaired: true };
+      }
+    }
+
+    return { 
+      success: false, 
+      message: `EPUB validation failed: ${validation.issues.join(', ')}`,
+      repaired: false
+    };
+  } catch (error) {
+    console.error('Error validating EPUB:', error);
+    return { 
+      success: false, 
+      message: `Error validating EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      repaired: false
+    };
+  }
+};
 
 export function useNovelDownloader(novelId: string | null) {
   const [downloadingVolumes, setDownloadingVolumes] = useState<Map<string, DownloadState>>(new Map());
@@ -104,6 +187,29 @@ export function useNovelDownloader(novelId: string | null) {
       const result = await downloadResumable.downloadAsync();
       
       if (result?.uri) {
+        // Validate and repair the downloaded EPUB
+        console.log('📚 Validating downloaded EPUB...');
+        const validationResult = await validateAndRepairEpub(result.uri);
+        
+        if (!validationResult.success) {
+          console.error('❌ EPUB validation failed:', validationResult.message);
+          // If validation failed and couldn't be repaired, delete the file and return false
+          await FileSystem.deleteAsync(result.uri);
+          setDownloadingVolumes(prev => {
+            const next = new Map(prev);
+            next.delete(volume.id);
+            return next;
+          });
+          await AsyncStorage.removeItem(`download_state_${volume.id}`);
+          return false;
+        }
+
+        if (validationResult.repaired) {
+          console.log('🔧 EPUB was repaired successfully');
+        } else {
+          console.log('✅ EPUB is valid');
+        }
+
         setDownloadedVolumes(prev => new Set(prev).add(volume.id));
         setDownloadingVolumes(prev => {
           const next = new Map(prev);

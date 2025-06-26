@@ -17,6 +17,10 @@ export interface PlayerPreferences {
     textColor: string;
     backgroundOpacity: number;
     boldText: boolean;
+    positionY?: number;
+    outlineWidth?: number;
+    outlineColor?: string;
+    textAlign?: string;
   };
   markerSettings: {
     showMarkers: boolean;
@@ -65,7 +69,11 @@ const defaultPreferences: PlayerPreferences = {
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     textColor: '#FFFFFF',
     backgroundOpacity: 0.7,
-    boldText: false
+    boldText: false,
+    positionY: 120,
+    outlineWidth: 2,
+    outlineColor: 'rgba(0, 0, 0, 0.8)',
+    textAlign: 'center'
   },
   markerSettings: {
     showMarkers: true,

@@ -19,6 +19,17 @@ import {
 } from '../utils/episodeOptimization';
 import { animeProviderManager } from '../api/proxy/providers/anime';
 import { zoroProvider } from '../api/proxy/providers/anime/zorohianime';
+import { 
+  getOptimizedListProps, 
+  detectDeviceCapabilities, 
+  PERFORMANCE_CONFIG,
+  useOptimizedScrollHandler,
+  MemoryManager 
+} from '../utils/performanceOptimization';
+import OptimizedImage from './OptimizedImage';
+
+// Device capabilities for performance optimization
+const deviceCapabilities = detectDeviceCapabilities();
 
 // Hook to load source settings
 const useSourceSettings = () => {
@@ -55,7 +66,7 @@ const useSourceSettings = () => {
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
 const MAL_API_ENDPOINT = 'https://api.myanimelist.net/v2';
 
-const PLACEHOLDER_BLUR_HASH = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
+const PLACEHOLDER_BLUR_HASH = PERFORMANCE_CONFIG.BLUR_HASH_PLACEHOLDER;
 
 interface Episode {
   id: string;
@@ -146,127 +157,153 @@ const safeFormatDate = (dateString?: string, options?: Intl.DateTimeFormatOption
 };
 // #endregion
 
-// #region Production-Safe Episode Card Components
-const GridEpisodeCard = memo(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage }: {
+// #region Optimized Episode Card Components
+const OptimizedGridEpisodeCard = memo<{
   episode: Episode;
   onPress: (episode: Episode) => void;
   currentProgress: number;
   currentTheme: any;
   isDarkMode: boolean;
   coverImage?: string;
-}) => {
-  try {
-    const isWatched = currentProgress >= (episode.number ?? 0);
-    const safeEpisodeNumber = String(episode?.number ?? '??');
-    const safeEpisodeTitle = episode?.title || `Episode ${safeEpisodeNumber}`;
-    const formattedDate = safeFormatDate(episode?.aired, { month: 'short', day: 'numeric' });
+  index: number;
+  isVisible: boolean;
+}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible }) => {
+  const isWatched = useMemo(() => currentProgress >= (episode.number ?? 0), [currentProgress, episode.number]);
+  const safeEpisodeNumber = useMemo(() => String(episode?.number ?? '??'), [episode.number]);
+  const safeEpisodeTitle = useMemo(() => episode?.title || `Episode ${safeEpisodeNumber}`, [episode.title, safeEpisodeNumber]);
+  const formattedDate = useMemo(() => safeFormatDate(episode?.aired, { month: 'short', day: 'numeric' }), [episode.aired]);
 
-    return (
-      <TouchableOpacity
-        style={[styles.gridEpisodeCard, { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)' }, isWatched && styles.watchedGridCard]}
-        onPress={() => onPress(episode)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.gridThumbnailContainer}>
-          <Image source={{ uri: episode.image || coverImage || '' }} placeholder={PLACEHOLDER_BLUR_HASH} style={[styles.gridEpisodeThumbnail, isWatched && styles.watchedGridThumbnail]} contentFit="cover" transition={200} />
-          {isWatched && <View style={styles.gridWatchedBadge}><FontAwesome5 name="check" size={8} color="#FFFFFF" /></View>}
-          <View style={styles.gridEpisodeNumberBadge}><Text style={styles.gridEpisodeNumberText}>{safeEpisodeNumber}</Text></View>
+  const handlePress = useCallback(() => {
+    onPress(episode);
+  }, [onPress, episode]);
+
+  const cardStyle = useMemo(() => [
+    styles.gridEpisodeCard, 
+    { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)' }, 
+    isWatched && styles.watchedGridCard
+  ], [isDarkMode, isWatched]);
+
+  return (
+    <TouchableOpacity
+      style={cardStyle}
+      onPress={handlePress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.gridThumbnailContainer}>
+        <OptimizedImage
+          uri={episode.image || coverImage || ''}
+          width={160}
+          height={90}
+          style={[styles.gridEpisodeThumbnail, isWatched && styles.watchedGridThumbnail]}
+          placeholder={PLACEHOLDER_BLUR_HASH}
+          resizeMode="cover"
+          isVisible={isVisible}
+          priority={index < 6 ? 'high' : 'normal'}
+          reduceMemoryUsage={deviceCapabilities.isLowEndDevice}
+          index={index}
+        />
+        {isWatched && <View style={styles.gridWatchedBadge}><FontAwesome5 name="check" size={8} color="#FFFFFF" /></View>}
+        <View style={styles.gridEpisodeNumberBadge}><Text style={styles.gridEpisodeNumberText}>{safeEpisodeNumber}</Text></View>
+        {(episode.isSubbed || episode.isDubbed) && (
+          <View style={styles.gridAvailabilityContainer}>
+            {episode.isSubbed && <View style={[styles.gridAvailabilityBadge, styles.gridSubBadge]}><Text style={styles.gridAvailabilityText}>SUB</Text></View>}
+            {episode.isDubbed && <View style={[styles.gridAvailabilityBadge, styles.gridDubBadge]}><Text style={styles.gridAvailabilityText}>DUB</Text></View>}
+          </View>
+        )}
+      </View>
+      <View style={styles.gridEpisodeContent}>
+        <Text style={[styles.gridEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>{safeEpisodeTitle}</Text>
+        {formattedDate && <Text style={[styles.gridEpisodeMeta, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>{formattedDate}</Text>}
+        <TouchableOpacity style={[styles.gridWatchButton, isWatched && styles.gridRewatchButton]} onPress={handlePress}>
+          <FontAwesome5 name={isWatched ? "redo" : "play"} size={10} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.episode.id === nextProps.episode.id &&
+    prevProps.episode.number === nextProps.episode.number &&
+    prevProps.currentProgress === nextProps.currentProgress &&
+    prevProps.isVisible === nextProps.isVisible &&
+    prevProps.index === nextProps.index
+  );
+});
+
+const OptimizedListEpisodeCard = memo<{
+  episode: Episode;
+  onPress: (episode: Episode) => void;
+  currentProgress: number;
+  currentTheme: any;
+  isDarkMode: boolean;
+  coverImage?: string;
+  index: number;
+  isVisible: boolean;
+}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible }) => {
+  const isWatched = useMemo(() => currentProgress >= (episode.number ?? 0), [currentProgress, episode.number]);
+  const safeEpisodeNumber = useMemo(() => String(episode?.number ?? '??'), [episode.number]);
+  const safeEpisodeTitle = useMemo(() => episode?.title || `Episode ${safeEpisodeNumber}`, [episode.title, safeEpisodeNumber]);
+  const formattedDate = useMemo(() => safeFormatDate(episode?.aired, { month: 'short', day: 'numeric' }), [episode.aired]);
+
+  const handlePress = useCallback(() => {
+    onPress(episode);
+  }, [onPress, episode]);
+
+  const cardStyle = useMemo(() => [
+    styles.listEpisodeCard, 
+    { backgroundColor: currentTheme.colors.surface }, 
+    isWatched && styles.watchedListCard
+  ], [currentTheme.colors.surface, isWatched]);
+
+  return (
+    <TouchableOpacity
+      style={cardStyle}
+      onPress={handlePress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.listThumbnailContainer}>
+        <OptimizedImage
+          uri={episode.image || coverImage || ''}
+          width={120}
+          height={68}
+          style={[styles.listEpisodeThumbnail, isWatched && styles.watchedListThumbnail]}
+          placeholder={PLACEHOLDER_BLUR_HASH}
+          resizeMode="cover"
+          isVisible={isVisible}
+          priority={index < 6 ? 'high' : 'normal'}
+          reduceMemoryUsage={deviceCapabilities.isLowEndDevice}
+          index={index}
+        />
+        {isWatched && <View style={styles.listWatchedBadge}><FontAwesome5 name="check" size={10} color="#FFFFFF" /></View>}
+      </View>
+      <View style={styles.listEpisodeContent}>
+        <Text style={[styles.listEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+          Episode {safeEpisodeNumber}: {safeEpisodeTitle}
+        </Text>
+        <View style={styles.listMetaRow}>
+          {formattedDate && <Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>{formattedDate}</Text>}
           {(episode.isSubbed || episode.isDubbed) && (
-            <View style={styles.gridAvailabilityContainer}>
-              {episode.isSubbed && <View style={[styles.gridAvailabilityBadge, styles.gridSubBadge]}><Text style={styles.gridAvailabilityText}>SUB</Text></View>}
-              {episode.isDubbed && <View style={[styles.gridAvailabilityBadge, styles.gridDubBadge]}><Text style={styles.gridAvailabilityText}>DUB</Text></View>}
+            <View style={styles.listAvailabilityContainer}>
+              {episode.isSubbed && <View style={[styles.listAvailabilityBadge, styles.listSubBadge]}><Text style={styles.listAvailabilityText}>SUB</Text></View>}
+              {episode.isDubbed && <View style={[styles.listAvailabilityBadge, styles.listDubBadge]}><Text style={styles.listAvailabilityText}>DUB</Text></View>}
             </View>
           )}
         </View>
-        <View style={styles.gridEpisodeContent}>
-          <Text style={[styles.gridEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>{safeEpisodeTitle}</Text>
-          {formattedDate && <Text style={[styles.gridEpisodeMeta, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>{formattedDate}</Text>}
-          <TouchableOpacity style={[styles.gridWatchButton, isWatched && styles.gridRewatchButton]} onPress={() => onPress(episode)}>
-            <FontAwesome5 name={isWatched ? "redo" : "play"} size={10} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    );
-  } catch (error: any) {
-    console.error('[CRITICAL] GridEpisodeCard render crashed.', { episode, error });
-    return (
-      <View style={[styles.gridEpisodeCard, { backgroundColor: 'rgba(255, 0, 0, 0.1)', borderColor: 'red', borderWidth: 1 }]}>
-        <View style={{ padding: 10, alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-          <FontAwesome5 name="exclamation-triangle" size={24} color="red" />
-          <Text style={{ color: 'red', fontWeight: 'bold', fontSize: 12, marginTop: 8, textAlign: 'center' }}>{`Error in Ep ${episode?.number ?? '??'}`}</Text>
-          <Text style={{ color: 'red', fontSize: 10, marginTop: 2, textAlign: 'center' }}>{error?.message || 'Render Failed'}</Text>
-        </View>
+        <TouchableOpacity style={[styles.listWatchButton, isWatched && styles.listRewatchButton]} onPress={handlePress}>
+          <FontAwesome5 name={isWatched ? "redo" : "play"} size={12} color="#FFFFFF" />
+          <Text style={styles.listWatchButtonText}>{isWatched ? "Rewatch" : "Watch"}</Text>
+        </TouchableOpacity>
       </View>
-    );
-  }
-});
-
-const ListEpisodeCard = memo(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage }: {
-  episode: Episode;
-  onPress: (episode: Episode) => void;
-  currentProgress: number;
-  currentTheme: any;
-  isDarkMode: boolean;
-  coverImage?: string;
-}) => {
-  try {
-    const isWatched = currentProgress >= (episode.number ?? 0);
-    const safeEpisodeNumber = String(episode?.number ?? '??');
-    const safeEpisodeTitle = episode?.title || `Episode ${safeEpisodeNumber}`;
-    const safeDurationText = episode?.duration ? `${episode.duration}m` : '';
-    const formattedDate = safeFormatDate(episode?.aired, { year: 'numeric', month: 'short', day: 'numeric' });
-    const watchButtonText = isWatched ? "Rewatch" : "Watch";
-    const progressText = isWatched ? 'Watched' : 'Not watched';
-
-    return (
-      <TouchableOpacity
-        style={[styles.listEpisodeCard, { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)' }, isWatched && styles.watchedListCard]}
-        onPress={() => onPress(episode)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.listThumbnailContainer}>
-          <Image source={{ uri: episode.image || coverImage || '' }} placeholder={PLACEHOLDER_BLUR_HASH} style={[styles.listEpisodeThumbnail, isWatched && styles.watchedListThumbnail]} contentFit="cover" transition={200} />
-          {isWatched && <View style={styles.listWatchedBadge}><FontAwesome5 name="check" size={12} color="#FFFFFF" /></View>}
-          <View style={styles.listEpisodeNumberBadge}><Text style={styles.listEpisodeNumberText}>{safeEpisodeNumber}</Text></View>
-        </View>
-        <View style={styles.listEpisodeContent}>
-          <Text style={[styles.listEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>{safeEpisodeTitle}</Text>
-          <View style={styles.listMetaRow}>
-            {formattedDate && <View style={styles.listMetaItem}><FontAwesome5 name="calendar-alt" size={12} color={currentTheme.colors.textSecondary} /><Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>{formattedDate}</Text></View>}
-            {!!safeDurationText && <View style={styles.listMetaItem}><FontAwesome5 name="clock" size={12} color={currentTheme.colors.textSecondary} /><Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>{safeDurationText}</Text></View>}
-          </View>
-          <View style={styles.listTagsContainer}>
-            {episode.isFiller && <View style={[styles.listEpisodeTypeBadge, { backgroundColor: '#F44336' }]}><Text style={styles.listEpisodeTypeText}>Filler</Text></View>}
-            {episode.isRecap && <View style={[styles.listEpisodeTypeBadge, { backgroundColor: '#2196F3' }]}><Text style={styles.listEpisodeTypeText}>Recap</Text></View>}
-            {episode.isSubbed && <View style={[styles.listAvailabilityBadge, styles.listSubBadge]}><Text style={styles.listAvailabilityText}>SUB</Text></View>}
-            {episode.isDubbed && <View style={[styles.listAvailabilityBadge, styles.listDubBadge]}><Text style={styles.listAvailabilityText}>DUB</Text></View>}
-          </View>
-          <View style={styles.listEpisodeFooter}>
-            <View style={styles.listProgressContainer}>
-              <View style={[styles.listProgressBar, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}><View style={[styles.listProgressFill, { width: `${isWatched ? 100 : 0}%` }]} /></View>
-              <Text style={[styles.listProgressText, { color: currentTheme.colors.textSecondary }]}>{progressText}</Text>
-            </View>
-            <TouchableOpacity style={[styles.listWatchButton, isWatched && styles.listRewatchButton]} onPress={() => onPress(episode)}>
-              <FontAwesome5 name={isWatched ? "redo" : "play"} size={13} color="#FFFFFF" style={{ marginRight: 6 }} /><Text style={styles.listWatchButtonText}>{watchButtonText}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  } catch (error: any) {
-    console.error('[CRITICAL] ListEpisodeCard render crashed.', { episode, error });
-    return (
-      <View style={[styles.listEpisodeCard, { backgroundColor: 'rgba(255, 0, 0, 0.1)', borderColor: 'red', borderWidth: 1 }]}>
-        <View style={{ padding: 10, flexDirection: 'row', alignItems: 'center' }}>
-          <FontAwesome5 name="exclamation-triangle" size={24} color="red" />
-          <View style={{ marginLeft: 10 }}>
-            <Text style={{ color: 'red', fontWeight: 'bold' }}>{`Error: Ep ${episode?.number ?? '??'}`}</Text>
-            <Text style={{ color: 'red', fontSize: 12, marginTop: 4 }}>{error?.message || 'Render failed'}</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
+    </TouchableOpacity>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.episode.id === nextProps.episode.id &&
+    prevProps.episode.number === nextProps.episode.number &&
+    prevProps.currentProgress === nextProps.currentProgress &&
+    prevProps.isVisible === nextProps.isVisible &&
+    prevProps.index === nextProps.index
+  );
 });
 // #endregion
 
@@ -514,6 +551,32 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                             provider: 'Zoro/HiAnime'
                         }));
                     }
+                } else if (currentProvider === 'animepahe') {
+                    console.log(`[EpisodeList] Setting availability for AnimePahe provider (SUB only)...`);
+                    
+                    // AnimePahe only provides subtitled content, no dub
+                    episodesWithAvailability = providerResult.episodes.map(episode => ({
+                        ...episode,
+                        isSubbed: true,  // AnimePahe always has subtitles
+                        isDubbed: false, // AnimePahe never has dub
+                        provider: 'AnimePahe'
+                    }));
+                    
+                    console.log(`[EpisodeList] Updated AnimePahe episodes with availability:`, {
+                        totalEpisodes: episodesWithAvailability.length,
+                        subbedCount: episodesWithAvailability.filter(ep => ep.isSubbed).length,
+                        dubbedCount: episodesWithAvailability.filter(ep => ep.isDubbed).length
+                    });
+                } else {
+                    // For other providers, set default availability
+                    console.log(`[EpisodeList] Setting default availability for ${currentProvider} provider...`);
+                    
+                    episodesWithAvailability = providerResult.episodes.map(episode => ({
+                        ...episode,
+                        isSubbed: true,  // Assume SUB is available by default
+                        isDubbed: false, // Assume DUB is not available by default for unknown providers
+                        provider: currentProvider
+                    }));
                 }
                 
                 setEpisodes(episodesWithAvailability);
@@ -790,9 +853,9 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
     const renderItem = useCallback(({ item }: { item: Episode }) => (
         <View style={styles.cardWrapper}>
             {columnCount === 1 ? (
-                <ListEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} />
+                <OptimizedListEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} index={0} isVisible={true} />
             ) : (
-                <GridEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} />
+                <OptimizedGridEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} index={0} isVisible={true} />
             )}
         </View>
     ), [columnCount, handleEpisodePress, currentProgress, currentTheme, isDarkMode, coverImage]);
@@ -1103,10 +1166,11 @@ const styles = StyleSheet.create({
     listTagsContainer: { flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' },
     listEpisodeTypeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
     listEpisodeTypeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
-    listAvailabilityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-    listSubBadge: { backgroundColor: 'rgba(76, 175, 80, 0.9)' },
-    listDubBadge: { backgroundColor: 'rgba(255, 152, 0, 0.9)' },
-    listAvailabilityText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
+      listAvailabilityContainer: { flexDirection: 'row', gap: 4 },
+  listAvailabilityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  listSubBadge: { backgroundColor: 'rgba(76, 175, 80, 0.9)' },
+  listDubBadge: { backgroundColor: 'rgba(255, 152, 0, 0.9)' },
+  listAvailabilityText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
     listEpisodeFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
     listProgressContainer: { flex: 1, marginRight: 12 },
     listProgressBar: { height: 4, backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },

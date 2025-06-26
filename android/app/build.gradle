@@ -95,6 +95,18 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        
+        // Network optimization for API reliability
+        manifestPlaceholders = [
+            networkSecurityConfig: "@xml/network_security_config"
+        ]
+        
+        // Additional build config values for API handling
+        buildConfigField "String", "TAKIAPI_PRIMARY", '"https://takiapi.xyz"'
+        buildConfigField "String", "TAKIAPI_MIRROR1", '"https://api.takiapi.xyz"'
+        buildConfigField "String", "TAKIAPI_MIRROR2", '"https://cdn.takiapi.xyz"'
+        buildConfigField "String", "KATANA_PRIMARY", '"https://magaapinovel.xyz"'
+        buildConfigField "String", "KATANA_FALLBACK", '"https://takiapi.xyz/manga"'
     }
     
     splits {
@@ -133,6 +145,11 @@ android {
             crunchPngs true
             zipAlignEnabled true
             debuggable false
+            
+            // Optimize for network reliability in release builds
+            buildConfigField "boolean", "API_DEBUG_MODE", "false"
+            buildConfigField "int", "API_TIMEOUT_MS", "15000"
+            buildConfigField "int", "API_RETRY_COUNT", "3"
         }
     }
     packagingOptions {
@@ -203,6 +220,10 @@ dependencies {
     // Add ffmpeg-kit dependencies using local AAR and required companion library
     implementation(name: 'ffmpeg-kit-https', ext: 'aar')
     implementation 'com.arthenica:smart-exception-java:0.2.1'
+    
+    // Enhanced networking libraries for better API reliability
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
 }
 
 // Add script to download FFmpeg Kit AAR from alternative source
@@ -233,6 +254,35 @@ afterEvaluate {
         }
     }
 
+    // Add task to verify API endpoints are reachable during build
+    tasks.register("verifyApiEndpoints") {
+        doLast {
+            def endpoints = [
+                'https://takiapi.xyz',
+                'https://api.takiapi.xyz', 
+                'https://magaapinovel.xyz'
+            ]
+            
+            println "🔍 Verifying API endpoints reachability..."
+            endpoints.each { endpoint ->
+                try {
+                    def connection = new URL("${endpoint}/health").openConnection()
+                    connection.setConnectTimeout(5000)
+                    connection.setReadTimeout(5000)
+                    connection.connect()
+                    println "✅ ${endpoint} - Reachable"
+                } catch (Exception e) {
+                    println "⚠️ ${endpoint} - Not reachable (${e.message})"
+                }
+            }
+        }
+    }
+
     // Make sure the AAR is downloaded before compilation begins
     preBuild.dependsOn("downloadFFmpegKitAar")
+    
+    // Verify API endpoints before release builds
+    tasks.matching { it.name.contains("Release") }.configureEach {
+        dependsOn("verifyApiEndpoints")
+    }
 }

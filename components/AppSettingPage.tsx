@@ -54,6 +54,9 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
     } else if (id === 'news') {
       onClose();
       router.push('/appsettings/newssettings');
+    } else if (id === 'apistatus') {
+      onClose();
+      router.push('/appsettings/api');
     }
   };
 
@@ -130,6 +133,14 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
       iconBgColor: '#FF6B35',
       requiresAuth: false,
     },
+    {
+      id: 'apistatus',
+      icon: 'server',
+      title: 'API Status',
+      description: 'Monitor real-time API health & performance',
+      iconBgColor: '#4CAF50',
+      requiresAuth: false,
+    },
     // {
     //   id: 'sources',
     //   icon: 'puzzle-piece',
@@ -155,7 +166,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
 
   // Sort settings to ensure consistent order
   settings.sort((a, b) => {
-    const order = ['commons', 'theme', 'news', 'anime', 'manga', 'novel'];
+    const order = ['commons', 'theme', 'apistatus', 'news', 'anime', 'manga', 'novel'];
     return order.indexOf(a.id) - order.indexOf(b.id);
   });
 

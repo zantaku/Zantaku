@@ -179,10 +179,181 @@ const PlayerScreen: React.FC = () => {
   const [selectedSubtitleLanguage, setSelectedSubtitleLanguage] = useState('English');
   const [currentAudioTrack, setCurrentAudioTrack] = useState<'sub' | 'dub'>('sub');
   
-  // Subtitle state
+  // Subtitle state - Enhanced with binary search index
   const [currentSubtitle, setCurrentSubtitle] = useState<string>('');
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
-  const [subtitlePosition, setSubtitlePosition] = useState({ x: 0, y: SCREEN_HEIGHT * 0.8 });
+  const [subtitlePosition, setSubtitlePosition] = useState({ x: 0, y: 120 });
+  
+  // Optimized subtitle lookup with binary search and caching
+  const currentSubtitleIndexRef = useRef<number>(-1);
+  const lastSubtitleLookupTimeRef = useRef<number>(-1);
+  
+  // Enhanced subtitle cue cache for faster lookups
+  const subtitleCacheRef = useRef<{
+    cues: SubtitleCue[];
+    timeIndex: Map<number, number>; // time (rounded to 100ms) -> cue index
+    sortedStartTimes: number[];
+  }>({
+    cues: [],
+    timeIndex: new Map(),
+    sortedStartTimes: []
+  });
+  
+  // Function to build subtitle index for fast lookups
+  const buildSubtitleIndex = useCallback((cues: SubtitleCue[]) => {
+    const cache = {
+      cues: [...cues].sort((a, b) => a.startTime - b.startTime),
+      timeIndex: new Map<number, number>(),
+      sortedStartTimes: [] as number[]
+    };
+    
+    // Build time-based index (100ms precision for balance between accuracy and performance)
+    cache.cues.forEach((cue, index) => {
+      const startTimeKey = Math.floor(cue.startTime * 10); // 100ms precision
+      const endTimeKey = Math.floor(cue.endTime * 10);
+      
+      // Map all time slots this cue covers
+      for (let timeKey = startTimeKey; timeKey <= endTimeKey; timeKey++) {
+        if (!cache.timeIndex.has(timeKey)) {
+          cache.timeIndex.set(timeKey, index);
+        }
+      }
+    });
+    
+    cache.sortedStartTimes = cache.cues.map(cue => cue.startTime);
+    subtitleCacheRef.current = cache;
+    
+    console.log(`🚀 [SUBTITLE OPTIMIZATION] Built index for ${cues.length} cues with ${cache.timeIndex.size} time slots`);
+  }, []);
+  
+  // Optimized subtitle lookup function using binary search
+  const findSubtitleAtTime = useCallback((time: number): string => {
+    const cache = subtitleCacheRef.current;
+    if (cache.cues.length === 0) return '';
+    
+    // Fast lookup using time index (100ms precision)
+    const timeKey = Math.floor(time * 10);
+    const indexFromCache = cache.timeIndex.get(timeKey);
+    
+    if (indexFromCache !== undefined) {
+      const cue = cache.cues[indexFromCache];
+      if (time >= cue.startTime && time <= cue.endTime) {
+        return cue.text;
+      }
+    }
+    
+    // Fallback to binary search for edge cases
+    let left = 0;
+    let right = cache.cues.length - 1;
+    
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      const cue = cache.cues[mid];
+      
+      if (time >= cue.startTime && time <= cue.endTime) {
+        return cue.text;
+      } else if (time < cue.startTime) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
+      }
+    }
+    
+    return '';
+  }, []);
+  
+  // Enhanced VTT parser with better WebVTT support
+  const parseVTT = useCallback((vttContent: string): SubtitleCue[] => {
+    const cues: SubtitleCue[] = [];
+    const lines = vttContent.trim().split('\n');
+    let i = 0;
+    
+    // Skip WEBVTT header and any initial metadata
+    while (i < lines.length && (!lines[i].includes('-->'))) {
+      i++;
+    }
+    
+    while (i < lines.length) {
+      // Skip empty lines
+      if (!lines[i].trim()) {
+        i++;
+        continue;
+      }
+      
+      // Look for timestamp line
+      const timestampLine = lines[i].trim();
+      if (timestampLine.includes('-->')) {
+        const parts = timestampLine.split('-->').map(p => p.trim());
+        if (parts.length === 2) {
+          const startTime = parseTimeToSeconds(parts[0].split(' ')[0]); // Remove any positioning info
+          const endTime = parseTimeToSeconds(parts[1].split(' ')[0]);
+          
+          // Collect subtitle text (handle multi-line subtitles)
+          i++;
+          const textLines: string[] = [];
+          
+          while (i < lines.length && lines[i].trim() && !lines[i].includes('-->')) {
+            const line = lines[i].trim();
+            // Remove WebVTT styling tags for better performance
+            const cleanLine = line
+              .replace(/<[^>]*>/g, '') // Remove HTML/WebVTT tags
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&amp;/g, '&')
+              .trim();
+            
+            if (cleanLine) {
+              textLines.push(cleanLine);
+            }
+            i++;
+          }
+          
+          if (textLines.length > 0 && startTime >= 0 && endTime > startTime) {
+            cues.push({
+              startTime,
+              endTime,
+              text: textLines.join('\n')
+            });
+          }
+        } else {
+          i++;
+        }
+      } else {
+        i++;
+      }
+    }
+    
+    console.log(`🎯 [VTT PARSER] Parsed ${cues.length} subtitle cues from ${lines.length} lines`);
+    return cues;
+  }, []);
+  
+  // Enhanced time parsing with better accuracy
+  const parseTimeToSeconds = useCallback((timeString: string): number => {
+    try {
+      // Handle both formats: HH:MM:SS.mmm and MM:SS.mmm
+      const parts = timeString.split(':');
+      let hours = 0, minutes = 0, seconds = 0;
+      
+      if (parts.length === 3) {
+        // HH:MM:SS.mmm format
+        hours = parseInt(parts[0], 10);
+        minutes = parseInt(parts[1], 10);
+        seconds = parseFloat(parts[2]);
+      } else if (parts.length === 2) {
+        // MM:SS.mmm format
+        minutes = parseInt(parts[0], 10);
+        seconds = parseFloat(parts[1]);
+      } else {
+        console.warn('🎯 [VTT PARSER] Invalid time format:', timeString);
+        return -1;
+      }
+      
+      return Math.max(0, hours * 3600 + minutes * 60 + seconds);
+    } catch (error) {
+      console.error('🎯 [VTT PARSER] Error parsing time:', timeString, error);
+      return -1;
+    }
+  }, []);
   
   // Timing and skip state
   const [showSkipIntro, setShowSkipIntro] = useState(false);
@@ -274,7 +445,7 @@ const PlayerScreen: React.FC = () => {
         player.muted = false;
         player.volume = preferences.volume;
         player.playbackRate = playbackSpeed;
-        player.timeUpdateEventInterval = 500; // Update every 500ms
+        player.timeUpdateEventInterval = 100; // Update every 100ms for smooth subtitles
         
         console.log(`[EXPO-VIDEO] 🎬 Player created and configured for ${detectedProvider.toUpperCase()}`);
         console.log(`[EXPO-VIDEO] 📡 Using ${videoHeaders && Object.keys(videoHeaders).length > 0 ? 'custom' : 'no'} headers`);
@@ -388,8 +559,8 @@ const PlayerScreen: React.FC = () => {
           const newDuration = videoPlayer.duration || 0;
           const isPlaying = videoPlayer.playing || false;
           
-          // Only update time if there's a significant change
-          if (Math.abs(newTime - lastTimeRef.current) > 0.5) {
+          // Only update time if there's a significant change (reduced threshold for smoother subtitles)
+          if (Math.abs(newTime - lastTimeRef.current) > 0.1) {
             lastTimeRef.current = newTime;
             setCurrentTime(newTime);
           }
@@ -424,7 +595,7 @@ const PlayerScreen: React.FC = () => {
             }
           }
         }
-      }, 500); // Update every 500ms
+      }, 100); // Update every 100ms for smooth subtitle tracking
       
       return () => {
         if (timeUpdateIntervalRef.current) {
@@ -504,7 +675,7 @@ const PlayerScreen: React.FC = () => {
   // Memoized display title
   const displayTitle = useMemo(() => {
     if (videoData?.animeTitle && videoData?.episodeNumber) {
-      return `${videoData.animeTitle} - Episode ${videoData.episodeNumber}`;
+      return `${videoData.animeTitle} - Ep ${videoData.episodeNumber}`;
     }
     return videoData?.animeTitle || 'Current Episode';
   }, [videoData?.animeTitle, videoData?.episodeNumber]);
@@ -556,6 +727,11 @@ const PlayerScreen: React.FC = () => {
         }
 
         if (data && data.source) {
+          console.log('🎬 [PLAYER] Loaded video data with episode info:', {
+            animeTitle: data.animeTitle,
+            episodeNumber: data.episodeNumber,
+            episodeId: data.episodeId
+          });
           setVideoData(data);
           hasLoadedData.current = true;
           
@@ -571,9 +747,12 @@ const PlayerScreen: React.FC = () => {
               ...prev,
               subtitlesEnabled: false
             }));
-          } else if (data.subtitles && data.subtitles[0]) {
-            // Load subtitle cues if available
-            await loadSubtitleCues(data.subtitles[0].url);
+          } else if (data.subtitles && data.subtitles.length > 0) {
+            // Set default subtitle language to the first available
+            const defaultSubtitle = data.subtitles[0];
+            console.log(`🎯 Setting default subtitle language: ${defaultSubtitle.lang}`);
+            setSelectedSubtitleLanguage(defaultSubtitle.lang);
+            // Note: The subtitle loading will be handled by the useEffect above
           }
           
           // Load saved progress
@@ -603,24 +782,42 @@ const PlayerScreen: React.FC = () => {
     loadVideoData();
   }, [params.dataKey, params.url, preferences.rememberPosition, setPreferences]);
 
-  // Load subtitle cues from URL
+  // Load subtitle cues from URL - Enhanced with indexing
   const loadSubtitleCues = async (subtitleUrl: string) => {
     try {
+      console.log('🎯 [SUBTITLE LOADER] Loading subtitles from:', subtitleUrl.substring(0, 100) + '...');
+      
       const response = await fetch(subtitleUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const vttContent = await response.text();
+      console.log('🎯 [SUBTITLE LOADER] Downloaded VTT content:', vttContent.length, 'characters');
+      
       const cues = parseVTT(vttContent);
       setSubtitleCues(cues);
       
-      // If no cues were parsed from the VTT, disable subtitles
-      if (cues.length === 0) {
-        console.log('⚠️ No subtitle cues found in VTT file, disabling subtitles');
+      // Build optimized index for fast lookups
+      if (cues.length > 0) {
+        buildSubtitleIndex(cues);
+        console.log('🚀 [SUBTITLE LOADER] Successfully loaded and indexed', cues.length, 'subtitle cues');
+        
+        // Enable subtitles if we successfully loaded cues
+        setPreferences(prev => ({
+          ...prev,
+          subtitlesEnabled: true
+        }));
+      } else {
+        console.log('⚠️ [SUBTITLE LOADER] No subtitle cues found in VTT file, disabling subtitles');
         setPreferences(prev => ({
           ...prev,
           subtitlesEnabled: false
         }));
       }
     } catch (error) {
-      console.error('❌ Error loading subtitles:', error);
+      console.error('❌ [SUBTITLE LOADER] Error loading subtitles:', error);
       // Disable subtitles on error
       setPreferences(prev => ({
         ...prev,
@@ -629,61 +826,54 @@ const PlayerScreen: React.FC = () => {
     }
   };
 
-  // Parse VTT subtitle format
-  const parseVTT = (vttContent: string): SubtitleCue[] => {
-    const cues: SubtitleCue[] = [];
-    const lines = vttContent.split('\n');
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.includes('-->')) {
-        const [startTime, endTime] = line.split('-->').map(t => parseTimeToSeconds(t.trim()));
-        let text = '';
-        
-        // Collect subtitle text lines
-        for (let j = i + 1; j < lines.length && lines[j].trim() !== ''; j++) {
-          text += lines[j].trim() + ' ';
-        }
-        
-        if (text.trim()) {
-          cues.push({
-            startTime,
-            endTime,
-            text: text.trim(),
-          });
-        }
-      }
-    }
-    
-    return cues;
-  };
-
-  // Convert time string to seconds
-  const parseTimeToSeconds = (timeString: string): number => {
-    const parts = timeString.split(':');
-    const seconds = parseFloat(parts[parts.length - 1]);
-    const minutes = parts.length > 1 ? parseInt(parts[parts.length - 2]) : 0;
-    const hours = parts.length > 2 ? parseInt(parts[parts.length - 3]) : 0;
-    
-    return hours * 3600 + minutes * 60 + seconds;
-  };
-
-  // Update current subtitle based on time - optimized with useMemo
+  // Load subtitles when language selection changes
   useEffect(() => {
-    if (subtitleCues.length > 0 && preferences.subtitlesEnabled) {
-      const currentCue = subtitleCues.find(
-        cue => currentTime >= cue.startTime && currentTime <= cue.endTime
+    if (videoData?.subtitles && selectedSubtitleLanguage) {
+      const selectedSubtitle = videoData.subtitles.find(
+        sub => sub.lang === selectedSubtitleLanguage
       );
-      const newSubtitle = currentCue ? currentCue.text : '';
       
-      // Only update if subtitle actually changed
-      if (newSubtitle !== currentSubtitle) {
-        setCurrentSubtitle(newSubtitle);
+      if (selectedSubtitle && selectedSubtitle.url) {
+        loadSubtitleCues(selectedSubtitle.url);
+      } else {
+        // Fallback to first available subtitle if selected language not found
+        const fallbackSubtitle = videoData.subtitles[0];
+        if (fallbackSubtitle && fallbackSubtitle.url) {
+          setSelectedSubtitleLanguage(fallbackSubtitle.lang);
+          loadSubtitleCues(fallbackSubtitle.url);
+        }
       }
-    } else if (currentSubtitle) {
-      setCurrentSubtitle('');
     }
-  }, [currentTime, subtitleCues, preferences.subtitlesEnabled, currentSubtitle]);
+  }, [videoData?.subtitles, selectedSubtitleLanguage]);
+
+  // Optimized subtitle tracking with binary search and caching
+  useEffect(() => {
+    if (subtitleCues.length === 0 || !preferences.subtitlesEnabled) {
+      if (currentSubtitle) {
+        setCurrentSubtitle('');
+        lastSubtitleLookupTimeRef.current = -1;
+      }
+      return;
+    }
+
+    // Skip lookup if time hasn't changed significantly (avoid unnecessary computations)
+    const timeDiff = Math.abs(currentTime - lastSubtitleLookupTimeRef.current);
+    if (timeDiff < 0.05) { // Skip if less than 50ms difference
+      return;
+    }
+
+    const newSubtitle = findSubtitleAtTime(currentTime);
+    
+    // Only update if subtitle actually changed
+    if (newSubtitle !== currentSubtitle) {
+      setCurrentSubtitle(newSubtitle);
+      lastSubtitleLookupTimeRef.current = currentTime;
+      
+      if (newSubtitle) {
+        console.log(`🎯 [SUBTITLE TRACKING] Updated subtitle at ${currentTime.toFixed(2)}s: "${newSubtitle.substring(0, 50)}${newSubtitle.length > 50 ? '...' : ''}"`);
+      }
+    }
+  }, [currentTime, subtitleCues.length, preferences.subtitlesEnabled, currentSubtitle, findSubtitleAtTime]);
 
   // Check for intro/outro timing - optimized
   useEffect(() => {
@@ -1165,8 +1355,8 @@ const PlayerScreen: React.FC = () => {
         onSeekStart={handleSeekStart}
         onSeekChange={handleSeekChange}
         onSeekEnd={handleSeekEnd}
-        animeTitle={displayTitle}
-        episodeNumber={videoData.episodeNumber}
+        animeTitle={videoData?.animeTitle}
+        episodeNumber={videoData?.episodeNumber}
         onBackPress={handleBackPress}
         showControls={showControls}
         onToggleControls={toggleControls}
@@ -1179,12 +1369,24 @@ const PlayerScreen: React.FC = () => {
 
       {/* Subtitles */}
       {shouldShowSubtitles && (
-        <View style={[styles.subtitleContainer, { bottom: subtitlePosition.y }]}>
-          <Text style={[styles.subtitleText, subtitleStyle]}>
+        <View style={[
+          styles.subtitleContainer, 
+          { bottom: preferences.subtitleStyle?.positionY || subtitlePosition.y }
+        ]}>
+          <Text style={[
+            styles.subtitleText, 
+            subtitleStyle,
+            {
+              backgroundColor: preferences.subtitleStyle?.backgroundColor || 'rgba(13, 27, 42, 0.7)',
+              textAlign: (preferences.subtitleStyle?.textAlign as 'left' | 'center' | 'right') || 'center',
+            }
+          ]}>
             {currentSubtitle}
           </Text>
         </View>
       )}
+      
+
 
       {/* Settings Modal */}
       {showSettingsModal && (
@@ -1286,13 +1488,13 @@ const PlayerScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
+    backgroundColor: '#000000', // Pure black background
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
+    backgroundColor: '#000000', // Pure black background
   },
   loadingText: {
     color: PLAYER_COLORS.TEXT_LIGHT,
@@ -1301,7 +1503,7 @@ const styles = StyleSheet.create({
   video: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
-    backgroundColor: PLAYER_COLORS.BACKGROUND_DARK,
+    backgroundColor: '#000000', // Pure black background for video
     // Ensure video maintains aspect ratio and quality
     overflow: 'hidden',
   },

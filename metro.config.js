@@ -18,4 +18,38 @@ config.resolver.alias = {
   '@services': path.resolve(__dirname, 'services'),
 };
 
+// Performance optimizations for low-end devices
+config.transformer = {
+  ...config.transformer,
+  // Enable minification in production only
+  minifierEnabled: process.env.NODE_ENV === 'production',
+  minifierPath: 'metro-minify-terser',
+  // Optimize image assets
+  assetPlugins: ['expo-asset/tools/hashAssetFiles'],
+  // Enable tree shaking
+  unstable_allowRequireContext: true,
+};
+
+// Optimize bundle size
+config.serializer = {
+  ...config.serializer,
+  createModuleIdFactory: () => {
+    // Use shorter module IDs to reduce bundle size
+    const moduleIdMap = new Map();
+    let nextId = 0;
+    return (path) => {
+      if (!moduleIdMap.has(path)) {
+        moduleIdMap.set(path, nextId++);
+      }
+      return moduleIdMap.get(path);
+    };
+  },
+};
+
+// Asset optimization
+config.resolver.assetExts = [
+  ...config.resolver.assetExts.filter(ext => ext !== 'svg'),
+  'webp', // Prefer WebP images
+];
+
 module.exports = config; 

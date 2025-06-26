@@ -34,10 +34,11 @@ const WINDOW_HEIGHT = Dimensions.get('window').height;
 const WINDOW_WIDTH = Dimensions.get('window').width;
 
 // Optimized constants for better performance and reduced flickering
-const INITIAL_LOAD_COUNT = 5;
-const PRELOAD_BUFFER = 2;
-const MAX_CACHE_SIZE = 15;
-const DEFAULT_IMAGE_HEIGHT = Math.floor(WINDOW_WIDTH * 1.4); // Standard webtoon ratio
+const INITIAL_LOAD_COUNT = 8;
+const PRELOAD_BUFFER = 3;
+const MAX_CACHE_SIZE = 20;
+const DEFAULT_IMAGE_HEIGHT = Math.floor(WINDOW_WIDTH * 1.8); // Better default for webtoon panels
+const ESTIMATED_ITEM_SIZE = DEFAULT_IMAGE_HEIGHT;
 
 // Simple debounce utility function
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
@@ -63,47 +64,82 @@ const MemoizedImageItem = React.memo<{
   imageHeaders: Record<string, string>;
   onToggleUI: () => void;
   windowWidth: number;
-}>(({ imageUrl, index, imageHeaders, onToggleUI, windowWidth }) => {
-  const [imageHeight, setImageHeight] = useState(DEFAULT_IMAGE_HEIGHT);
+  preCalculatedHeight?: number;
+  onHeightCalculated?: (index: number, height: number) => void;
+}>(({ imageUrl, index, imageHeaders, onToggleUI, windowWidth, preCalculatedHeight, onHeightCalculated }) => {
+  // Use pre-calculated height to prevent layout shifts
+  const [imageHeight, setImageHeight] = useState(preCalculatedHeight || DEFAULT_IMAGE_HEIGHT);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [shouldRetry, setShouldRetry] = useState(0);
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const [imageWidth, setImageWidth] = useState(WINDOW_WIDTH);
 
   const handleImageLoad = useCallback((event: any) => {
-    const { width, height } = event.source;
-    if (width && height) {
-      const aspectRatio = height / width;
-      const calculatedHeight = Math.floor(windowWidth * aspectRatio);
-      // Clamp height to reasonable bounds
-      const finalHeight = Math.max(200, Math.min(calculatedHeight, WINDOW_HEIGHT * 2));
-      setImageHeight(finalHeight);
+    const { width: originalWidth, height: originalHeight } = event.source;
+    if (originalWidth && originalHeight) {
+      const aspectRatio = originalHeight / originalWidth;
+      
+      // Check if image is smaller than screen width
+      if (originalWidth < WINDOW_WIDTH) {
+        // For small images, don't scale up too much to avoid pixelation
+        const maxScale = 1.2; // Limit scaling to 120% to reduce pixelation
+        const scale = Math.min(WINDOW_WIDTH / originalWidth, maxScale);
+        const calculatedWidth = Math.floor(originalWidth * scale);
+        const calculatedHeight = Math.floor(originalHeight * scale);
+        
+        setImageWidth(calculatedWidth);
+        if (!preCalculatedHeight || Math.abs(calculatedHeight - imageHeight) > 50) {
+          setImageHeight(calculatedHeight);
+          if (onHeightCalculated) {
+            onHeightCalculated(index, calculatedHeight);
+          }
+        }
+      } else {
+        // For larger images, scale down to fit screen width
+        const calculatedHeight = Math.floor(WINDOW_WIDTH * aspectRatio);
+        
+        setImageWidth(WINDOW_WIDTH);
+        if (!preCalculatedHeight || Math.abs(calculatedHeight - imageHeight) > 50) {
+          setImageHeight(calculatedHeight);
+          if (onHeightCalculated) {
+            onHeightCalculated(index, calculatedHeight);
+          }
+        }
+      }
     }
     setIsLoading(false);
     setHasError(false);
-  }, [windowWidth]);
+    setIsImageLoaded(true);
+  }, [preCalculatedHeight, imageHeight, index, onHeightCalculated]);
 
   const handleImageError = useCallback(() => {
     setIsLoading(false);
     setHasError(true);
+    setIsImageLoaded(false);
   }, []);
 
   const handleRetry = useCallback(() => {
     setIsLoading(true);
     setHasError(false);
+    setIsImageLoaded(false);
     setShouldRetry(prev => prev + 1);
   }, []);
 
-  // Memoized styles to prevent recalculation
+  // Memoized styles to prevent recalculation - use fixed height to prevent layout shifts
   const containerStyle = useMemo(() => [
     styles.imageContainer, 
-    { height: imageHeight }
+    { 
+      height: imageHeight,
+      width: WINDOW_WIDTH // Ensure container uses full width
+    }
   ], [imageHeight]);
 
   const imageStyle = useMemo(() => ({
-    width: windowWidth,
+    width: imageWidth,
     height: imageHeight,
     backgroundColor: '#000',
-  }), [windowWidth, imageHeight]);
+  }), [imageWidth, imageHeight]);
 
   return (
     <TouchableOpacity 
@@ -115,16 +151,21 @@ const MemoizedImageItem = React.memo<{
         key={`${imageUrl}-${shouldRetry}`} // Force re-render on retry
         source={{ 
           uri: imageUrl,
-          headers: imageHeaders 
+          headers: imageHeaders,
+          width: 2048, // Request higher resolution if available
+          height: 2048
         }}
         style={imageStyle}
-        contentFit="contain"
+        contentFit="contain" // Show full image without cropping
         onLoad={handleImageLoad}
         onError={handleImageError}
         cachePolicy="memory-disk"
         placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-        transition={150}
-        priority="high"
+        transition={isImageLoaded ? 150 : 0} // Reduce transition when not loaded to prevent flicker
+        priority={index < 10 ? "high" : "normal"} // High priority for first 10 images
+        recyclingKey={`page-${index}`} // Help with memory management
+        allowDownscaling={false} // Prevent downscaling which can cause blur
+        responsivePolicy="live" // Use best quality for current size
       />
       
       {isLoading && (
@@ -150,9 +191,28 @@ const MemoizedImageItem = React.memo<{
     prevProps.imageUrl === nextProps.imageUrl &&
     prevProps.index === nextProps.index &&
     prevProps.windowWidth === nextProps.windowWidth &&
+    prevProps.preCalculatedHeight === nextProps.preCalculatedHeight &&
     JSON.stringify(prevProps.imageHeaders) === JSON.stringify(nextProps.imageHeaders)
   );
 });
+
+/* 
+ * PERFORMANCE OPTIMIZATIONS IMPLEMENTED TO FIX SCROLLING FLICKER:
+ * 
+ * 1. PRE-CALCULATED IMAGE HEIGHTS: Images now use estimated heights to prevent layout shifts
+ * 2. getItemLayout: Added for optimal FlatList performance - eliminates dynamic layout calculations  
+ * 3. OPTIMIZED FLATLIST PROPS: Better configuration for smooth scrolling
+ * 4. IMPROVED SCROLL HANDLER: Better throttling and immediate progress updates
+ * 5. MEMOIZED COMPONENTS: Prevent unnecessary re-renders
+ * 6. STABLE IMAGE DIMENSIONS: Use fixed heights to prevent layout jumps
+ * 7. FLASHLIST ALTERNATIVE: Available as commented code for even better performance
+ * 
+ * Key changes:
+ * - Images start with fixed dimensions instead of 0x0
+ * - FlatList knows exact item positions via getItemLayout
+ * - Reduced scroll event throttling for smoother experience
+ * - Better memory management and view recycling
+ */
 
 export default function WebNovelReader() {
   const params = useLocalSearchParams();
@@ -166,6 +226,7 @@ export default function WebNovelReader() {
   
   // Simplified state to reduce re-renders
   const [images, setImages] = useState<string[]>([]);
+  const [imageHeights, setImageHeights] = useState<number[]>([]);
   const [showUI, setShowUI] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showExitModal, setShowExitModal] = useState(false);
@@ -468,6 +529,9 @@ export default function WebNovelReader() {
         console.log(`[WebNovelReader] ✅ Loaded ${imageUrls.length} images for chapter ${params.chapter}`);
         if (isMounted.current) {
           setImages(imageUrls);
+          // Initialize image heights with estimated values to prevent layout shifts
+          const estimatedHeights = new Array(imageUrls.length).fill(DEFAULT_IMAGE_HEIGHT);
+          setImageHeights(estimatedHeights);
           setIsInitialLoading(false);
           
           console.log(`[WebNovelReader] ✅ Images ready for rendering: ${imageUrls.length} images`);
@@ -585,16 +649,23 @@ export default function WebNovelReader() {
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!isMounted.current) return;
     
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const now = Date.now();
     
-    // Throttle scroll events to reduce flickering
-    if (now - lastScrollTime.current < 100) {
+    // Immediate scroll progress update (no throttling for smooth UI)
+    const scrollY = Math.max(0, contentOffset.y);
+    const totalScrollHeight = Math.max(1, contentSize.height - layoutMeasurement.height);
+    const scrollProgress = Math.min(100, Math.max(0, (scrollY / totalScrollHeight) * 100));
+    
+    // Update scroll progress immediately for smooth progress bar
+    progressTracker.updateScrollProgress(scrollProgress);
+    
+    // Throttle the expensive calculations
+    if (now - lastScrollTime.current < 150) {
       return;
     }
     lastScrollTime.current = now;
 
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    
     // Clear any existing timeout
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
@@ -605,39 +676,42 @@ export default function WebNovelReader() {
       if (!isMounted.current) return;
       
       try {
-        // Calculate scroll progress percentage
-        const scrollY = Math.max(0, contentOffset.y);
-        const totalScrollHeight = Math.max(1, contentSize.height - layoutMeasurement.height);
-        const scrollProgress = Math.min(100, Math.max(0, (scrollY / totalScrollHeight) * 100));
+        // Calculate which image we're currently viewing using actual heights
+        let currentPage = 0;
+        let cumulativeHeight = 0;
         
-        // Calculate which image we're currently viewing
-        const estimatedImageHeight = DEFAULT_IMAGE_HEIGHT;
-        const currentPage = Math.floor(scrollY / estimatedImageHeight);
+        for (let i = 0; i < imageHeights.length; i++) {
+          const imageHeight = imageHeights[i] || DEFAULT_IMAGE_HEIGHT;
+          if (scrollY >= cumulativeHeight && scrollY < cumulativeHeight + imageHeight) {
+            currentPage = i;
+            break;
+          }
+          cumulativeHeight += imageHeight;
+        }
+        
         const validCurrentPage = Math.max(0, Math.min(currentPage, images.length - 1));
         
-        // Update scroll progress
-        progressTracker.updateScrollProgress(scrollProgress);
-        
-        // Also update page index if it changed
+        // Update page index if it changed
         if (validCurrentPage !== lastUpdatedPage.current && validCurrentPage >= 0 && validCurrentPage < images.length) {
           progressTracker.updateProgress(validCurrentPage, images.length);
           lastUpdatedPage.current = validCurrentPage;
         }
 
         // Check if we're at the bottom with buffer for better UX
-        const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 200;
+        const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 300;
         
         if (isAtBottom && (chapterNav.hasNextChapter || localHasNextChapter)) {
           // Throttle chapter navigation to prevent multiple triggers
-          if (now - lastScrollTime.current > 1000) {
+          const timeSinceLastNav = now - lastScrollTime.current;
+          if (timeSinceLastNav > 2000) { // Increased throttle time
             handleChapterNavigation('next');
           }
         }
       } catch (error) {
         console.warn('[WebNovelReader] Error in scroll handler:', error);
       }
-    }, 50); // Reduced debounce for better responsiveness
-  }, [images.length, progressTracker, chapterNav.hasNextChapter, localHasNextChapter, handleChapterNavigation]);
+    }, 100); // Balanced debounce time
+  }, [images.length, imageHeights, progressTracker, chapterNav.hasNextChapter, localHasNextChapter, handleChapterNavigation]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -1185,6 +1259,19 @@ export default function WebNovelReader() {
   // Memoized container style to prevent re-calculations
   const containerStyle = useMemo(() => [styles.container], []);
 
+  // Function to update image height when image loads
+  const updateImageHeight = useCallback((index: number, height: number) => {
+    setImageHeights(prev => {
+      const newHeights = [...prev];
+      // Only update if the height is significantly different
+      if (Math.abs(newHeights[index] - height) > 50) {
+        newHeights[index] = height;
+        return newHeights;
+      }
+      return prev;
+    });
+  }, []);
+
   // Memoized render item function to prevent recreation
   const renderItem = useCallback(({ item: imageUrl, index }: { item: string, index: number }) => (
     <MemoizedImageItem
@@ -1193,11 +1280,28 @@ export default function WebNovelReader() {
       imageHeaders={imageHeaders}
       onToggleUI={toggleUI}
       windowWidth={WINDOW_WIDTH}
+      preCalculatedHeight={imageHeights[index]}
+      onHeightCalculated={updateImageHeight}
     />
-  ), [imageHeaders, toggleUI]);
+  ), [imageHeaders, toggleUI, imageHeights, updateImageHeight]);
 
   // Memoized key extractor
   const keyExtractor = useCallback((item: string, index: number) => `page-${index}`, []);
+
+  // getItemLayout for optimal FlatList performance - prevents layout calculations
+  const getItemLayout = useCallback((data: any, index: number) => {
+    const height = imageHeights[index] || DEFAULT_IMAGE_HEIGHT;
+    let offset = 0;
+    for (let i = 0; i < index; i++) {
+      offset += imageHeights[i] || DEFAULT_IMAGE_HEIGHT;
+    }
+    
+    return {
+      length: height,
+      offset,
+      index,
+    };
+  }, [imageHeights]);
 
   if (error) {
     return (
@@ -1227,32 +1331,55 @@ export default function WebNovelReader() {
         data={images}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
+        getItemLayout={getItemLayout}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
-        scrollEventThrottle={100}
+        scrollEventThrottle={16}
         scrollEnabled={true}
         // Optimized performance settings to reduce flickering
-        initialNumToRender={3}
-        maxToRenderPerBatch={2}
-        windowSize={5}
-        removeClippedSubviews={false}
-        updateCellsBatchingPeriod={50}
+        initialNumToRender={INITIAL_LOAD_COUNT}
+        maxToRenderPerBatch={5}
+        windowSize={10}
+        removeClippedSubviews={true}
+        updateCellsBatchingPeriod={100}
         legacyImplementation={false}
         disableVirtualization={false}
-        // Stable scrolling behavior
+        // Stable scrolling behavior - optimized
         bounces={true}
         bouncesZoom={false}
         alwaysBounceVertical={true}
         decelerationRate="normal"
-        // Reduce layout thrashing
-        maintainVisibleContentPosition={{
-          minIndexForVisible: 0,
-          autoscrollToTopThreshold: 10
-        }}
-        // Improve scroll performance
+        // Performance optimizations
+        directionalLockEnabled={true}
+        overScrollMode="never"
+        scrollToOverflowEnabled={true}
+        // Reduce memory usage for large lists
+        onEndReachedThreshold={0.8}
         onScrollToIndexFailed={() => {}}
-        getItemLayout={undefined}
+        // Additional optimizations to prevent flickering
+        persistentScrollbar={false}
+        indicatorStyle="white"
+        scrollIndicatorInsets={{right: 1}}
+        // Remove any default spacing
+        ItemSeparatorComponent={null}
+        contentContainerStyle={{ flexGrow: 1 }}
       />
+      
+      {/* Alternative: Use FlashList for even better performance
+      <FlashList
+        ref={flatListRef as any}
+        data={images}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        estimatedItemSize={ESTIMATED_ITEM_SIZE}
+        showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        // FlashList handles most optimizations automatically
+        removeClippedSubviews={true}
+        drawDistance={WINDOW_HEIGHT * 2}
+      />
+      */}
 
       <ReaderUI
         showUI={showUI}
@@ -1443,6 +1570,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+    width: '100%', // Ensure full width
   },
   errorContainer: {
     flex: 1,
@@ -1752,8 +1880,9 @@ const styles = StyleSheet.create({
   imageContainer: {
     width: WINDOW_WIDTH,
     backgroundColor: '#000',
-    alignItems: 'center',
+    alignItems: 'center', // Center images horizontally
     justifyContent: 'center',
+    overflow: 'hidden', // Prevent overflow
   },
   mangaImage: {
     width: WINDOW_WIDTH,

@@ -29,7 +29,7 @@ import axios from 'axios';
 import { ANILIST_GRAPHQL_ENDPOINT } from '../constants/auth';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
-import { getAnilistUser } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 
 interface MediaEntry {
@@ -116,9 +116,14 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
     }
     
     try {
-      const userData = await getAnilistUser(user.id);
-      if (userData && userData.is_verified) {
-        setIsVerified(true);
+      const { data, error } = await supabase
+        .from('anilist_users')
+        .select('is_verified')
+        .eq('anilist_id', user.id)
+        .single();
+      
+      if (!error && data) {
+        setIsVerified(data.is_verified || false);
       } else {
         setIsVerified(false);
       }
@@ -494,6 +499,12 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
     router.push('/settings');
   };
 
+  // Add function to navigate to API status
+  const navigateToAPIStatus = () => {
+    onClose();
+    router.push('/appsettings/api');
+  };
+
   // Add function to navigate to activities
   const navigateToActivities = () => {
     onClose();
@@ -781,6 +792,8 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
               <FontAwesome5 name="chevron-right" size={16} color={isDarkMode ? '#666' : '#999'} />
             </TouchableOpacity>
           )}
+
+        
 
           {/* Settings Navigation Button */}
           <TouchableOpacity 

@@ -1,12 +1,12 @@
 // katana.ts
 
 // Katana Manga Provider
-import { CONSUMET_API_URL, KATANA_API_URLS } from '../../../../app/constants/api';
+import { CONSUMET_API_URL, MAGAAPI_URL } from '../../../../app/constants/api';
 import axios from 'axios';
 import { MangaDexProvider, MANGADEX_API_URL } from './mangadx';
 
-export const KATANA_API_URL = KATANA_API_URLS.PRIMARY;
-export const KATANA_FALLBACK_URL = KATANA_API_URLS.FALLBACK;
+export const KATANA_API_URL = MAGAAPI_URL;
+export const KATANA_FALLBACK_URL = MAGAAPI_URL;
 
 export interface KatanaChapter {
   id: string;

@@ -52,6 +52,36 @@ interface Anime {
   } | null;
 }
 
+interface AiringSchedule {
+  id: number;
+  airingAt: number;
+  timeUntilAiring: number;
+  episode: number;
+  media: {
+    id: number;
+    title: {
+      userPreferred: string;
+      english: string;
+      romaji: string;
+      native: string;
+    };
+    coverImage: {
+      large: string;
+      color: string;
+    };
+    averageScore: number;
+    status: string;
+    format: string;
+  };
+}
+
+interface ScheduleDay {
+  date: string;
+  dayName: string;
+  isToday: boolean;
+  schedules: AiringSchedule[];
+}
+
 interface Character {
   id: number;
   name: {
@@ -109,7 +139,8 @@ export default function AnimeScreen() {
   const { settings } = useSettings();
   const currentTheme = isDarkMode ? darkTheme : lightTheme;
   const [trendingAnime, setTrendingAnime] = useState<Anime[]>([]);
-  const [airingNow, setAiringNow] = useState<Anime[]>([]);
+  const [airingSchedule, setAiringSchedule] = useState<ScheduleDay[]>([]);
+  const [selectedDay, setSelectedDay] = useState(0);
   const [birthdays, setBirthdays] = useState<(Character | Staff)[]>([]);
   const [anticipatedUpcoming, setAnticipatedUpcoming] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,6 +211,13 @@ export default function AnimeScreen() {
     lockPortrait();
   }, [lockPortrait]);
 
+  // Reset selected day to today (index 0) when airing schedule updates
+  useEffect(() => {
+    if (airingSchedule.length > 0) {
+      setSelectedDay(0);
+    }
+  }, [airingSchedule]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -225,6 +263,33 @@ export default function AnimeScreen() {
               nextAiringEpisode {
                 episode
                 timeUntilAiring
+              }
+            }
+          }
+          airingSchedule: Page(page: 1, perPage: 100) {
+            airingSchedules(airingAt_greater: ${Math.floor(Date.now() / 1000) - (24 * 60 * 60)}, airingAt_lesser: ${Math.floor(Date.now() / 1000) + (8 * 24 * 60 * 60)}) {
+              id
+              airingAt
+              timeUntilAiring
+              episode
+              media {
+                id
+                title {
+                  userPreferred
+                  english
+                  romaji
+                  native
+                }
+                coverImage {
+                  large
+                  color
+                }
+                averageScore
+                status
+                format
+                type
+                isAdult
+                genres
               }
             }
           }
@@ -389,32 +454,6 @@ export default function AnimeScreen() {
               seasonYear
             }
           }
-          airingNow: Page(page: 1, perPage: 15) {
-            media(sort: POPULARITY_DESC, type: ANIME, status: RELEASING, isAdult: $isAdult) {
-              id
-              title {
-                userPreferred
-                english
-                romaji
-                native
-              }
-              coverImage {
-                extraLarge
-                large
-                color
-              }
-              episodes
-              averageScore
-              popularity
-              status
-              nextAiringEpisode {
-                episode
-                timeUntilAiring
-              }
-              season
-              seasonYear
-            }
-          }
           anticipatedUpcoming: Page(page: 1, perPage: 15) {
             media(sort: POPULARITY_DESC, type: ANIME, status: NOT_YET_RELEASED, isAdult: $isAdult) {
               id
@@ -535,17 +574,53 @@ export default function AnimeScreen() {
         console.warn('No trending anime data available');
       }
 
-      const airingNowData = data.airingNow?.media || [];
-      console.log('Airing Now anime count:', airingNowData.length);
-      const processedAiringNow = airingNowData.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      }));
-      setAiringNow(processedAiringNow);
+      // Process airing schedule
+      const airingSchedules = data.airingSchedule?.airingSchedules || [];
+      console.log('Airing schedules count:', airingSchedules.length);
+      
+      // Filter out null media, anime only, adult content, and organize by date
+      const validSchedules = airingSchedules.filter((schedule: any) => {
+        if (!schedule.media || 
+            schedule.media.type !== 'ANIME' || 
+            schedule.media.status !== 'RELEASING') {
+          return false;
+        }
+
+        // Filter out explicitly adult content
+        if (schedule.media.isAdult) {
+          return false;
+        }
+
+        // Filter out by NSFW genres (only Hentai, not Ecchi since many mainstream anime have this)
+        if (schedule.media.genres && schedule.media.genres.some((genre: string) => 
+          ['Hentai'].includes(genre))) {
+          return false;
+        }
+
+        // Filter out by explicit NSFW keywords in title
+        const title = (schedule.media.title.english || schedule.media.title.userPreferred || schedule.media.title.romaji || '').toLowerCase();
+        const nsfwKeywords = ['hentai'];
+        if (nsfwKeywords.some(keyword => title.includes(keyword))) {
+          return false;
+        }
+
+        return true;
+      });
+      console.log('Valid anime schedules count:', validSchedules.length);
+      
+      // Debug: Log schedules by day to see what we're getting
+      const scheduleDays = organizeSchedulesByDate(validSchedules);
+      scheduleDays.forEach((day, index) => {
+        console.log(`Day ${index} (${day.dayName} ${day.date}): ${day.schedules.length} episodes`);
+        if (day.schedules.length > 0) {
+          day.schedules.forEach(schedule => {
+            const airingDate = new Date(schedule.airingAt * 1000);
+            console.log(`  - ${schedule.media.title.userPreferred} at ${airingDate.toLocaleString()}`);
+          });
+        }
+      });
+      
+      setAiringSchedule(scheduleDays);
 
       const anticipatedData = data.anticipatedUpcoming?.media || [];
       console.log('Anticipated Upcoming anime count:', anticipatedData.length);
@@ -662,7 +737,7 @@ export default function AnimeScreen() {
       
       // Set empty arrays but don't throw - let the UI handle the empty state
       setTrendingAnime([]);
-      setAiringNow([]);
+      setAiringSchedule([]);
       setBirthdays([]);
       setAnticipatedUpcoming([]);
       setHeroAnime(null);
@@ -670,6 +745,104 @@ export default function AnimeScreen() {
       setLoading(false);
     }
   };
+
+  const organizeSchedulesByDate = (schedules: any[]): ScheduleDay[] => {
+    const today = new Date();
+    const days: ScheduleDay[] = [];
+    
+    // Create 7 days starting from today using clean UTC date strings
+    for (let i = 0; i < 7; i++) {
+      // Generate UTC date key for this day
+      const dateKey = new Date(today.getTime() + i * 86400000).toISOString().split('T')[0];
+      
+      // Filter schedules that match this UTC date
+      const daySchedules = schedules.filter(schedule => {
+        const airingDateKey = new Date(schedule.airingAt * 1000).toISOString().split('T')[0];
+        return airingDateKey === dateKey;
+      }).sort((a, b) => a.airingAt - b.airingAt);
+
+      // Create display date for the day name (still use local time for display)
+      const displayDate = new Date(today.getTime() + i * 86400000);
+      
+      days.push({
+        date: dateKey,
+        dayName: displayDate.toLocaleDateString('en-US', { weekday: 'short' }),
+        isToday: i === 0,
+        schedules: daySchedules
+      });
+    }
+    
+    return days;
+  };
+
+  const formatAiringTime = (airingAt: number) => {
+    const airingDate = new Date(airingAt * 1000);
+    const now = new Date();
+    
+    const timeDiff = airingDate.getTime() - now.getTime();
+    const minutesDiff = Math.abs(timeDiff) / (1000 * 60);
+    const hoursDiff = Math.abs(timeDiff) / (1000 * 60 * 60);
+    
+    // Currently airing (±15 minutes window)
+    if (minutesDiff <= 15) {
+      return 'AIRING NOW';
+    }
+    
+    // Just aired (15-60 minutes ago)
+    if (timeDiff < 0 && minutesDiff <= 60) {
+      if (minutesDiff < 60) {
+        return 'JUST AIRED';
+      }
+    }
+    
+    // Aired recently (1-24 hours ago)
+    if (timeDiff < 0 && hoursDiff <= 24) {
+      const hours = Math.floor(hoursDiff);
+      return `AIRED ${hours}H AGO`;
+    }
+    
+    // Aired more than 24 hours ago
+    if (timeDiff < -24 * 60 * 60 * 1000) {
+      const days = Math.floor(hoursDiff / 24);
+      return `AIRED ${days}D AGO`;
+    }
+    
+    // Upcoming episodes - show the actual time
+    return airingDate.toLocaleTimeString([], { 
+      hour: 'numeric', 
+      minute: '2-digit'
+    });
+  };
+
+  const getAiringStatus = (airingAt: number) => {
+    const airingDate = new Date(airingAt * 1000);
+    const now = new Date();
+    const timeDiff = airingDate.getTime() - now.getTime();
+    const minutesDiff = Math.abs(timeDiff) / (1000 * 60);
+    
+    // Currently airing (±15 minutes)
+    if (minutesDiff <= 15) {
+      return 'airing';
+    } 
+    // Just aired or recently aired (up to 1 hour)
+    else if (timeDiff < 0 && minutesDiff <= 60) {
+      return 'just-aired';
+    }
+    // Aired (more than 1 hour ago)
+    else if (timeDiff < -60 * 60 * 1000) {
+      return 'aired';
+    } 
+    // Upcoming
+    else {
+      return 'upcoming';
+    }
+  };
+
+  const isAiringNow = (airingAt: number) => {
+    return getAiringStatus(airingAt) === 'airing';
+  };
+
+
 
   const renderHeroItem = ({ item: anime }: { item: Anime }) => {
     // Safety checks for required data
@@ -834,6 +1007,146 @@ export default function AnimeScreen() {
           {renderPaginationDots()}
         </View>
 
+        {/* Airing Schedule Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Airing Schedule</Text>
+            </View>
+            {/* Compact Day Selector */}
+            <View style={[styles.dayDropdown, { backgroundColor: currentTheme.colors.surface }]}>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.compactDaySelector}
+              >
+                {airingSchedule.map((day, index) => (
+                  <TouchableOpacity
+                    key={day.date}
+                    style={[
+                      styles.compactDayButton,
+                      { backgroundColor: selectedDay === index ? currentTheme.colors.primary : 'transparent' }
+                    ]}
+                    onPress={() => setSelectedDay(index)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.compactDayText,
+                      { color: selectedDay === index ? '#fff' : currentTheme.colors.text }
+                    ]}>
+                      {day.dayName} {new Date(day.date).getDate()}
+                    </Text>
+                    {day.schedules.length > 0 && (
+                      <View style={[
+                        styles.compactDayBadge,
+                        { backgroundColor: selectedDay === index ? '#fff' : currentTheme.colors.primary }
+                      ]}>
+                        <Text style={[
+                          styles.compactDayBadgeText,
+                          { color: selectedDay === index ? currentTheme.colors.primary : '#fff' }
+                        ]}>
+                          {day.schedules.length}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+
+          {/* Horizontal Schedule list */}
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
+            {airingSchedule[selectedDay]?.schedules.length > 0 ? (
+              airingSchedule[selectedDay].schedules.map((schedule) => (
+                <TouchableOpacity 
+                  key={schedule.id}
+                  style={[
+                    styles.horizontalScheduleCard, 
+                    { 
+                      backgroundColor: currentTheme.colors.surface,
+                      shadowColor: isDarkMode ? '#000' : '#666',
+                      opacity: getAiringStatus(schedule.airingAt) === 'aired' ? 0.7 : 
+                               getAiringStatus(schedule.airingAt) === 'just-aired' ? 0.9 : 1.0
+                    }
+                  ]}
+                  onPress={() => router.push(`/anime/${schedule.media.id}`)}
+                  activeOpacity={0.7}
+                >
+                  <ExpoImage
+                    source={{ uri: schedule.media.coverImage.large }}
+                    style={[
+                      styles.horizontalScheduleImage,
+                      getAiringStatus(schedule.airingAt) === 'aired' && { opacity: 0.8 },
+                      getAiringStatus(schedule.airingAt) === 'just-aired' && { opacity: 0.95 }
+                    ]}
+                    contentFit="cover"
+                    transition={300}
+                  />
+                  
+                  <View style={styles.horizontalScheduleInfo}>
+                    <View style={styles.horizontalScheduleTime}>
+                      <Text style={[
+                        styles.horizontalTimeText, 
+                        { 
+                          color: getAiringStatus(schedule.airingAt) === 'airing' ? '#4CAF50' : 
+                                 getAiringStatus(schedule.airingAt) === 'just-aired' ? '#FF9800' : 
+                                 getAiringStatus(schedule.airingAt) === 'aired' ? '#9E9E9E' : 
+                                 currentTheme.colors.primary 
+                        }
+                      ]}>
+                        {formatAiringTime(schedule.airingAt)}
+                      </Text>
+                      {getAiringStatus(schedule.airingAt) === 'aired' && (
+                        <Text style={[styles.horizontalOriginalTime, { color: currentTheme.colors.textSecondary }]}>
+                          {new Date(schedule.airingAt * 1000).toLocaleTimeString([], { 
+                            hour: 'numeric', 
+                            minute: '2-digit'
+                          })}
+                        </Text>
+                      )}
+                      <Text style={[styles.horizontalEpisodeText, { color: currentTheme.colors.textSecondary }]}>
+                        Ep {schedule.episode}
+                      </Text>
+                    </View>
+                    
+                    <Text style={[styles.horizontalScheduleTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+                      {schedule.media.title.english || schedule.media.title.userPreferred || schedule.media.title.romaji}
+                    </Text>
+                    
+                    <View style={styles.horizontalScheduleMeta}>
+                      {schedule.media.averageScore > 0 && (
+                        <View style={styles.horizontalScoreContainer}>
+                          <FontAwesome5 name="star" size={10} color="#FFD700" solid />
+                          <Text style={[styles.horizontalScoreText, { color: currentTheme.colors.textSecondary }]}>
+                            {(schedule.media.averageScore / 10).toFixed(1)}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={[styles.horizontalFormatBadge, { backgroundColor: currentTheme.colors.primary + '20' }]}>
+                        <Text style={[styles.horizontalFormatText, { color: currentTheme.colors.primary }]}>
+                          {schedule.media.format}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={[styles.horizontalNoSchedule, { backgroundColor: currentTheme.colors.surface }]}>
+                <FontAwesome5 name="calendar-times" size={24} color={currentTheme.colors.textSecondary} />
+                <Text style={[styles.horizontalNoScheduleText, { color: currentTheme.colors.textSecondary }]}>
+                  No episodes airing this day
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View>
@@ -879,14 +1192,13 @@ export default function AnimeScreen() {
         </View>
 
         {[
-          { title: 'Airing Now', subtitle: 'Currently broadcasting episodes', data: airingNow },
-          { title: 'Anticipated Anime', subtitle: 'Upcoming releases to watch for', data: anticipatedUpcoming },
-          { title: 'New and Popular', subtitle: 'Trending this week', data: popularAnime },
-          { title: `Best of ${currentYear - 1}`, data: lastYearAnime },
-          { title: 'Anime Movies', subtitle: 'Popular theatrical releases', data: animeMovies },
-          { title: 'Music Videos', subtitle: 'Anime music & performances', data: musicVideos }
+          { title: 'Anticipated Anime', subtitle: 'Upcoming releases to watch for', data: anticipatedUpcoming, category: 'anticipated' },
+          { title: 'New and Popular', subtitle: 'Trending this week', data: popularAnime, category: 'popular' },
+          { title: `Best of ${currentYear - 1}`, data: lastYearAnime, category: 'lastYear' },
+          { title: 'Anime Movies', subtitle: 'Popular theatrical releases', data: animeMovies, category: 'movies' },
+          { title: 'Music Videos', subtitle: 'Anime music & performances', data: musicVideos, category: 'musicVideos' }
         ].map((section, index) => (
-          <View key={section.title} style={[styles.section, index === 5 && styles.lastSection]}>
+          <View key={section.title} style={[styles.section, index === 4 && styles.lastSection]}>
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
@@ -921,14 +1233,7 @@ export default function AnimeScreen() {
                       {anime.title.english || anime.title.userPreferred}
                     </Text>
                     <View style={styles.scoreContainer}>
-                      {section.title === 'Airing Now' && anime.nextAiringEpisode ? (
-                        <>
-                          <FontAwesome5 name="clock" size={10} color="#4CAF50" solid />
-                          <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
-                            Ep {anime.nextAiringEpisode.episode} in {Math.floor(anime.nextAiringEpisode.timeUntilAiring / 3600)}h
-                          </Text>
-                        </>
-                      ) : section.title === 'Music Videos' ? (
+                      {section.title === 'Music Videos' ? (
                         <>
                           <FontAwesome5 name="clock" size={10} color={currentTheme.colors.textSecondary} solid />
                           <Text style={[styles.scoreText, { color: currentTheme.colors.textSecondary }]}>
@@ -954,12 +1259,33 @@ export default function AnimeScreen() {
                   </View>
                 </TouchableOpacity>
               ))}
+              {/* See More Button */}
+              <TouchableOpacity
+                style={[styles.seeMoreCard, { backgroundColor: currentTheme.colors.surface }]}
+                onPress={() => router.push(`/anime-list?category=${section.category}&title=${encodeURIComponent(section.title)}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.seeMoreContent}>
+                  <FontAwesome5 name="plus" size={24} color={currentTheme.colors.primary} />
+                  <Text style={[styles.seeMoreCardText, { color: currentTheme.colors.primary }]}>See More</Text>
+                </View>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         ))}
 
         <View style={[styles.section, styles.lastSection]}>
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Top 50</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Top 50</Text>
+            <TouchableOpacity
+              style={[styles.seeMoreButton, { backgroundColor: currentTheme.colors.primary + '20' }]}
+              onPress={() => router.push(`/anime-list?category=top100&title=${encodeURIComponent('Top 100 Anime')}`)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.seeMoreText, { color: currentTheme.colors.primary }]}>See All</Text>
+              <FontAwesome5 name="chevron-right" size={12} color={currentTheme.colors.primary} />
+            </TouchableOpacity>
+          </View>
           <View style={styles.top100Container}>
             {top100Anime.map((anime, index) => (
               <TouchableOpacity 
@@ -1431,5 +1757,174 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  dayDropdown: {
+    borderRadius: 12,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    marginLeft: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  compactDaySelector: {
+    gap: 4,
+  },
+  compactDayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  compactDayText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  compactDayBadge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  compactDayBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  horizontalScheduleCard: {
+    width: 160,
+    marginRight: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  horizontalScheduleImage: {
+    width: '100%',
+    height: 220,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  horizontalScheduleInfo: {
+    padding: 12,
+    gap: 6,
+  },
+  horizontalScheduleTime: {
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  horizontalTimeText: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  horizontalOriginalTime: {
+    fontSize: 10,
+    fontWeight: '500',
+    opacity: 0.7,
+  },
+  horizontalEpisodeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  horizontalScheduleTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  horizontalScheduleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  horizontalScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+  },
+  horizontalScoreText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  horizontalFormatBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  horizontalFormatText: {
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  horizontalNoSchedule: {
+    width: width - 40,
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+    gap: 8,
+  },
+  horizontalNoScheduleText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  seeMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  seeMoreText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  seeMoreCard: {
+    width: 160,
+    marginRight: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(2, 169, 255, 0.3)',
+    height: 280, // Same total height as animeCard (220 image + 60 info)
+  },
+  seeMoreContent: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  seeMoreCardText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 }); 

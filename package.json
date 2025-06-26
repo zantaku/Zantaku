@@ -23,6 +23,7 @@
   "dependencies": {
     "@apollo/client": "^3.7.17",
     "@consumet/extensions": "^1.8.1",
+    "@epubjs-react-native/core": "^1.4.7",
     "@expo/vector-icons": "^14.0.4",
     "@fontsource/inter": "^5.2.5",
     "@fontsource/lora": "^5.2.5",
@@ -123,7 +124,8 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-video": "^6.9.0",
     "react-native-web": "~0.19.13",
-    "react-native-webview": "13.12.5",
+    "react-native-webview": "^13.15.0",
+    "react-native-zip-archive": "^7.0.2",
     "sharp": "^0.33.5",
     "sharp-cli": "^5.1.0",
     "tailwindcss-react-native": "^1.7.10",

@@ -65,8 +65,6 @@ interface NovelVolumeListProps {
   anilistId?: string;
 }
 
-
-
 export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeListProps) {
   const router = useRouter();
   const { currentTheme } = useTheme();
@@ -89,6 +87,7 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
   const [notificationMessage, setNotificationMessage] = React.useState('');
   const [showCorrectNovelModal, setShowCorrectNovelModal] = React.useState(false);
   const [currentNovelTitle, setCurrentNovelTitle] = React.useState<string>('');
+  const [loadingMessage, setLoadingMessage] = React.useState<string | null>(null);
 
   // Animations
   const notificationAnim = React.useRef(new Animated.Value(-100)).current;
@@ -148,6 +147,8 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
     const isDownloaded = downloadedVolumes.has(volume.id);
     const downloadUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${volume.id}`;
 
+    console.log('Download URL:', downloadUrl);
+
     if (isDownloading) {
       await cancelDownload(volume.id);
       return;
@@ -166,10 +167,25 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
       return;
     }
 
-    // Start download but don't navigate
-    const success = await startDownload(volume);
-    if (success) {
-      showNotificationIsland(`Volume ${volume.number} downloaded successfully! Tap to read.`);
+    // Start download and show validation status
+    try {
+      setLoadingMessage(`Downloading ${volume.title}...`);
+      const success = await startDownload(volume);
+      
+      if (success) {
+        showNotificationIsland(`Volume ${volume.number} downloaded and validated successfully! Tap to read.`);
+      } else {
+        // Show error notification
+        showNotificationIsland(`❌ Failed to validate ${volume.title}. The file may be corrupted. Please try downloading again.`);
+        
+        // Remove from downloaded volumes if it was added
+        await deleteVolume(volume.id);
+      }
+    } catch (error) {
+      console.error('Error downloading volume:', error);
+      showNotificationIsland(`❌ Error downloading ${volume.title}. Please try again.`);
+    } finally {
+      setLoadingMessage(null);
     }
   };
 
@@ -287,9 +303,18 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
               
               {isDownloading && (
                 <View style={styles.gridDownloadingOverlay}>
-                  <Text style={styles.gridDownloadingText}>
-                    {Math.round(downloadProgress * 100)}%
-                  </Text>
+                  {loadingMessage ? (
+                    <View style={styles.validationOverlay}>
+                      <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+                      <Text style={[styles.validationText, { color: currentTheme.colors.text }]}>
+                        {loadingMessage}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.gridDownloadingText}>
+                      {Math.round(downloadProgress * 100)}%
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -337,7 +362,7 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
               />
             ) : (
               <View style={[styles.listPlaceholderCover, { backgroundColor: currentTheme.colors.background }]}>
-                <FontAwesome5 name="book" size={20} color={currentTheme.colors.textSecondary} />
+                <FontAwesome5 name="book" size={24} color={currentTheme.colors.textSecondary} />
               </View>
             )}
             
@@ -349,19 +374,30 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
             
             {isDownloading && (
               <View style={styles.listDownloadingOverlay}>
-                <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+                {loadingMessage ? (
+                  <View style={styles.validationOverlay}>
+                    <ActivityIndicator size="small" color={currentTheme.colors.primary} />
+                    <Text style={[styles.validationText, { color: currentTheme.colors.text }]}>
+                      {loadingMessage}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.listDownloadingText}>
+                    {Math.round(downloadProgress * 100)}%
+                  </Text>
+                )}
               </View>
             )}
           </View>
           
           <View style={styles.listInfo}>
-            <View style={styles.listHeader}>
-              <Text style={[styles.listVolumeNumber, { color: currentTheme.colors.primary }]}>
-                Volume {item.number}
-              </Text>
-              {getStatusBadge(item)}
-            </View>
-            <Text style={[styles.listVolumeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
+            <Text style={[styles.listVolumeNumber, { color: currentTheme.colors.primary }]}>
+              Vol. {item.number}
+            </Text>
+            <Text 
+              style={[styles.listVolumeTitle, { color: currentTheme.colors.text }]} 
+              numberOfLines={2}
+            >
               {item.title}
             </Text>
           </View>
@@ -369,8 +405,6 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
       </View>
     );
   };
-
-
 
   const renderHeader = () => (
     <View style={[styles.header, { backgroundColor: currentTheme.colors.background }]}>
@@ -414,10 +448,60 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
           </TouchableOpacity>
         </View>
       </View>
-
-
     </View>
   );
+
+  const verifyFile = async () => {
+    if (!selectedVolume || !novelId) return;
+    
+    try {
+      setLoadingMessage('Verifying file...');
+      setShowOptionsModal(false);
+      
+      // Get the file path
+      const fileUri = getStoragePath(novelId, selectedVolume.id, 'epub');
+      
+      // Read the file
+      const fileContent = await FileSystem.readAsStringAsync(fileUri, { 
+        encoding: FileSystem.EncodingType.Base64 
+      });
+      
+      // Create JSZip instance
+      const JSZip = require('jszip');
+      const zip = new JSZip();
+      
+      // Load and validate the EPUB
+      const { validateEpub } = require('../utils/epubValidator');
+      await zip.loadAsync(fileContent, { base64: true });
+      const validation = await validateEpub(zip);
+      
+      if (validation.isValid) {
+        showNotificationIsland('✅ File verified successfully! No issues found.');
+      } else {
+        // If there are issues, show them and offer to redownload
+        const issues = validation.issues.join('\n');
+        Alert.alert(
+          'File Validation Issues',
+          `The following issues were found:\n\n${issues}\n\nWould you like to redownload this volume?`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel'
+            },
+            {
+              text: 'Redownload',
+              onPress: handleRedownload
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error verifying file:', error);
+      showNotificationIsland('❌ Error verifying file. The file may be corrupted.');
+    } finally {
+      setLoadingMessage(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -489,104 +573,54 @@ export default function NovelVolumeList({ mangaTitle, anilistId }: NovelVolumeLi
       </View>
 
       {/* Volume Options Modal */}
-      <Modal
-        visible={showOptionsModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowOptionsModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.optionsModalContainer, { backgroundColor: currentTheme.colors.surface }]}>
-            <Text style={[styles.optionsModalTitle, { color: currentTheme.colors.text }]}>
-              Volume {selectedVolume?.number}
-            </Text>
-            <Text style={[styles.optionsModalSubtitle, { color: currentTheme.colors.textSecondary }]}>
-              {selectedVolume?.title}
-            </Text>
-
-            <View style={styles.optionsContainer}>
+      {showOptionsModal && selectedVolume && (
+        <Modal
+          visible={showOptionsModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowOptionsModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowOptionsModal(false)}
+          >
+            <View style={[styles.modalContent, { backgroundColor: currentTheme.colors.surface }]}>
               <TouchableOpacity
-                style={[styles.optionButton, { backgroundColor: currentTheme.colors.background }]}
-                onPress={handleRedownload}
-              >
-                <FontAwesome5 name="sync-alt" size={24} color={currentTheme.colors.primary} />
-                <View style={styles.optionTextContainer}>
-                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Redownload</Text>
-                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                    Download the file again
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.optionButton, { backgroundColor: currentTheme.colors.background }]}
+                style={[styles.modalButton, { borderBottomWidth: 1, borderBottomColor: currentTheme.colors.border }]}
                 onPress={handleViewFile}
               >
-                <FontAwesome5 name="book-reader" size={24} color={currentTheme.colors.primary} />
-                <View style={styles.optionTextContainer}>
-                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Read</Text>
-                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                    Open in reader
-                  </Text>
-                </View>
+                <FontAwesome5 name="folder-open" size={16} color={currentTheme.colors.text} />
+                <Text style={[styles.modalButtonText, { color: currentTheme.colors.text }]}>View Files</Text>
               </TouchableOpacity>
-
+              
               <TouchableOpacity
-                style={[styles.optionButton, { backgroundColor: currentTheme.colors.background }]}
-                onPress={() => {
-                  if (!selectedVolume?.id || !novelId) {
-                    Alert.alert('Error', 'Volume or Novel ID not found');
-                    return;
-                  }
-                  const novelDir = getStoragePath(novelId, selectedVolume.id);
-                  FileSystem.getInfoAsync(novelDir).then(info => {
-                    if (info.exists) {
-                      FileSystem.readDirectoryAsync(novelDir).then(files => {
-                        const isExpoGo = Constants.default.appOwnership === 'expo';
-                        Alert.alert(
-                          'Files in Directory',
-                          `Running in: ${isExpoGo ? 'Expo Go' : 'Standalone App'}\n\nDirectory: ${novelDir}\n\nFiles:\n${files.join('\n')}`,
-                          [{ text: 'OK' }]
-                        );
-                      });
-                    } else {
-                      Alert.alert('Directory Not Found', `${novelDir} does not exist`);
-                    }
-                  });
-                }}
+                style={[styles.modalButton, { borderBottomWidth: 1, borderBottomColor: currentTheme.colors.border }]}
+                onPress={verifyFile}
               >
-                <FontAwesome5 name="folder-open" size={24} color={currentTheme.colors.primary} />
-                <View style={styles.optionTextContainer}>
-                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>View Files</Text>
-                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                    Show stored files
-                  </Text>
-                </View>
+                <FontAwesome5 name="check-circle" size={16} color={currentTheme.colors.text} />
+                <Text style={[styles.modalButtonText, { color: currentTheme.colors.text }]}>Verify File</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.optionButton, { backgroundColor: currentTheme.colors.background }]}
+                style={[styles.modalButton, { borderBottomWidth: 1, borderBottomColor: currentTheme.colors.border }]}
+                onPress={handleRedownload}
+              >
+                <FontAwesome5 name="sync" size={16} color={currentTheme.colors.text} />
+                <Text style={[styles.modalButtonText, { color: currentTheme.colors.text }]}>Redownload</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, { borderBottomColor: '#FF3B30' }]}
                 onPress={handleDeleteVolume}
               >
-                <FontAwesome5 name="trash-alt" size={24} color="#dc3545" />
-                <View style={styles.optionTextContainer}>
-                  <Text style={[styles.optionText, { color: currentTheme.colors.text }]}>Delete</Text>
-                  <Text style={[styles.optionDescription, { color: currentTheme.colors.textSecondary }]}>
-                    Remove from device
-                  </Text>
-                </View>
+                <FontAwesome5 name="trash-alt" size={16} color="#FF3B30" />
+                <Text style={[styles.modalButtonText, { color: '#FF3B30' }]}>Delete</Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={[styles.cancelButton, { backgroundColor: currentTheme.colors.background }]}
-              onPress={() => setShowOptionsModal(false)}
-            >
-              <Text style={[styles.cancelButtonText, { color: currentTheme.colors.text }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       {/* Correct Novel Search Modal */}
       <CorrectNovelSearchModal
@@ -604,7 +638,7 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 100, // Move container down to avoid top navbar
+    paddingTop: 16,
   },
   header: {
     padding: 16,
@@ -626,10 +660,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   novelTitle: {
-    fontSize: 16,
+    fontSize: 24,
     fontWeight: '600',
-    flex: 1,
-    marginRight: 8,
+    marginBottom: 8,
+  },
+  novelDescription: {
+    fontSize: 16,
+    lineHeight: 24,
   },
   controls: {
     flexDirection: 'row',
@@ -665,30 +702,26 @@ const styles = StyleSheet.create({
   },
   listItem: {
     flexDirection: 'row',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderWidth: 1,
   },
   listCoverContainer: {
+    width: 80,
+    height: 120,
     borderRadius: 8,
     overflow: 'hidden',
-    position: 'relative',
   },
   listCover: {
-    width: 60,
-    height: 90,
-    borderRadius: 8,
+    width: '100%',
+    height: '100%',
   },
   listPlaceholderCover: {
-    width: 60,
-    height: 90,
-    borderRadius: 8,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 8,
   },
   listInfo: {
     flex: 1,
@@ -702,22 +735,21 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   listVolumeNumber: {
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: '600',
-    textTransform: 'uppercase',
+    marginBottom: 4,
   },
   listVolumeTitle: {
     fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 18,
+    lineHeight: 20,
   },
   listStatusOverlay: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: 8,
+    right: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 12,
-    padding: 2,
+    padding: 4,
   },
   listDownloadingOverlay: {
     position: 'absolute',
@@ -728,77 +760,74 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
+  },
+  listDownloadingText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 
   // Grid View Styles
   gridWrapper: {
-    flex: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    width: '50%',
+    padding: 8,
   },
   gridItem: {
-    borderRadius: 16,
-    padding: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
   },
   gridCoverContainer: {
-    borderRadius: 12,
+    aspectRatio: 2/3,
+    width: '100%',
+    borderRadius: 8,
     overflow: 'hidden',
     marginBottom: 8,
-    position: 'relative',
   },
   gridCover: {
     width: '100%',
-    height: 160,
-    borderRadius: 12,
+    height: '100%',
   },
   gridPlaceholderCover: {
     width: '100%',
-    height: 160,
-    borderRadius: 12,
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 8,
   },
   gridInfo: {
-    alignItems: 'center',
+    marginTop: 8,
   },
   gridVolumeNumber: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   gridVolumeTitle: {
     fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
     lineHeight: 16,
   },
   gridStatusOverlay: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 8,
+    right: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 12,
     padding: 4,
   },
   gridDownloadingOverlay: {
     position: 'absolute',
-    bottom: 6,
-    right: 6,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   gridDownloadingText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 14,
     fontWeight: 'bold',
   },
 
@@ -865,7 +894,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  optionsModalContainer: {
+  modalContent: {
     width: '90%',
     maxWidth: 400,
     padding: 24,
@@ -876,45 +905,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
   },
-  optionsModalTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  optionsModalSubtitle: {
-    fontSize: 16,
-    marginBottom: 24,
-  },
-  optionsContainer: {
-    gap: 8,
-    marginBottom: 16,
-  },
-  optionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  modalButton: {
     padding: 16,
-    borderRadius: 12,
-    gap: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
   },
-  optionTextContainer: {
-    flex: 1,
-  },
-  optionText: {
+  modalButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 2,
-  },
-  optionDescription: {
-    fontSize: 14,
-  },
-  cancelButton: {
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    marginLeft: 8,
   },
   notificationIsland: {
     position: 'absolute',
@@ -942,5 +941,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  validationOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 8,
+  },
+  validationText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+  },
 
 }); 

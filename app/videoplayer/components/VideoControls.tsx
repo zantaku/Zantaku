@@ -188,7 +188,7 @@ const VideoControls = ({
           <View style={styles.titleContainer}>
             <Text style={styles.titleText} numberOfLines={1}>
               {animeTitle && episodeNumber 
-                ? `${animeTitle} - Episode ${episodeNumber}`
+                ? `${animeTitle} - Ep ${episodeNumber}`
                 : animeTitle || 'Current Episode'
               }
             </Text>

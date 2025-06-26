@@ -338,6 +338,14 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
+          name="appsettings/api"
+          options={{
+            headerShown: false,
+            presentation: 'modal',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="settings"
           options={{
             headerShown: false,
@@ -354,33 +362,9 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
-          name="profile"
+          name="@profile"
           options={{
-            headerShown: true,
-            presentation: 'card',
-            animation: 'slide_from_right',
-            headerTransparent: true,
-            headerBlurEffect: isDarkMode ? 'dark' : 'light',
-            headerBackground: () => (
-              <BlurView 
-                tint={isDarkMode ? 'dark' : 'light'} 
-                intensity={100} 
-                style={StyleSheet.absoluteFill} 
-              />
-            ),
-            headerTitle: '',
-            headerLeft: () => (
-              <TouchableOpacity 
-                style={[styles.headerButton, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }]}
-                onPress={() => router.back()}
-              >
-                <FontAwesome5 
-                  name="chevron-left" 
-                  size={20} 
-                  color="white" 
-                />
-              </TouchableOpacity>
-            ),
+            headerShown: false,
           }}
         />
         <Stack.Screen
@@ -494,6 +478,22 @@ function ThemedLayout() {
               </View>
             ),
           })}
+        />
+        <Stack.Screen
+          name="anime-list"
+          options={{
+            headerShown: false,
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="manga-list"
+          options={{
+            headerShown: false,
+            presentation: 'card',
+            animation: 'slide_from_right',
+          }}
         />
       </Stack>
     </>

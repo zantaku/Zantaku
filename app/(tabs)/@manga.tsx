@@ -655,13 +655,13 @@ export default function MangaScreen() {
         </View>
 
         {[
-          { title: 'Trending Now', data: trendingManga },
-          { title: 'Just Added Chapters', data: recentlyUpdated },
-          { title: 'One-shots', data: oneShots },
-          { title: 'Light Novels', data: lightNovels },
-          { title: 'Manhwa', data: manhwa },
-          { title: 'Donghua', data: manhua },
-          { title: 'Manhua', data: taihua }
+          { title: 'Trending Now', data: trendingManga, category: 'trending' },
+          { title: 'Just Added Chapters', data: recentlyUpdated, category: 'recentlyUpdated' },
+          { title: 'One-shots', data: oneShots, category: 'oneShots' },
+          { title: 'Light Novels', data: lightNovels, category: 'lightNovels' },
+          { title: 'Manhwa', data: manhwa, category: 'manhwa' },
+          { title: 'Manhua', data: manhua, category: 'manhua' },
+          { title: 'Taihua', data: taihua, category: 'taihua' }
         ].map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>{section.title}</Text>
@@ -696,12 +696,33 @@ export default function MangaScreen() {
                   </View>
                 </TouchableOpacity>
               ))}
+              {/* See More Button */}
+              <TouchableOpacity
+                style={[styles.seeMoreCard, { backgroundColor: currentTheme.colors.surface }]}
+                onPress={() => router.push(`/manga-list?category=${section.category}&title=${encodeURIComponent(section.title)}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.seeMoreContent}>
+                  <FontAwesome5 name="plus" size={24} color={currentTheme.colors.primary} />
+                  <Text style={[styles.seeMoreCardText, { color: currentTheme.colors.primary }]}>See More</Text>
+                </View>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         ))}
 
         <View style={[styles.section, styles.lastSection]}>
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Top 50</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Top 50</Text>
+            <TouchableOpacity
+              style={[styles.seeMoreButton, { backgroundColor: currentTheme.colors.primary + '20' }]}
+              onPress={() => router.push(`/manga-list?category=top100&title=${encodeURIComponent('Top 100 Manga')}`)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.seeMoreButtonText, { color: currentTheme.colors.primary }]}>See All</Text>
+              <FontAwesome5 name="chevron-right" size={12} color={currentTheme.colors.primary} />
+            </TouchableOpacity>
+          </View>
           <View style={styles.top100Container}>
             {top100Manga.map((manga, index) => (
               <TouchableOpacity 
@@ -1061,5 +1082,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  seeMoreCard: {
+    width: 160,
+    marginRight: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(2, 169, 255, 0.3)',
+    height: 280, // Same total height as manga card (220 image + 60 info)
+  },
+  seeMoreContent: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  seeMoreCardText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  seeMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  seeMoreButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 }); 
