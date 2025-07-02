@@ -441,7 +441,9 @@ export default function EpisodeSourcesModal({
   anilistId,
   autoSelectSource = false,
   mangaTitle,
-  currentProvider
+  currentProvider,
+  skipTypeSelection = false,
+  episodeNumber
 }: {
   visible: boolean;
   episodeId: string;
@@ -454,6 +456,8 @@ export default function EpisodeSourcesModal({
   autoSelectSource?: boolean;
   mangaTitle?: string;
   currentProvider?: string;
+  skipTypeSelection?: boolean;
+  episodeNumber?: number;
 }) {
   // Load source settings
   const sourceSettings = useSourceSettings();
@@ -473,7 +477,6 @@ export default function EpisodeSourcesModal({
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
-  const [episodeNumber, setEpisodeNumber] = useState('');
   const [animeId, setAnimeId] = useState('');
   const [pillVisible, setPillVisible] = useState(false);
   const [pillMessage, setPillMessage] = useState('Loading video...');
@@ -485,39 +488,42 @@ export default function EpisodeSourcesModal({
     headers: Record<string, string>;
     isZoroServer?: boolean;
   }[]>([]);
+  const [serverProcessingMessage, setServerProcessingMessage] = useState<string>('');
   
-  // Extract episode number from the episode ID
+  // Convert episodeNumber to string for use in the component
+  const episodeNumberStr = episodeNumber?.toString() || '';
+
+  // Extract anime ID from the episode ID
   useEffect(() => {
     if (episodeId) {
-      let epNum;
       let animeIdMatch;
+      
+      console.log(`🎬 [EPISODE DETECTION] Raw episodeId: "${episodeId}"`);
       
       // Support new simplified format: {anime id}/{episode number}
       if (episodeId.includes('/')) {
         // New format: animeId/episodeNumber
         const parts = episodeId.split('/');
         animeIdMatch = parts[0];
-        epNum = parts[1] || '1';
+        console.log(`🎬 [EPISODE DETECTION] Split format: animeId="${animeIdMatch}"`);
       } else if (episodeId.includes('?ep=')) {
         // Legacy format: animeId?ep=episodeNumber
-        epNum = episodeId.split('?ep=')[1] || '1';
         animeIdMatch = episodeId.split('?')[0];
+        console.log(`🎬 [EPISODE DETECTION] Legacy format: animeId="${animeIdMatch}"`);
       } else {
         // Default fallback
-        epNum = '1';
         animeIdMatch = episodeId;
+        console.log(`🎬 [EPISODE DETECTION] Fallback format: animeId="${animeIdMatch}"`);
       }
-      
-      setEpisodeNumber(epNum);
       
       if (animeIdMatch) {
         setAnimeId(animeIdMatch);
       }
       
       // Debug log for URL format detection
-      console.log(`🎬 [EPISODE DETECTION] episodeId="${episodeId}" => animeId="${animeIdMatch}", episodeNumber="${epNum}"`);
+      console.log(`🎬 [EPISODE DETECTION] FINAL: episodeId="${episodeId}" => animeId="${animeIdMatch}", episodeNumber="${episodeNumberStr}"`);
     }
-  }, [episodeId]);
+  }, [episodeId, episodeNumberStr]);
 
   useEffect(() => {
     if (visible) {
@@ -540,10 +546,11 @@ export default function EpisodeSourcesModal({
         try {
           console.log('\n=== EPISODE SOURCES MODAL USER SETTINGS ===');
           console.log('Modal visible with preferred type:', preferredType);
+          console.log('Skip type selection:', skipTypeSelection);
           console.log('Auto-selection mode:', sourceSettings.autoSelectSource ? 'ON' : 'OFF');
           
-                      // Source settings are now loaded via hook at component level
-            console.log('Source Settings:', sourceSettings);
+          // Source settings are now loaded via hook at component level
+          console.log('Source Settings:', sourceSettings);
           
           const episodeListSettingsData = await AsyncStorage.getItem('episodeListSettings');
           if (episodeListSettingsData) {
@@ -580,9 +587,9 @@ export default function EpisodeSourcesModal({
         setPillMessage(`Loading ${initialType} version...`);
       }
       
-      // For AnimePahe, automatically start fetching SUB sources without showing selection
-      if (currentProvider === 'animepahe') {
-        fetchSources(episodeId, 'sub');
+      // If skipTypeSelection is true, directly fetch sources
+      if (skipTypeSelection || currentProvider === 'animepahe') {
+        fetchSources(episodeId, initialType);
       } else {
         fetchSources(episodeId, initialType);
       }
@@ -592,23 +599,57 @@ export default function EpisodeSourcesModal({
       // Hide pill when modal closes
       setPillVisible(false);
     }
-  }, [visible]);
+  }, [visible, skipTypeSelection]);
 
-  const formatSourceWithHeaders = (source: any, apiHeaders: any, sourceType: 'sub' | 'dub'): Source => {
-    const headers = {
-      ...apiHeaders,
-      Referer: 'https://hianime.to/',
-      Origin: 'https://hianime.to',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
-    };
+  const formatSourceWithHeaders = (source: any, apiHeaders: any, sourceType: 'sub' | 'dub', provider?: string): Source => {
+    console.log(`[FORMAT_SOURCE] 🔧 Formatting source for provider: ${provider}`);
+    console.log(`[FORMAT_SOURCE] 📊 Original source:`, {
+      url: source.url?.substring(0, 80) + '...',
+      quality: source.quality,
+      hasHeaders: !!source.headers,
+      originalHeaders: source.headers
+    });
     
-    return {
+    let headers = {};
+    
+    if (provider === 'animepahe') {
+      // AnimePahe: Use AnimePahe-specific headers, NO PROXY
+      headers = {
+        ...apiHeaders,
+        Referer: 'https://animepahe.com/',
+        Origin: 'https://animepahe.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+      };
+      console.log(`[FORMAT_SOURCE] ✅ [ANIMEPAHE] Using direct AnimePahe headers (no proxy)`);
+    } else {
+      // Zoro/HiAnime: Use HiAnime headers (with proxy handling in provider)
+      headers = {
+        ...apiHeaders,
+        Referer: 'https://hianime.to/',
+        Origin: 'https://hianime.to',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
+      };
+      console.log(`[FORMAT_SOURCE] ✅ [ZORO] Using HiAnime headers (proxy handled by provider)`);
+    }
+    
+    const formattedSource = {
       url: source.url,
       quality: source.quality || 'default',
       type: sourceType,
       headers: headers,
       isM3U8: source.url.includes('.m3u8') || source.isM3U8
     };
+    
+    console.log(`[FORMAT_SOURCE] 📊 Formatted source:`, {
+      url: formattedSource.url?.substring(0, 80) + '...',
+      quality: formattedSource.quality,
+      type: formattedSource.type,
+      isM3U8: formattedSource.isM3U8,
+      provider,
+      referer: (headers as any).Referer
+    });
+    
+    return formattedSource;
   };
 
   // Function to fetch anime titles from AniList
@@ -681,35 +722,38 @@ export default function EpisodeSourcesModal({
     const shouldAutoSelect = sourceSettings.autoSelectSource && autoSelectSource;
     
     try {
-      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (PROVIDER SEPARATION) ===`);
-      console.log(`📡 Fetching ${type.toUpperCase()} sources for episode ${episodeId}`);
+      console.log(`\n=== EPISODE SOURCES MODAL DEBUG (FAST MODE) ===`);
+      console.log(`📡 Fast-fetching ${type.toUpperCase()} server options for episode ${episodeId}`);
       console.log(`📺 Anime title:`, animeTitle);
       console.log(`🆔 AniList ID:`, anilistId);
       console.log(`🔄 Auto-select mode: ${shouldAutoSelect ? 'ON' : 'OFF'} (from settings)`);
-      console.log(`🎯 Provider priority: ${sourceSettings.providerPriority.join(' → ')}`);
-      console.log(`🎯 Default provider: ${sourceSettings.defaultProvider}`);
       
       setError(null);
       setLoading(true);
 
-      // Extract episode number from episodeId
-      let episodeNum;
-      if (episodeId.includes('/')) {
-        // New format: animeId/episodeNumber
-        episodeNum = episodeId.split('/')[1] || '1';
-      } else if (episodeId.includes('?ep=')) {
-        // Legacy format: animeId?ep=episodeNumber
-        episodeNum = episodeId.split('?ep=')[1] || '1';
-      } else {
-        episodeNum = '1';
+      // Extract episode number from episodeId or use the provided episodeNumber
+      let episodeNum = episodeNumber;
+      if (!episodeNum && episodeId) {
+        if (episodeId.includes('/')) {
+          const parts = episodeId.split('/')[1];
+          if (parts && parts.startsWith('episode-')) {
+            episodeNum = parseInt(parts.replace('episode-', ''));
+          }
+        } else if (episodeId.includes('?ep=')) {
+          episodeNum = parseInt(episodeId.split('?ep=')[1]);
+        }
+      }
+      
+      // Ensure we have a valid episode number
+      if (!episodeNum || isNaN(episodeNum)) {
+        throw new Error('Invalid episode number');
       }
       
       console.log(`📺 Episode number:`, episodeNum);
       
       // Determine which providers to try based on settings and availability
-      // If currentProvider is specified, use that first, otherwise use settings
       const providersToTry = currentProvider 
-        ? [currentProvider] // Use the provider selected in EpisodeList
+        ? [currentProvider] 
         : shouldAutoSelect && !sourceSettings.defaultProvider 
           ? sourceSettings.providerPriority 
           : sourceSettings.defaultProvider 
@@ -717,310 +761,188 @@ export default function EpisodeSourcesModal({
             : sourceSettings.providerPriority;
           
       console.log(`🎯 Providers to try: ${providersToTry.join(' → ')}`);
-      
-      let watchResult: any = null;
-      let successfulProvider: string = '';
-      
-      // Try each provider in order
+
+      // Try each provider in sequence
       for (const provider of providersToTry) {
+        console.log(`🚀 Fast-checking provider: ${provider}`);
+        
         try {
-          console.log(`🔄 Trying provider: ${provider}`);
-          
-          if (provider === 'zoro') {
-            // ZoroHiAnime Provider - uses new HiAnime endpoints
-            if (!anilistId) {
-              console.log(`❌ Skipping Zoro: AniList ID required`);
-              continue;
-            }
-            
-            console.log(`📡 [ZORO] Fetching ${type} data for AniList ID: ${anilistId}, Episode: ${episodeNum}`);
-            
-            const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub');
-            
-            if (zoroWatchData && zoroWatchData.sources && zoroWatchData.sources.length > 0) {
-              console.log(`✅ [ZORO] Found ${zoroWatchData.sources.length} sources`);
-              watchResult = {
-                success: true,
-                provider: 'zoro',
-                data: zoroWatchData
-              };
-              successfulProvider = 'Zoro/HiAnime';
-              break;
-            } else {
-              console.log(`❌ [ZORO] No sources found`);
-            }
-            
-          } else if (provider === 'animepahe') {
-            // AnimePahe Provider - uses Consumet API
+          if (provider === 'animepahe') {
+            // AnimePahe Provider - keep existing logic since it's already fast
             if (!animeTitle) {
-              console.log(`❌ Skipping AnimePahe: Anime title required`);
+              console.log(`❌ [ANIMEPAHE] Skipping AnimePahe: Anime title required`);
               continue;
             }
             
             console.log(`📡 [ANIMEPAHE] Fetching ${type} data for anime: ${animeTitle}, Episode: ${episodeNum}`);
+            console.log(`📡 [ANIMEPAHE] URL Debug - Will call getAnimeIdByTitle("${animeTitle}")`);
             
-            // First get the anime ID from AnimePahe
             const animeId = await animePaheProvider.getAnimeIdByTitle(animeTitle);
             if (!animeId) {
               console.log(`❌ [ANIMEPAHE] Could not find anime ID for: ${animeTitle}`);
               continue;
             }
             
-            console.log(`✅ [ANIMEPAHE] Found anime ID: ${animeId}`);
-            
-            // Get watch data using anime ID and episode number
-            const paheWatchData = await animePaheProvider.getWatchData(animeId, parseInt(episodeNum), type === 'dub');
+            console.log(`📡 [ANIMEPAHE] URL Debug - Will call getWatchData("${animeId}", ${episodeNum}, ${type === 'dub'})`);
+            const paheWatchData = await animePaheProvider.getWatchData(animeId, episodeNum, type === 'dub');
             
             if (paheWatchData && paheWatchData.sources && paheWatchData.sources.length > 0) {
               console.log(`✅ [ANIMEPAHE] Found ${paheWatchData.sources.length} sources`);
-              watchResult = {
-                success: true,
-                provider: 'animepahe',
-                data: paheWatchData
-              };
-              successfulProvider = 'AnimePahe';
-              break;
+              console.log(`📡 [ANIMEPAHE] Source URLs:`, paheWatchData.sources.map((s: any, i: number) => `${i + 1}: ${s.url?.substring(0, 80)}...`));
+              
+              // For AnimePahe, process immediately since it's fast
+              console.log(`[ANIMEPAHE] 🔧 Formatting ${paheWatchData.sources.length} sources with AnimePahe headers...`);
+              const formattedSources = paheWatchData.sources.map((source: any) => 
+                formatSourceWithHeaders(source, paheWatchData.headers || {}, type, 'animepahe')
+              );
+              
+              setSources(formattedSources);
+              setSubtitles(paheWatchData.subtitles || []);
+              setTimings(paheWatchData.intro || paheWatchData.outro ? {
+                intro: paheWatchData.intro,
+                outro: paheWatchData.outro
+              } : null);
+              
+              if (shouldAutoSelect && formattedSources.length > 0) {
+                console.log(`📡 [ANIMEPAHE] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
+                handleDirectSourceSelect(
+                  formattedSources[0], 
+                  paheWatchData.subtitles || [], 
+                  paheWatchData.intro || paheWatchData.outro ? {
+                    intro: paheWatchData.intro,
+                    outro: paheWatchData.outro
+                  } : undefined,
+                  anilistId
+                );
+                return;
+              }
+              
+              // Show quality selection for AnimePahe
+              const qualityOptions = formattedSources.map((source: Source, index: number) => ({
+                quality: source.quality || `Source ${index + 1}`,
+                url: source.url,
+                isDefault: index === 0,
+                headers: source.headers,
+                isZoroServer: false
+              }));
+              
+              setAvailableQualities(qualityOptions);
+              setShowQualitySelection(true);
+              setLoading(false);
+              return;
             } else {
-              console.log(`❌ [ANIMEPAHE] No sources found`);
+              console.log(`❌ [ANIMEPAHE] No sources found in response:`, paheWatchData);
+            }
+          } else if (provider === 'zoro') {
+            // Zoro Provider with detailed URL logging
+            if (!anilistId) {
+              console.log(`❌ [ZORO] Skipping Zoro: AniList ID required`);
+              continue;
+            }
+            
+            console.log(`📡 [ZORO] Starting Zoro provider flow for episode: ${episodeId}`);
+            console.log(`📡 [ZORO] Episode ID processing:`);
+            console.log(`📡 [ZORO] - Raw episodeId: "${episodeId}"`);
+            console.log(`📡 [ZORO] - AniList ID: "${anilistId}"`);
+            console.log(`📡 [ZORO] - Episode Number: ${episodeNum}`);
+            console.log(`📡 [ZORO] - Audio Type: ${type} (isDub: ${type === 'dub'})`);
+            
+            // Call getWatchData with detailed logging
+            console.log(`📡 [ZORO] URL Debug - Will call zoroProvider.getWatchData("${episodeId}", ${type === 'dub'})`);
+            console.log(`📡 [ZORO] This will trigger the following chain:`);
+            console.log(`📡 [ZORO] 1. Extract episode ID from: "${episodeId}"`);
+            console.log(`📡 [ZORO] 2. Get servers from: https://hianime.to/ajax/v2/episode/servers?episodeId={extracted_id}`);
+            console.log(`📡 [ZORO] 3. Get source link from: https://hianime.to/ajax/v2/episode/sources?id={server_id}`);
+            console.log(`📡 [ZORO] 4. Parse stream data from iframe URL via: https://shih.kaoru.cat/sources?url={iframe_url}`);
+            console.log(`📡 [ZORO] 5. All URLs will be proxied through: http://yesgogogototheapi.xyz/proxy?url={encoded_url}`);
+            
+            try {
+              const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub');
+              
+              if (zoroWatchData && zoroWatchData.sources && zoroWatchData.sources.length > 0) {
+                console.log(`✅ [ZORO] Found ${zoroWatchData.sources.length} sources from getWatchData`);
+                console.log(`📡 [ZORO] Source URLs:`, zoroWatchData.sources.map((s: any, i: number) => `${i + 1}: ${s.url?.substring(0, 80)}...`));
+                console.log(`📡 [ZORO] Source qualities:`, zoroWatchData.sources.map((s: any, i: number) => `${i + 1}: ${s.quality}`));
+                
+                // Format sources
+                console.log(`[ZORO] 🔧 Formatting ${zoroWatchData.sources.length} sources with Zoro headers...`);
+                const formattedSources = zoroWatchData.sources.map((source: any) => 
+                  formatSourceWithHeaders(source, zoroWatchData.headers || {}, type, 'zoro')
+                );
+                
+                console.log(`📡 [ZORO] Formatted source URLs:`, formattedSources.map((s: any, i: number) => `${i + 1}: ${s.url?.substring(0, 80)}...`));
+                
+                setSources(formattedSources);
+                setSubtitles(zoroWatchData.subtitles || []);
+                setTimings(zoroWatchData.intro || zoroWatchData.outro ? {
+                  intro: zoroWatchData.intro,
+                  outro: zoroWatchData.outro
+                } : null);
+                
+                if (shouldAutoSelect && formattedSources.length > 0) {
+                  console.log(`📡 [ZORO] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
+                  handleDirectSourceSelect(
+                    formattedSources[0], 
+                    zoroWatchData.subtitles || [], 
+                    zoroWatchData.intro || zoroWatchData.outro ? {
+                      intro: zoroWatchData.intro,
+                      outro: zoroWatchData.outro
+                    } : undefined,
+                    anilistId
+                  );
+                  return;
+                }
+                
+                // Show quality selection for Zoro
+                const qualityOptions = formattedSources.map((source: Source, index: number) => ({
+                  quality: source.quality || `Source ${index + 1}`,
+                  url: source.url,
+                  isDefault: index === 0,
+                  headers: source.headers,
+                  isZoroServer: true
+                }));
+                
+                setAvailableQualities(qualityOptions);
+                setShowQualitySelection(true);
+                setLoading(false);
+                return;
+              } else {
+                console.log(`❌ [ZORO] No sources found in getWatchData response:`, zoroWatchData);
+              }
+            } catch (zoroError: any) {
+              console.log(`❌ [ZORO] Error in getWatchData:`, {
+                errorMessage: zoroError?.message,
+                errorCode: zoroError?.code,
+                httpStatus: zoroError?.response?.status,
+                errorStack: zoroError?.stack?.split('\n').slice(0, 5).join('\n')
+              });
+              console.log(`❌ [ZORO] Full error object:`, zoroError);
             }
           }
           
-        } catch (providerError) {
-          console.error(`❌ [${provider.toUpperCase()}] Error:`, providerError);
+        } catch (providerError: any) {
+          console.error(`❌ [${provider.toUpperCase()}] Provider error:`, {
+            provider,
+            errorMessage: providerError?.message,
+            errorCode: providerError?.code,
+            httpStatus: providerError?.response?.status,
+            errorStack: providerError?.stack?.split('\n').slice(0, 3).join('\n')
+          });
+          console.error(`❌ [${provider.toUpperCase()}] Full error object:`, providerError);
           continue;
         }
       }
       
-      // Check if we found any sources
-      if (!watchResult || !watchResult.success) {
-        console.log(`❌ No sources found from any provider`);
-        
-        // If we're looking for dub and auto-select is enabled, automatically try sub
-        if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion) {
-          console.log(`🔄 Auto-fallback: Trying SUB version instead...`);
-          setPillMessage('Dub not available, loading sub version...');
-          return fetchSources(episodeId, 'sub');
-        }
-        
-        throw new Error(`No ${type.toUpperCase()} sources found from any provider`);
-      }
+      // If we get here, no providers worked
+      console.log(`❌ [SOURCES_MODAL] No providers returned sources. Tried: ${providersToTry.join(', ')}`);
+      console.log(`❌ [SOURCES_MODAL] Episode details: episodeId="${episodeId}", type="${type}", episodeNum=${episodeNum}`);
+      console.log(`❌ [SOURCES_MODAL] Available data: animeTitle="${animeTitle}", anilistId="${anilistId}"`);
+      throw new Error(`No ${type.toUpperCase()} sources found from any provider (tried: ${providersToTry.join(', ')})`);
       
-      console.log(`✅ Found sources from provider: ${successfulProvider}`);
-      console.log(`📊 Sources available: ${watchResult.data.sources.length}`);
-      console.log(`📊 Subtitles available: ${watchResult.data.subtitles?.length || 0}`);
-      
-      // Create direct references to API data
-      let directTimings: VideoTimings | undefined = undefined;
-      if (watchResult.data.intro || watchResult.data.outro) {
-        console.log(`✅ Video timings available:`, {
-          intro: watchResult.data.intro ? `${watchResult.data.intro.start}s - ${watchResult.data.intro.end}s` : 'None',
-          outro: watchResult.data.outro ? `${watchResult.data.outro.start}s - ${watchResult.data.outro.end}s` : 'None'
-        });
-        
-        directTimings = {
-          intro: watchResult.data.intro,
-          outro: watchResult.data.outro
-        };
-        
-        // Update state variables for UI display
-        setTimings(directTimings);
-        if (watchResult.data.intro) {
-          setIntroStartTime(watchResult.data.intro.start);
-          setIntroEndTime(watchResult.data.intro.end);
-        }
-        if (watchResult.data.outro) {
-          setOutroStartTime(watchResult.data.outro.start);
-          setOutroEndTime(watchResult.data.outro.end);
-        }
-      }
-
-      // Process sources
-      const allSources = watchResult.data.sources || [];
-      console.log(`📊 RAW SOURCES:`, allSources.length);
-
-      if (allSources.length > 0) {
-        // Format sources with headers
-        const formattedSources = allSources.map((source: any) => 
-          formatSourceWithHeaders(source, watchResult.data.headers || {}, type)
-        );
-        
-        console.log(`✅ Found ${type.toUpperCase()} sources: ${formattedSources.length}`);
-        
-        // Create direct subtitles array from API response
-        let directSubtitles: Subtitle[] = watchResult.data.subtitles || [];
-        
-        if (directSubtitles.length > 0) {
-          const subLangs = directSubtitles.map((sub: any) => sub.lang).join(', ');
-          console.log(`✅ Subtitles available: ${directSubtitles.length} - Languages: ${subLangs}`);
-          setSubtitles(directSubtitles);
-        } else {
-          console.log(`ℹ️ No subtitles available`);
-          setSubtitles([]);
-        }
-        
-        // Update sources state for UI
-        setSources(formattedSources);
-        
-        // Determine if we should show source selection or auto-select
-        const hasMultipleSources = formattedSources.length > 1;
-        const shouldShowSelection = hasMultipleSources && !shouldAutoSelect;
-        
-        console.log(`📊 Multiple sources available: ${hasMultipleSources}`);
-        console.log(`📊 Should show selection: ${shouldShowSelection}`);
-        
-        if (shouldShowSelection) {
-          // Check if this is from Zoro provider and get both SUB/DUB servers
-          const isZoroProvider = successfulProvider.includes('Zoro') || successfulProvider.includes('HiAnime');
-          
-          if (isZoroProvider && anilistId) {
-            console.log(`📊 Zoro provider detected, checking for SUB/DUB server options...`);
-            
-            try {
-              // Get all server options for both SUB and DUB
-              const allServerOptions = await zoroProvider.getAllServerOptions(episodeId);
-              
-              if (allServerOptions.sub.length > 0 || allServerOptions.dub.length > 0) {
-                console.log(`📊 Found SUB servers: ${allServerOptions.sub.length}, DUB servers: ${allServerOptions.dub.length}`);
-                
-                // Store all server options for the modal
-                setAvailableQualities([]);
-                setSubtitles(directSubtitles);
-                setTimings(directTimings || null);
-                
-                // Set special flag for Zoro multi-server view
-                setShowQualitySelection(true);
-                setLoading(false);
-                
-                // Store server options in state (we'll use a different approach)
-                (window as any).zoroServerOptions = {
-                  sub: allServerOptions.sub,
-                  dub: allServerOptions.dub,
-                  subtitles: directSubtitles,
-                  timings: directTimings
-                };
-                
-                console.log(`📊 Prepared Zoro server selection with SUB/DUB sections`);
-                return;
-              }
-            } catch (error) {
-              console.warn(`❌ Failed to get Zoro server options, falling back to regular selection:`, error);
-            }
-          }
-          
-          // Fallback to regular quality selection for non-Zoro or if Zoro server fetch failed
-          const qualityOptions = formattedSources.map((source: Source, index: number) => {
-            // Check if this is from Zoro provider (has server name in quality)
-            const isZoroSource = source.quality && source.quality.includes('HD-');
-            
-            return {
-              quality: source.quality || `Source ${index + 1}`,
-              url: source.url,
-              isDefault: index === 0, // First source is default
-              headers: source.headers,
-              isZoroServer: isZoroSource
-            };
-          });
-          
-          // Sort sources: Zoro servers first (HD-1, HD-2, etc.), then others
-          qualityOptions.sort((a: typeof qualityOptions[0], b: typeof qualityOptions[0]) => {
-            if (a.isZoroServer && !b.isZoroServer) return -1;
-            if (!a.isZoroServer && b.isZoroServer) return 1;
-            
-            if (a.isZoroServer && b.isZoroServer) {
-              // Sort HD servers numerically (HD-1, HD-2, HD-3)
-              const getHDNumber = (quality: string) => {
-                const match = quality.match(/HD-(\d+)/);
-                return match ? parseInt(match[1], 10) : 999;
-              };
-              return getHDNumber(a.quality) - getHDNumber(b.quality);
-            }
-            
-            // For non-Zoro sources, sort by quality numbers
-            const getQualityNumber = (q: string) => {
-              const match = q.match(/(\d+)p/);
-              return match ? parseInt(match[1], 10) : 0;
-            };
-            return getQualityNumber(b.quality) - getQualityNumber(a.quality);
-          });
-          
-          setAvailableQualities(qualityOptions);
-          setShowQualitySelection(true);
-          setLoading(false);
-          
-          // Store subtitles and timings for later use
-          setSubtitles(directSubtitles);
-          setTimings(directTimings || null);
-          
-          console.log(`📊 Prepared ${qualityOptions.length} server/quality options for user selection`);
-          return;
-        } else {
-          // Auto-select mode or single source - proceed with automatic selection
-          setPillMessage(`Loading ${type} version from ${successfulProvider}...`);
-          
-          // Prefer HLS (m3u8) streams if available and setting is enabled
-          let selectedSource: Source | null = null;
-          
-          if (sourceSettings.preferHLSStreams) {
-            selectedSource = formattedSources.find((source: Source) => source.isM3U8) || null;
-            if (selectedSource) {
-              console.log(`✅ Selected HLS (m3u8) stream for ${type} from ${successfulProvider}`);
-            }
-          }
-          
-          // Fallback to first available source if no HLS found or HLS not preferred
-          if (!selectedSource) {
-            selectedSource = formattedSources[0];
-            if (selectedSource) {
-              console.log(`✅ Selected ${selectedSource.isM3U8 ? 'HLS' : 'direct'} stream for ${type} from ${successfulProvider}`);
-            }
-          }
-          
-          if (selectedSource) {
-            handleDirectSourceSelect(selectedSource, directSubtitles, directTimings, anilistId);
-            return;
-          }
-        }
-      } else {
-        console.log(`❌ No sources available from any provider`);
-        
-        // If we're looking for dub and auto-select is enabled, automatically try sub
-        if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion) {
-          console.log(`🔄 Auto-fallback: No DUB sources available, trying SUB...`);
-          setPillMessage('Dub sources not available, loading sub...');
-          return fetchSources(episodeId, 'sub');
-        }
-        
-        throw new Error(`No ${type} version available from any provider`);
-      }
-      
-      console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
-
-      // Update pill message to reflect current status
-      if (shouldAutoSelect) {
-        setPillMessage(`Found episode ${episodeNum} from ${successfulProvider}...`);
-      }
     } catch (error) {
-      console.error(`❌ Error:`, error);
-      console.error(`❌ ERROR STACK TRACE:`, error instanceof Error ? error.stack : 'No stack trace');
-      
-      // If we're looking for dub and auto-select is enabled, automatically try sub as last resort
-      if (type === 'dub' && shouldAutoSelect && sourceSettings.autoTryAlternateVersion && !error?.toString().includes('SUB')) {
-        console.log(`🔄 Final auto-fallback: DUB failed with error, trying SUB as last resort...`);
-        setPillMessage('Dub failed, trying sub...');
-        return fetchSources(episodeId, 'sub');
-      }
-      
+      console.error(`❌ [SOURCES_MODAL] Outer catch - Error:`, error);
       setError(error instanceof Error ? error.message : 'Failed to fetch sources');
-      console.log(`=== END EPISODE SOURCES MODAL DEBUG ===\n`);
       
-      // Update pill message for errors
-      if (shouldAutoSelect) {
-        setPillMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load'}`);
-        // Auto-hide pill after error is shown
-        setTimeout(() => setPillVisible(false), 3000);
-      }
-      
-      // If we're in auto-select mode and encounter an error, close the modal
       if (shouldAutoSelect) {
         onClose();
       }
@@ -1035,8 +957,8 @@ export default function EpisodeSourcesModal({
     console.log('\n=== SOURCE SELECT DEBUG (DIRECT DATA) ===');
     console.log('[SOURCE SELECT DEBUG] Source URL:', source.url.substring(0, 50) + '...');
     console.log('[SOURCE SELECT DEBUG] Episode ID:', episodeId);
-    console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumber || '');
-    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumber ? parseInt(episodeNumber) : undefined);
+    console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumberStr);
+    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumberStr ? parseInt(episodeNumberStr) : undefined);
     console.log('[SOURCE SELECT DEBUG] Anime ID:', animeId || '');
     console.log('[SOURCE SELECT DEBUG] AniList ID:', anilistId || 'Not provided');
     console.log('[SOURCE SELECT DEBUG] URL Format:', episodeId.includes('/') ? 'New (animeId/episodeNumber)' : 'Legacy');
@@ -1082,7 +1004,7 @@ export default function EpisodeSourcesModal({
       source: source.url,
       headers: source.headers,
       episodeId: episodeId,
-      episodeNumber: episodeNumber ? parseInt(episodeNumber) : undefined,
+      episodeNumber: episodeNumberStr ? parseInt(episodeNumberStr) : undefined,
       subtitles: directSubtitles || [],
       timings: directTimings || null,
       anilistId: anilistId || '',
@@ -1096,7 +1018,7 @@ export default function EpisodeSourcesModal({
     
     // Update pill message before navigating
     if (autoSelectSource) {
-      setPillMessage(`Starting Episode ${episodeNumber || ''}...`);
+      setPillMessage(`Starting Episode ${episodeNumberStr}...`);
     }
     
     // Close the modal if auto-selecting
@@ -1106,7 +1028,7 @@ export default function EpisodeSourcesModal({
     
     // Close current modal and pass data back to caller
     // IMPORTANT: Use direct data references instead of state
-    onSelectSource(source.url, source.headers, episodeId, episodeNumber || '', directSubtitles, directTimings, anilistId, dataKey);
+    onSelectSource(source.url, source.headers, episodeId, episodeNumberStr, directSubtitles, directTimings, anilistId, dataKey);
   };
 
   // Similarly update the handleSourceSelect function
@@ -1120,8 +1042,8 @@ export default function EpisodeSourcesModal({
     console.log('\n=== SOURCE SELECT DEBUG (STATE DATA) ===');
     console.log('[SOURCE SELECT DEBUG] Source URL:', source.url.substring(0, 50) + '...');
     console.log('[SOURCE SELECT DEBUG] Episode ID:', episodeId);
-    console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumber || '');
-    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumber ? parseInt(episodeNumber) : undefined);
+    console.log('[SOURCE SELECT DEBUG] Episode Number:', episodeNumberStr);
+    console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumberStr ? parseInt(episodeNumberStr) : undefined);
     console.log('[SOURCE SELECT DEBUG] Anime ID:', animeId || '');
     console.log('[SOURCE SELECT DEBUG] AniList ID:', anilistId || 'Not provided');
     
@@ -1155,7 +1077,7 @@ export default function EpisodeSourcesModal({
       source: source.url,
       headers: source.headers,
       episodeId: episodeId,
-      episodeNumber: episodeNumber ? parseInt(episodeNumber) : undefined,
+      episodeNumber: episodeNumberStr ? parseInt(episodeNumberStr) : undefined,
       subtitles: currentSubtitles || [],
       timings: videoTimings || null,
       anilistId: anilistId || '',
@@ -1174,7 +1096,7 @@ export default function EpisodeSourcesModal({
     
     // Close current modal and pass data back to caller
     // Use the captured subtitles to avoid race conditions
-    onSelectSource(source.url, source.headers, episodeId, episodeNumber || '', currentSubtitles, videoTimings, anilistId, dataKey);
+    onSelectSource(source.url, source.headers, episodeId, episodeNumberStr, currentSubtitles, videoTimings, anilistId, dataKey);
   };
 
   const handleTypeSelect = (selectedType: 'sub' | 'dub') => {
@@ -1187,31 +1109,63 @@ export default function EpisodeSourcesModal({
   // Handle Zoro server selection for SUB/DUB
   const handleZoroServerSelect = async (server: any, serverType: 'sub' | 'dub') => {
     try {
-      console.log(`[ZoroServerSelect] Selected ${server.name} (${serverType})`);
+      console.log(`[ZoroServerSelect] 🚀 User selected ${server.name} (${serverType}) - Now processing streams...`);
       
-      // Get watch data for this specific server
+      // Show processing message
+      setServerProcessingMessage(`Processing ${server.name} server...`);
+      setLoading(true);
+      setError(null);
+      
+      // NOW do the heavy processing for just this selected server
+      console.log(`[ZoroServerSelect] 🔄 Processing stream data for ${server.name}...`);
+      
+      // Get watch data for this specific server type
       const watchData = await zoroProvider.getWatchData(episodeId, serverType === 'dub');
       
       if (watchData && watchData.sources && watchData.sources.length > 0) {
-        // Find the source from this specific server
+        console.log(`[ZoroServerSelect] ✅ Stream processing complete for ${server.name}`);
+        console.log(`[ZoroServerSelect] 📊 Found ${watchData.sources.length} sources, ${watchData.subtitles?.length || 0} subtitles`);
+        
+        // Update processing message
+        setServerProcessingMessage(`Loading video from ${server.name}...`);
+        
+        // Find the source from this specific server or use the first one
         const serverSource = watchData.sources.find((source: any) => 
           source.quality && source.quality.includes(server.name)
         ) || watchData.sources[0];
         
-        const formattedSource = formatSourceWithHeaders(serverSource, watchData.headers || {}, serverType);
+        console.log(`[ZoroServerSelect] 🎯 Selected source: ${serverSource.quality || 'Default'}`);
         
-        // Get stored data
-        const storedData = (window as any).zoroServerOptions;
-        const directSubtitles = storedData?.subtitles || [];
-        const directTimings = storedData?.timings;
+        console.log(`[ZORO_SERVER_SELECT] 🔧 Formatting source with Zoro headers (proxy handled by provider)...`);
+        const formattedSource = formatSourceWithHeaders(serverSource, watchData.headers || {}, serverType, 'zoro');
         
+        // Create timings object from watch data
+        const directTimings: VideoTimings | undefined = (watchData.intro || watchData.outro) ? {
+          intro: watchData.intro,
+          outro: watchData.outro
+        } : undefined;
+        
+        const directSubtitles = watchData.subtitles || [];
+        
+        console.log(`[ZoroServerSelect] 📋 Final data ready:`, {
+          hasTimings: Boolean(directTimings),
+          subtitleCount: directSubtitles.length,
+          subtitleLangs: directSubtitles.map((s: any) => s.lang).join(', ')
+        });
+        
+        // Clear processing message
+        setServerProcessingMessage('');
+        
+        // Process and send to player
         handleDirectSourceSelect(formattedSource, directSubtitles, directTimings, anilistId);
       } else {
-        throw new Error(`No sources available from ${server.name}`);
+        throw new Error(`No streams available from ${server.name}`);
       }
     } catch (error) {
-      console.error(`[ZoroServerSelect] Error selecting ${server.name}:`, error);
+      console.error(`[ZoroServerSelect] ❌ Error processing ${server.name}:`, error);
       setError(`Failed to load ${server.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setServerProcessingMessage('');
+      setLoading(false);
     }
   };
 
@@ -1280,17 +1234,6 @@ export default function EpisodeSourcesModal({
               🎬 All servers provide HLS streaming with auto quality adaptation
             </Text>
           </View>
-          
-          <ReanimatedTouchableOpacity
-            style={styles.backButton}
-            onPress={() => {
-              setShowQualitySelection(false);
-              // Clear stored options
-              delete (window as any).zoroServerOptions;
-            }}
-          >
-            <Text style={styles.backButtonText}>← Go Back</Text>
-          </ReanimatedTouchableOpacity>
         </View>
       );
     }
@@ -1362,16 +1305,6 @@ export default function EpisodeSourcesModal({
             💡 HLS streams typically offer better stability and quality adaptation
           </Text>
         </View>
-        
-        <ReanimatedTouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            setShowQualitySelection(false);
-            setType(type); // Reset back to type selection
-          }}
-        >
-          <Text style={styles.backButtonText}>← Go Back</Text>
-        </ReanimatedTouchableOpacity>
       </View>
     );
   };
@@ -1411,10 +1344,10 @@ export default function EpisodeSourcesModal({
       // Check AnimePahe provider if anime title is available
       if (animeTitle && (!subAvailable || !dubAvailable)) {
         try {
-          const paheAvailable = await animePaheProvider.checkEpisodeAvailability(animeTitle, parseInt(episodeNum));
-          if (!subAvailable) subAvailable = paheAvailable;
-          if (!dubAvailable) dubAvailable = paheAvailable; // AnimePahe supports both
-          console.log(`📊 [ANIMEPAHE] Availability: SUB=${paheAvailable}, DUB=${paheAvailable}`);
+          const paheAvailability = await animePaheProvider.checkEpisodeAvailability(animeTitle, parseInt(episodeNum));
+          if (!subAvailable) subAvailable = paheAvailability.sub;
+          if (!dubAvailable) dubAvailable = paheAvailability.dub; // AnimePahe only provides SUB
+          console.log(`📊 [ANIMEPAHE] Availability: SUB=${paheAvailability.sub}, DUB=${paheAvailability.dub}`);
         } catch (error) {
           console.log(`❌ [ANIMEPAHE] Availability check failed:`, error);
         }
@@ -1440,9 +1373,12 @@ export default function EpisodeSourcesModal({
       <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
         <BlurView intensity={20} tint="dark" style={styles.blurContainer}>
           <Animated.View style={[styles.content, { transform: [{ scale: scaleAnim }] }]}>
-            {autoSelectSource ? (
-              // Show simplified UI with prominent loading for auto-select mode
-              <AutoLoadingMessage episodeNumber={episodeNumber} onClose={onClose} />
+            {showQualitySelection ? (
+              // Quality selection UI - PRIORITIZE this over auto-select
+              <QualitySelectionView />
+            ) : (autoSelectSource || skipTypeSelection) && !showQualitySelection ? (
+              // Show simplified UI with prominent loading for auto-select mode ONLY when we don't have server options yet
+              <AutoLoadingMessage episodeNumber={episodeNumberStr} onClose={onClose} />
             ) : loading ? (
               // Regular loading UI for manual mode
               <View style={styles.loadingContainer}>
@@ -1452,7 +1388,7 @@ export default function EpisodeSourcesModal({
                   </View>
                   <View style={styles.loadingTextContainer}>
                     <Reanimated.Text style={styles.loadingText}>
-                      {LoadingMessages[Math.floor(Math.random() * LoadingMessages.length)]}
+                      {serverProcessingMessage || LoadingMessages[Math.floor(Math.random() * LoadingMessages.length)]}
                     </Reanimated.Text>
                     <LoadingProgress />
                   </View>
@@ -1479,11 +1415,15 @@ export default function EpisodeSourcesModal({
                   <Text style={styles.retryButtonText}>Retry</Text>
                 </ReanimatedTouchableOpacity>
               </View>
-            ) : showQualitySelection ? (
-              // Quality selection UI
-              <QualitySelectionView />
+            ) : skipTypeSelection ? (
+              // Skip type selection - this shouldn't normally be reached as we should go to quality selection or auto-select
+              <View style={styles.typeSelection}>
+                <Text style={styles.title}>Loading Sources...</Text>
+                <Text style={styles.subtitle}>Fetching {type.toUpperCase()} version</Text>
+                <LoadingSpinner />
+              </View>
             ) : (
-              // Type selection UI 
+              // Type selection UI (only shown when skipTypeSelection is false)
               <View style={styles.typeSelection}>
                 <ReanimatedTouchableOpacity 
                   style={styles.closeButtonTop}
@@ -1522,7 +1462,7 @@ export default function EpisodeSourcesModal({
       </Animated.View>
       
       {/* Also keep the pill for additional subtle feedback */}
-      {autoSelectSource && (
+      {(autoSelectSource || skipTypeSelection) && (
         <AutoSelectPill 
           visible={pillVisible} 
           message={pillMessage} 
@@ -1814,20 +1754,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 14,
     fontWeight: '500',
-  },
-  backButton: {
-    backgroundColor: 'rgba(30, 30, 30, 0.8)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  backButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    opacity: 0.8,
   },
   shimmer: {
     width: '100%',

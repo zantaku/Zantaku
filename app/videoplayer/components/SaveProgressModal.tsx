@@ -22,6 +22,7 @@ interface SaveProgressModalProps {
     token: string;
     avatar?: string;
   };
+  onSaveTimestampOnly?: () => void;
 }
 
 export default function SaveProgressModal({
@@ -36,7 +37,8 @@ export default function SaveProgressModal({
   duration,
   anilistId,
   isSavingProgress = false,
-  anilistUser
+  anilistUser,
+  onSaveTimestampOnly
 }: SaveProgressModalProps) {
   const [rememberChoice, setRememberChoice] = useState(false);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
@@ -54,61 +56,30 @@ export default function SaveProgressModal({
         showAniListButton: Boolean(anilistId && onSaveToAniList),
         hasAnilistUser: Boolean(anilistUser),
         anilistUserId: anilistUser?.userId || 'Not provided',
-        anilistUsername: anilistUser?.username || 'Not provided'
+        anilistUsername: anilistUser?.username || 'Not provided',
+        currentTime: currentTime ? `${Math.floor(currentTime / 60)}:${Math.floor(currentTime % 60).toString().padStart(2, '0')}` : 'Not provided',
+        duration: duration ? `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}` : 'Not provided'
       });
     }
-  }, [isVisible, anilistId, onSaveToAniList, anilistUser]);
+  }, [isVisible, anilistId, onSaveToAniList, anilistUser, currentTime, duration]);
   
   if (!isVisible) return null;
   
   // Determine if we should show the AniList button
   const hasAniList = Boolean(anilistId && onSaveToAniList && anilistUser?.token);
+  
+  // Format time for display
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  const progressText = currentTime && duration 
+    ? `at ${formatTime(currentTime)} / ${formatTime(duration)}`
+    : '';
 
-  if (showSaveOptions) {
-    // Show the secondary modal with save options
-    return (
-      <BlurView
-        style={styles.modalBlur}
-        intensity={MODAL_STYLES.BLUR_INTENSITY}
-        tint="dark"
-      >
-        <View style={styles.modalCard}>
-          <Text style={styles.title}>Save To:</Text>
-          
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity 
-              onPress={() => onSave(rememberChoice)} 
-              style={styles.saveBtn}
-            >
-              <Text style={styles.saveBtnText}>Local Storage</Text>
-            </TouchableOpacity>
-            
-            {hasAniList && (
-              <TouchableOpacity 
-                style={[styles.anilistBtn, isSavingProgress && styles.buttonDisabled]}
-                onPress={() => onSaveToAniList && onSaveToAniList(rememberChoice)}
-                disabled={isSavingProgress}
-              >
-                {isSavingProgress ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.saveBtnText}>AniList</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          <TouchableOpacity 
-            onPress={() => setShowSaveOptions(false)} 
-            style={styles.cancelBtn}
-          >
-            <Text style={styles.cancelBtnText}>Back</Text>
-          </TouchableOpacity>
-        </View>
-      </BlurView>
-    );
-  }
-
+  // NEW: Main modal UI - simplified to show the primary choice
   return (
     <BlurView
       style={styles.modalBlur}
@@ -116,50 +87,81 @@ export default function SaveProgressModal({
       tint="dark"
     >
       <View style={styles.modalCard}>
-        <Text style={styles.title}>Save Progress?</Text>
+        <Text style={styles.title}>
+          {hasAniList ? 'Save to AniList?' : 'Save Progress?'}
+        </Text>
         
         <Text style={styles.body}>
-          Would you like to save your progress before leaving?
-          {episodeNumber ? ` (Episode ${episodeNumber})` : ''}
+          {animeName ? `${animeName} ` : ''}
+          {episodeNumber ? `Episode ${episodeNumber}` : ''}
+          {progressText && <Text style={styles.progressText}>{'\n'}{progressText}</Text>}
         </Text>
 
-        <View style={styles.toggleRow}>
-          <TouchableOpacity 
-            style={styles.toggleContainer}
-            onPress={() => setRememberChoice(!rememberChoice)}
-          >
-            <View style={[styles.toggleTrack, rememberChoice && styles.toggleTrackActive]}>
-              <View style={[styles.toggleThumb, rememberChoice && styles.toggleThumbActive]} />
-            </View>
-            <Text style={styles.toggleText}>Remember my choice</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.threeButtonRow}>
-          <TouchableOpacity onPress={onCancel} style={styles.cancelBtnSmall}>
-            <Text style={styles.cancelBtnText}>Cancel</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={onExitWithoutSaving || onCancel} 
-            style={styles.noBtn}
-          >
-            <Text style={styles.noBtnText}>No</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={() => {
-              if (hasAniList) {
-                setShowSaveOptions(true);
-              } else {
-                onSave(rememberChoice);
-              }
-            }} 
-            style={styles.yesBtn}
-          >
-            <Text style={styles.yesBtnText}>Yes</Text>
-          </TouchableOpacity>
-        </View>
+        {hasAniList ? (
+          // NEW: AniList save flow
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity 
+              onPress={() => {
+                console.log('[SAVE_MODAL] 📱 User chose "No, Exit" - saving timestamp only');
+                if (onSaveTimestampOnly) {
+                  onSaveTimestampOnly();
+                } else {
+                  // Fallback to local save
+                  onSave(false);
+                }
+              }} 
+              style={styles.noBtn}
+            >
+              <Text style={styles.noBtnText}>No, Exit</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.yesBtn, isSavingProgress && styles.buttonDisabled]}
+              onPress={() => {
+                console.log('[SAVE_MODAL] ✅ User chose "Yes, Save & Exit" - saving to AniList');
+                if (onSaveToAniList) {
+                  onSaveToAniList(rememberChoice);
+                }
+              }}
+              disabled={isSavingProgress}
+            >
+              {isSavingProgress ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.yesBtnText}>Yes, Save & Exit</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          // Original flow for non-AniList users
+          <View style={styles.threeButtonRow}>
+            <TouchableOpacity onPress={onCancel} style={styles.cancelBtnSmall}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              onPress={onExitWithoutSaving || onCancel} 
+              style={styles.noBtn}
+            >
+              <Text style={styles.noBtnText}>No</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              onPress={() => onSave(rememberChoice)} 
+              style={styles.yesBtn}
+            >
+              <Text style={styles.yesBtnText}>Yes</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {/* Info text for clarity */}
+        {hasAniList && (
+          <Text style={styles.infoText}>
+            "No" saves your position locally{'\n'}
+            "Yes" marks as watched on AniList
+          </Text>
+        )}
       </View>
     </BlurView>
   );
@@ -198,6 +200,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
     opacity: 0.9,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#ADD8E6',
+    marginTop: 4,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -241,8 +248,10 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   buttonContainer: {
+    flexDirection: 'row',
     width: '100%',
     marginBottom: 16,
+    gap: 12,
   },
   cancelBtnSmall: {
     flex: 1,
@@ -264,7 +273,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 100, 100, 0.8)',
-    marginHorizontal: 4,
     alignItems: 'center',
   },
   noBtnText: {
@@ -278,7 +286,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 8,
     backgroundColor: PLAYER_COLORS.PRIMARY,
-    marginLeft: 4,
     alignItems: 'center',
   },
   yesBtnText: {
@@ -319,5 +326,12 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  infoText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 }); 

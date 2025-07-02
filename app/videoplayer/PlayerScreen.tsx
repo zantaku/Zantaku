@@ -32,6 +32,7 @@ import {
   StatusBar,
   Animated,
   ToastAndroid,
+  TouchableOpacity,
 } from 'react-native';
 import * as ExpoVideo from 'expo-video';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -65,6 +66,7 @@ import {
   STORAGE_KEYS,
   DEBUG,
   AUTO_DETECT_TIMING,
+  MODAL_STYLES,
 } from './constants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -183,6 +185,10 @@ const PlayerScreen: React.FC = () => {
   const [currentSubtitle, setCurrentSubtitle] = useState<string>('');
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [subtitlePosition, setSubtitlePosition] = useState({ x: 0, y: 120 });
+  
+  // NEW: Resume state
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [savedTimestamp, setSavedTimestamp] = useState<number | null>(null);
   
   // Optimized subtitle lookup with binary search and caching
   const currentSubtitleIndexRef = useRef<number>(-1);
@@ -714,8 +720,24 @@ const PlayerScreen: React.FC = () => {
           }
         } else {
           // Fallback to direct params
+          console.log('🎬 [PLAYER] No dataKey found, using direct params:', {
+            hasSource: Boolean(params.source),
+            hasUrl: Boolean(params.url),
+            sourcePreview: params.source ? (params.source as string).substring(0, 50) + '...' : 'none',
+            urlPreview: params.url ? (params.url as string).substring(0, 50) + '...' : 'none'
+          });
+          
+          // Handle both 'source' and 'url' parameters for backward compatibility
+          let sourceUrl = params.source as string || params.url as string;
+          
+          // Remove extra quotes if double-stringified
+          if (sourceUrl && sourceUrl.startsWith('"') && sourceUrl.endsWith('"')) {
+            sourceUrl = sourceUrl.slice(1, -1);
+            console.log('🔧 [PLAYER] Removed extra quotes from source URL');
+          }
+          
           data = {
-            source: params.url as string,
+            source: sourceUrl,
             headers: params.headers ? JSON.parse(params.headers as string) : undefined,
             subtitles: params.subtitles ? JSON.parse(params.subtitles as string) : [],
             timings: params.timings ? JSON.parse(params.timings as string) : undefined,
@@ -724,6 +746,13 @@ const PlayerScreen: React.FC = () => {
             animeTitle: params.animeTitle as string,
             anilistId: params.anilistId as string,
           };
+          
+          console.log('🎬 [PLAYER] Created fallback video data:', {
+            hasSource: Boolean(data.source),
+            sourcePreview: data.source ? data.source.substring(0, 50) + '...' : 'none',
+            episodeId: data.episodeId,
+            episodeNumber: data.episodeNumber
+          });
         }
 
         if (data && data.source) {
@@ -763,6 +792,32 @@ const PlayerScreen: React.FC = () => {
               if (progressData.currentTime > 30) { // Only resume if more than 30 seconds
                 setCurrentTime(progressData.currentTime);
               }
+            }
+          }
+          
+          // NEW: Check for saved timestamp for resume functionality
+          if (data.anilistId && data.episodeNumber) {
+            const timestampKey = `progress_anilist_${data.anilistId}_ep_${data.episodeNumber}`;
+            try {
+              const savedTimestampData = await AsyncStorage.getItem(timestampKey);
+              if (savedTimestampData) {
+                const timestampData = JSON.parse(savedTimestampData);
+                console.log('[PLAYER_SCREEN] 🕒 Found saved timestamp:', {
+                  timestamp: timestampData.timestamp,
+                  episodeNumber: timestampData.episodeNumber,
+                  savedAt: new Date(timestampData.savedAt).toLocaleString()
+                });
+                
+                // Only offer resume if timestamp is significant (> 30 seconds) and not near the end
+                if (timestampData.timestamp > 30 && 
+                    timestampData.duration && 
+                    timestampData.timestamp < timestampData.duration - 60) {
+                  setSavedTimestamp(timestampData.timestamp);
+                  setShowResumeModal(true);
+                }
+              }
+            } catch (error) {
+              console.error('[PLAYER_SCREEN] ❌ Error checking for saved timestamp:', error);
             }
           }
         } else {
@@ -1139,11 +1194,12 @@ const PlayerScreen: React.FC = () => {
   const [contentFitMode, setContentFitMode] = useState<"contain" | "cover" | "fill">("contain");
   
   const handleToggleFullscreen = useCallback(() => {
-    // For expo-video, we need to use contentFit property
-    const contentFitModes = ["contain", "cover", "fill"] as const;
-    const modeNames = ['Fit', 'Fill', 'Stretch'];
+    // For expo-video, we use contentFit property
+    type ContentFitMode = "contain" | "cover";
+    const contentFitModes: ContentFitMode[] = ["contain", "cover"]; // Removed 'fill' to prevent stretching
+    const modeNames = ['Fit', 'Fill'];
     
-    const currentIndex = contentFitModes.indexOf(contentFitMode);
+    const currentIndex = contentFitModes.indexOf(contentFitMode as ContentFitMode);
     const nextIndex = (currentIndex + 1) % contentFitModes.length;
     const nextMode = contentFitModes[nextIndex];
     
@@ -1151,7 +1207,7 @@ const PlayerScreen: React.FC = () => {
     setContentFitMode(nextMode);
     
     // Also update the old scaling mode for compatibility
-    const oldResizeModes = [ResizeMode.CONTAIN, ResizeMode.COVER, ResizeMode.STRETCH];
+    const oldResizeModes = [ResizeMode.CONTAIN, ResizeMode.COVER];
     setScalingMode(oldResizeModes[nextIndex]);
     
     console.log(`📺 Video resize mode: ${modeNames[nextIndex]}`);
@@ -1163,31 +1219,17 @@ const PlayerScreen: React.FC = () => {
         ToastAndroid.SHORT,
         ToastAndroid.CENTER
       );
-    } 
+    }
     
-    // For iOS, we'll just use the console log for now
-    // We could implement a custom toast component if needed
-    
-    // Force update the VideoView - try multiple approaches
+    // Force update the VideoView
     if (videoRef.current) {
-      // Method 1: Try setNativeProps
       try {
-        if (videoRef.current.setNativeProps) {
-          videoRef.current.setNativeProps({ contentFit: nextMode });
-        }
+        videoRef.current.setNativeProps({ contentFit: nextMode });
       } catch (error) {
-        console.warn('Could not set native props on VideoView', error);
+        console.warn('Could not update video scaling mode', error);
+        // Force remount as fallback
+        setVideoKey(prevKey => prevKey + 1);
       }
-      
-      // Method 2: Try direct property update
-      try {
-        videoRef.current.contentFit = nextMode;
-      } catch (error) {
-        console.warn('Could not update contentFit directly', error);
-      }
-      
-      // Method 3: Force remount by toggling a key
-      setVideoKey(prevKey => prevKey + 1);
     }
   }, [contentFitMode]);
   
@@ -1212,6 +1254,23 @@ const PlayerScreen: React.FC = () => {
     }
 
     try {
+      // First save timestamp locally (for resume functionality)
+      if (videoData.episodeNumber) {
+        const timestampData = {
+          timestamp: currentTime,
+          episodeNumber: videoData.episodeNumber,
+          anilistId: videoData.anilistId,
+          duration: duration,
+          savedAt: Date.now(),
+          animeTitle: videoData.animeTitle || '',
+        };
+        
+        const key = `progress_anilist_${videoData.anilistId}_ep_${videoData.episodeNumber}`;
+        await AsyncStorage.setItem(key, JSON.stringify(timestampData));
+        console.log('[PLAYER_SCREEN] 🕒 Saved timestamp before AniList sync');
+      }
+      
+      // Then save to AniList
       const success = await onSaveToAniList({
         anilistId: videoData.anilistId,
         episodeNumber: videoData.episodeNumber || 1,
@@ -1221,6 +1280,13 @@ const PlayerScreen: React.FC = () => {
 
       if (success) {
         console.log('[PLAYER_SCREEN] ✅ Successfully saved to AniList');
+        
+        // Clear the timestamp after successful AniList save (episode is marked as watched)
+        if (videoData.episodeNumber) {
+          const key = `progress_anilist_${videoData.anilistId}_ep_${videoData.episodeNumber}`;
+          await AsyncStorage.removeItem(key);
+          console.log('[PLAYER_SCREEN] 🧹 Cleared timestamp after AniList save');
+        }
       }
     } catch (error) {
       console.error('[PLAYER_SCREEN] ❌ Failed to save to AniList:', error);
@@ -1268,6 +1334,83 @@ const PlayerScreen: React.FC = () => {
     }
   };
 
+  // NEW: Handle timestamp-only save (for "No, Exit" option)
+  const handleSaveTimestampOnly = async () => {
+    if (!videoData?.anilistId || !videoData?.episodeNumber) {
+      console.log('[PLAYER_SCREEN] ⚠️ Cannot save timestamp: missing anilistId or episode number');
+      setShowSaveProgressModal(false);
+      handleExit();
+      return;
+    }
+
+    try {
+      // Save timestamp with AniList ID and episode number for resume functionality
+      const timestampData = {
+        timestamp: currentTime,
+        episodeNumber: videoData.episodeNumber,
+        anilistId: videoData.anilistId,
+        duration: duration,
+        savedAt: Date.now(),
+        animeTitle: videoData.animeTitle || '',
+      };
+      
+      const key = `progress_anilist_${videoData.anilistId}_ep_${videoData.episodeNumber}`;
+      await AsyncStorage.setItem(key, JSON.stringify(timestampData));
+      
+      console.log('[PLAYER_SCREEN] 🕒 Saved timestamp for resume:', {
+        key,
+        timestamp: currentTime,
+        episodeNumber: videoData.episodeNumber,
+        anilistId: videoData.anilistId
+      });
+      
+    } catch (error) {
+      console.error('[PLAYER_SCREEN] ❌ Failed to save timestamp:', error);
+    } finally {
+      setShowSaveProgressModal(false);
+      handleExit();
+    }
+  };
+
+  // Add window dimensions calculation
+  const window = Dimensions.get('window');
+  const [dimensions, setDimensions] = useState({
+    width: window.width,
+    height: window.height
+  });
+
+  // Handle dimension changes (orientation changes)
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      setDimensions({
+        width: window.width,
+        height: window.height
+      });
+    });
+
+    return () => subscription?.remove();
+  }, []);
+
+  // Calculate video dimensions maintaining 16:9 aspect ratio
+  const videoStyle = useMemo(() => {
+    const aspectRatio = 16 / 9;
+    let width = dimensions.width;
+    let height = width / aspectRatio;
+
+    // If calculated height is greater than screen height, scale down
+    if (height > dimensions.height) {
+      height = dimensions.height;
+      width = height * aspectRatio;
+    }
+
+    return {
+      width,
+      height,
+      alignSelf: 'center',
+      backgroundColor: '#000000',
+    };
+  }, [dimensions]);
+
   if (isLoading || !videoData) {
     return (
       <View style={styles.loadingContainer}>
@@ -1280,39 +1423,22 @@ const PlayerScreen: React.FC = () => {
     <View style={styles.container}>
       <StatusBar hidden={true} />
       
-      {/* System PiP Video Player - VideoView for native PiP support */}
-      <VideoView
-        key={`video-view-${videoKey}`}
-        ref={videoRef}
-        style={styles.video}
-        player={videoPlayer}
-        allowsFullscreen={true}
-        allowsPictureInPicture={true}
-        startsPictureInPictureAutomatically={false}
-        nativeControls={false}
-        contentFit={contentFitMode}
-        onPictureInPictureStart={handlePiPStart}
-        onPictureInPictureStop={handlePiPStop}
-      />
-      
-      {/* Fallback: Original expo-av Video Player (commented out but kept for reference) */}
-      {/* <Video
-        ref={videoRef}
-        style={styles.video}
-        source={{
-          uri: videoSource,
-          headers: videoData.headers,
-        }}
-        shouldPlay={!paused}
-        isLooping={false}
-        resizeMode={scalingMode as ResizeMode}
-        onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-        rate={playbackSpeed}
-        volume={preferences.volume}
-        shouldRasterizeIOS={false}
-        useNativeControls={false}
-        progressUpdateIntervalMillis={500}
-      /> */}
+      {/* Video container with proper centering */}
+      <View style={styles.videoContainer}>
+        <VideoView
+          key={`video-view-${videoKey}`}
+          ref={videoRef}
+          style={videoStyle}
+          player={videoPlayer}
+          allowsFullscreen={true}
+          allowsPictureInPicture={true}
+          startsPictureInPictureAutomatically={false}
+          nativeControls={false}
+          contentFit="contain"
+          onPictureInPictureStart={handlePiPStart}
+          onPictureInPictureStop={handlePiPStop}
+        />
+      </View>
 
       {/* Double Tap Overlay for Seeking */}
       <DoubleTapOverlay
@@ -1386,7 +1512,72 @@ const PlayerScreen: React.FC = () => {
         </View>
       )}
       
+      {/* Exit Modal */}
+      {showExitModal && (
+        <EnhancedExitModal
+          visible={showExitModal}
+          onExit={handleExit}
+          onCancel={() => setShowExitModal(false)}
+          onSave={() => {
+            setShowSaveProgressModal(true);
+            setShowExitModal(false);
+          }}
+          isSaving={false}
+          saveError={null}
+          isIncognito={false}
+          episodeProgress={duration > 0 ? currentTime / duration : 0}
+        />
+      )}
 
+      {/* Resume Modal */}
+      {showResumeModal && savedTimestamp !== null && (
+        <BlurView
+          style={styles.modalBlur}
+          intensity={MODAL_STYLES.BLUR_INTENSITY}
+          tint="dark"
+        >
+          <View style={styles.resumeModalCard}>
+            <Text style={styles.resumeTitle}>Resume Playback?</Text>
+            <Text style={styles.resumeBody}>
+              Resume from where you left off?{'\n'}
+              ({Math.floor(savedTimestamp / 60)}:{Math.floor(savedTimestamp % 60).toString().padStart(2, '0')})
+            </Text>
+            
+            <View style={styles.resumeButtonContainer}>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('[PLAYER_SCREEN] 🔄 User chose to start over');
+                  setShowResumeModal(false);
+                  setSavedTimestamp(null);
+                  // Start from beginning
+                  if (videoPlayer) {
+                    videoPlayer.currentTime = 0;
+                  }
+                }} 
+                style={styles.startOverBtn}
+              >
+                <Text style={styles.resumeBtnText}>Start Over</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('[PLAYER_SCREEN] ▶️ User chose to resume from', savedTimestamp);
+                  setShowResumeModal(false);
+                  // Resume from saved timestamp
+                  if (videoPlayer && savedTimestamp) {
+                    videoPlayer.currentTime = savedTimestamp;
+                    setCurrentTime(savedTimestamp);
+                  }
+                  setSavedTimestamp(null);
+                }} 
+                style={styles.resumeBtn}
+              >
+                <Text style={styles.resumeBtnText}>Resume</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </BlurView>
+      )}
 
       {/* Settings Modal */}
       {showSettingsModal && (
@@ -1451,29 +1642,13 @@ const PlayerScreen: React.FC = () => {
           }}
           onSave={(rememberChoice) => handleSaveLocalProgress(rememberChoice, true)}
           onSaveToAniList={anilistUser && videoData?.anilistId ? (rememberChoice) => handleSaveToAniListProgress(rememberChoice, true) : undefined}
+          onSaveTimestampOnly={handleSaveTimestampOnly}
           animeName={videoData.animeTitle}
           episodeNumber={videoData.episodeNumber}
           currentTime={currentTime}
           duration={duration}
           anilistId={videoData.anilistId}
           anilistUser={anilistUser || undefined}
-        />
-      )}
-
-      {/* Exit Modal */}
-      {showExitModal && (
-        <EnhancedExitModal
-          visible={showExitModal}
-          onExit={handleExit}
-          onCancel={() => setShowExitModal(false)}
-          onSave={() => {
-            setShowSaveProgressModal(true);
-            setShowExitModal(false);
-          }}
-          isSaving={false}
-          saveError={null}
-          isIncognito={false}
-          episodeProgress={duration > 0 ? currentTime / duration : 0}
         />
       )}
 
@@ -1488,7 +1663,13 @@ const PlayerScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000', // Pure black background
+    backgroundColor: '#000000',
+  },
+  videoContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
   },
   loadingContainer: {
     flex: 1,
@@ -1501,11 +1682,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   video: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-    backgroundColor: '#000000', // Pure black background for video
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000000',
     // Ensure video maintains aspect ratio and quality
-    overflow: 'hidden',
+    resizeMode: 'contain', // Default to contain for proper scaling
   },
   subtitleContainer: {
     position: 'absolute',
@@ -1521,6 +1703,65 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 4,
     overflow: 'hidden',
+  },
+  modalBlur: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  resumeModalCard: {
+    width: '80%',
+    backgroundColor: 'rgba(13, 27, 42, 0.9)',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 230, 0.2)',
+  },
+  resumeTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  resumeBody: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginBottom: 24,
+    textAlign: 'center',
+    opacity: 0.9,
+  },
+  resumeButtonContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  startOverBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255, 100, 100, 0.8)',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  resumeBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: PLAYER_COLORS.PRIMARY,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  resumeBtnText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#FFFFFF',
   },
 });
 

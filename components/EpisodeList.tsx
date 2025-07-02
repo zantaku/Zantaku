@@ -19,7 +19,8 @@ import {
 } from '../utils/episodeOptimization';
 import { animeProviderManager } from '../api/proxy/providers/anime';
 import { zoroProvider } from '../api/proxy/providers/anime/zorohianime';
-import { 
+import { animePaheProvider } from '../api/proxy/providers/anime/animepahe';
+import {
   getOptimizedListProps, 
   detectDeviceCapabilities, 
   PERFORMANCE_CONFIG,
@@ -83,6 +84,16 @@ interface Episode {
   provider?: string;
   isSubbed?: boolean;
   isDubbed?: boolean;
+  providerIds?: {
+    animepahe?: string;
+    zoro?: string;
+  };
+}
+
+interface EpisodeProgress {
+  timestamp: number;
+  duration: number;
+  percentage: number;
 }
 
 interface EpisodeListProps {
@@ -167,34 +178,52 @@ const OptimizedGridEpisodeCard = memo<{
   coverImage?: string;
   index: number;
   isVisible: boolean;
-}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible }) => {
+  preferredAudioType: 'sub' | 'dub';
+  onAudioError: (episode: Episode, requestedType: 'sub' | 'dub') => void;
+  episodeProgress?: EpisodeProgress;
+}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible, preferredAudioType, onAudioError, episodeProgress }) => {
   const isWatched = useMemo(() => currentProgress >= (episode.number ?? 0), [currentProgress, episode.number]);
   const safeEpisodeNumber = useMemo(() => String(episode?.number ?? '??'), [episode.number]);
   const safeEpisodeTitle = useMemo(() => episode?.title || `Episode ${safeEpisodeNumber}`, [episode.title, safeEpisodeNumber]);
   const formattedDate = useMemo(() => safeFormatDate(episode?.aired, { month: 'short', day: 'numeric' }), [episode.aired]);
 
+  // Check if preferred audio type is available
+  const audioAvailable = useMemo(() => {
+    if (preferredAudioType === 'sub') {
+      return episode.isSubbed === true;
+    } else {
+      return episode.isDubbed === true;
+    }
+  }, [episode.isSubbed, episode.isDubbed, preferredAudioType]);
+
   const handlePress = useCallback(() => {
+    if (!audioAvailable) {
+      onAudioError(episode, preferredAudioType);
+      return;
+    }
     onPress(episode);
-  }, [onPress, episode]);
+  }, [onPress, episode, audioAvailable, preferredAudioType, onAudioError]);
 
   const cardStyle = useMemo(() => [
     styles.gridEpisodeCard, 
-    { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)' }, 
-    isWatched && styles.watchedGridCard
-  ], [isDarkMode, isWatched]);
+    { backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)' }, 
+    isWatched && styles.watchedGridCard,
+    !audioAvailable && styles.unavailableCard
+  ], [isDarkMode, isWatched, audioAvailable]);
 
   return (
     <TouchableOpacity
       style={cardStyle}
       onPress={handlePress}
-      activeOpacity={0.7}
+      activeOpacity={0.8}
     >
+      {/* Thumbnail Section */}
       <View style={styles.gridThumbnailContainer}>
         <OptimizedImage
           uri={episode.image || coverImage || ''}
           width={160}
           height={90}
-          style={[styles.gridEpisodeThumbnail, isWatched && styles.watchedGridThumbnail]}
+          style={[styles.gridEpisodeThumbnail, isWatched && styles.watchedGridThumbnail, !audioAvailable && styles.unavailableThumbnail]}
           placeholder={PLACEHOLDER_BLUR_HASH}
           resizeMode="cover"
           isVisible={isVisible}
@@ -202,21 +231,105 @@ const OptimizedGridEpisodeCard = memo<{
           reduceMemoryUsage={deviceCapabilities.isLowEndDevice}
           index={index}
         />
-        {isWatched && <View style={styles.gridWatchedBadge}><FontAwesome5 name="check" size={8} color="#FFFFFF" /></View>}
-        <View style={styles.gridEpisodeNumberBadge}><Text style={styles.gridEpisodeNumberText}>{safeEpisodeNumber}</Text></View>
-        {(episode.isSubbed || episode.isDubbed) && (
-          <View style={styles.gridAvailabilityContainer}>
-            {episode.isSubbed && <View style={[styles.gridAvailabilityBadge, styles.gridSubBadge]}><Text style={styles.gridAvailabilityText}>SUB</Text></View>}
-            {episode.isDubbed && <View style={[styles.gridAvailabilityBadge, styles.gridDubBadge]}><Text style={styles.gridAvailabilityText}>DUB</Text></View>}
+        
+        {/* Episode Number Badge */}
+        <View style={styles.gridEpisodeNumberBadge}>
+          <Text style={styles.gridEpisodeNumberText}>EP {safeEpisodeNumber}</Text>
+        </View>
+        
+        {/* Watched Indicator */}
+        {isWatched && (
+          <View style={styles.gridWatchedBadge}>
+            <FontAwesome5 name="check" size={10} color="#FFFFFF" />
+          </View>
+        )}
+        
+        {/* Unavailable Warning */}
+        {!audioAvailable && (
+          <View style={styles.gridUnavailableBadge}>
+            <FontAwesome5 name="exclamation-triangle" size={12} color="#FFFFFF" />
           </View>
         )}
       </View>
+
+      {/* Content Section */}
       <View style={styles.gridEpisodeContent}>
-        <Text style={[styles.gridEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>{safeEpisodeTitle}</Text>
-        {formattedDate && <Text style={[styles.gridEpisodeMeta, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>{formattedDate}</Text>}
-        <TouchableOpacity style={[styles.gridWatchButton, isWatched && styles.gridRewatchButton]} onPress={handlePress}>
-          <FontAwesome5 name={isWatched ? "redo" : "play"} size={10} color="#FFFFFF" />
+        {/* Episode Title - Most Prominent */}
+        <Text style={[styles.gridEpisodeTitle, { color: currentTheme.colors.text }, !audioAvailable && styles.unavailableText]} numberOfLines={2}>
+          Ep {safeEpisodeNumber}: {safeEpisodeTitle}
+        </Text>
+        
+        {/* Audio Pills & Meta Row */}
+        <View style={styles.gridMetaRow}>
+          {/* Audio Type Pills */}
+          <View style={styles.gridAudioPills}>
+            {episode.isSubbed && (
+              <View style={[
+                styles.gridAudioPill, 
+                styles.gridSubPill,
+                preferredAudioType === 'sub' && styles.gridPreferredPill
+              ]}>
+                <Text style={styles.gridPillText}>🈸 SUB</Text>
+              </View>
+            )}
+            {episode.isDubbed && (
+              <View style={[
+                styles.gridAudioPill, 
+                styles.gridDubPill,
+                preferredAudioType === 'dub' && styles.gridPreferredPill
+              ]}>
+                <Text style={styles.gridPillText}>🎧 DUB</Text>
+              </View>
+            )}
+          </View>
+          
+          {/* Date */}
+          {formattedDate && (
+            <Text style={[styles.gridDateText, { color: currentTheme.colors.textSecondary }]}>
+              {formattedDate}
+            </Text>
+          )}
+        </View>
+        
+        {/* Watch Button */}
+        <TouchableOpacity 
+          style={[
+            styles.gridWatchButton, 
+            isWatched && styles.gridRewatchButton,
+            !audioAvailable && styles.gridUnavailableButton
+          ]} 
+          onPress={handlePress}
+        >
+          <FontAwesome5 
+            name={!audioAvailable ? "exclamation-triangle" : isWatched ? "redo" : "play"} 
+            size={12} 
+            color="#FFFFFF" 
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.gridWatchButtonText}>
+            {!audioAvailable 
+              ? "Unavailable" 
+              : `${isWatched ? "Rewatch" : "Watch"} (${preferredAudioType === 'sub' ? 'Subbed' : 'Dubbed'})`
+            }
+          </Text>
         </TouchableOpacity>
+        
+        {/* Progress Bar */}
+        {episodeProgress && episodeProgress.percentage > 0 && !isWatched && (
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBarBackground}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { width: `${episodeProgress.percentage}%` }
+                ]} 
+              />
+            </View>
+            <Text style={[styles.progressText, { color: currentTheme.colors.textSecondary }]}>
+              {Math.floor(episodeProgress.timestamp / 60)}:{Math.floor(episodeProgress.timestamp % 60).toString().padStart(2, '0')} / {Math.floor(episodeProgress.duration / 60)}:{Math.floor(episodeProgress.duration % 60).toString().padStart(2, '0')}
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -226,7 +339,10 @@ const OptimizedGridEpisodeCard = memo<{
     prevProps.episode.number === nextProps.episode.number &&
     prevProps.currentProgress === nextProps.currentProgress &&
     prevProps.isVisible === nextProps.isVisible &&
-    prevProps.index === nextProps.index
+    prevProps.index === nextProps.index &&
+    prevProps.preferredAudioType === nextProps.preferredAudioType &&
+    prevProps.episode.isSubbed === nextProps.episode.isSubbed &&
+    prevProps.episode.isDubbed === nextProps.episode.isDubbed
   );
 });
 
@@ -239,34 +355,52 @@ const OptimizedListEpisodeCard = memo<{
   coverImage?: string;
   index: number;
   isVisible: boolean;
-}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible }) => {
+  preferredAudioType: 'sub' | 'dub';
+  onAudioError: (episode: Episode, requestedType: 'sub' | 'dub') => void;
+  episodeProgress?: EpisodeProgress;
+}>(({ episode, onPress, currentProgress, currentTheme, isDarkMode, coverImage, index, isVisible, preferredAudioType, onAudioError, episodeProgress }) => {
   const isWatched = useMemo(() => currentProgress >= (episode.number ?? 0), [currentProgress, episode.number]);
   const safeEpisodeNumber = useMemo(() => String(episode?.number ?? '??'), [episode.number]);
   const safeEpisodeTitle = useMemo(() => episode?.title || `Episode ${safeEpisodeNumber}`, [episode.title, safeEpisodeNumber]);
   const formattedDate = useMemo(() => safeFormatDate(episode?.aired, { month: 'short', day: 'numeric' }), [episode.aired]);
 
+  // Check if preferred audio type is available
+  const audioAvailable = useMemo(() => {
+    if (preferredAudioType === 'sub') {
+      return episode.isSubbed === true;
+    } else {
+      return episode.isDubbed === true;
+    }
+  }, [episode.isSubbed, episode.isDubbed, preferredAudioType]);
+
   const handlePress = useCallback(() => {
+    if (!audioAvailable) {
+      onAudioError(episode, preferredAudioType);
+      return;
+    }
     onPress(episode);
-  }, [onPress, episode]);
+  }, [onPress, episode, audioAvailable, preferredAudioType, onAudioError]);
 
   const cardStyle = useMemo(() => [
     styles.listEpisodeCard, 
     { backgroundColor: currentTheme.colors.surface }, 
-    isWatched && styles.watchedListCard
-  ], [currentTheme.colors.surface, isWatched]);
+    isWatched && styles.watchedListCard,
+    !audioAvailable && styles.unavailableCard
+  ], [currentTheme.colors.surface, isWatched, audioAvailable]);
 
   return (
     <TouchableOpacity
       style={cardStyle}
       onPress={handlePress}
-      activeOpacity={0.7}
+      activeOpacity={0.8}
     >
+      {/* Thumbnail Section */}
       <View style={styles.listThumbnailContainer}>
         <OptimizedImage
           uri={episode.image || coverImage || ''}
           width={120}
           height={68}
-          style={[styles.listEpisodeThumbnail, isWatched && styles.watchedListThumbnail]}
+          style={[styles.listEpisodeThumbnail, isWatched && styles.watchedListThumbnail, !audioAvailable && styles.unavailableThumbnail]}
           placeholder={PLACEHOLDER_BLUR_HASH}
           resizeMode="cover"
           isVisible={isVisible}
@@ -274,25 +408,100 @@ const OptimizedListEpisodeCard = memo<{
           reduceMemoryUsage={deviceCapabilities.isLowEndDevice}
           index={index}
         />
-        {isWatched && <View style={styles.listWatchedBadge}><FontAwesome5 name="check" size={10} color="#FFFFFF" /></View>}
+        
+        {/* Watched Indicator */}
+        {isWatched && (
+          <View style={styles.listWatchedBadge}>
+            <FontAwesome5 name="check" size={10} color="#FFFFFF" />
+          </View>
+        )}
+        
+        {/* Unavailable Warning */}
+        {!audioAvailable && (
+          <View style={styles.listUnavailableBadge}>
+            <FontAwesome5 name="exclamation-triangle" size={12} color="#FFFFFF" />
+          </View>
+        )}
       </View>
+
+      {/* Content Section */}
       <View style={styles.listEpisodeContent}>
-        <Text style={[styles.listEpisodeTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
-          Episode {safeEpisodeNumber}: {safeEpisodeTitle}
+        {/* Episode Title - Most Prominent */}
+        <Text style={[styles.listEpisodeTitle, { color: currentTheme.colors.text }, !audioAvailable && styles.unavailableText]} numberOfLines={2}>
+          Ep {safeEpisodeNumber}: {safeEpisodeTitle}
         </Text>
+        
+        {/* Audio Pills & Meta Row */}
         <View style={styles.listMetaRow}>
-          {formattedDate && <Text style={[styles.listMetaText, { color: currentTheme.colors.textSecondary }]}>{formattedDate}</Text>}
-          {(episode.isSubbed || episode.isDubbed) && (
-            <View style={styles.listAvailabilityContainer}>
-              {episode.isSubbed && <View style={[styles.listAvailabilityBadge, styles.listSubBadge]}><Text style={styles.listAvailabilityText}>SUB</Text></View>}
-              {episode.isDubbed && <View style={[styles.listAvailabilityBadge, styles.listDubBadge]}><Text style={styles.listAvailabilityText}>DUB</Text></View>}
-            </View>
+          {/* Audio Type Pills */}
+          <View style={styles.listAudioPills}>
+            {episode.isSubbed && (
+              <View style={[
+                styles.listAudioPill, 
+                styles.listSubPill,
+                preferredAudioType === 'sub' && styles.listPreferredPill
+              ]}>
+                <Text style={styles.listPillText}>🈸 SUB</Text>
+              </View>
+            )}
+            {episode.isDubbed && (
+              <View style={[
+                styles.listAudioPill, 
+                styles.listDubPill,
+                preferredAudioType === 'dub' && styles.listPreferredPill
+              ]}>
+                <Text style={styles.listPillText}>🎧 DUB</Text>
+              </View>
+            )}
+          </View>
+          
+          {/* Date */}
+          {formattedDate && (
+            <Text style={[styles.listDateText, { color: currentTheme.colors.textSecondary }]}>
+              Aired: {formattedDate}
+            </Text>
           )}
         </View>
-        <TouchableOpacity style={[styles.listWatchButton, isWatched && styles.listRewatchButton]} onPress={handlePress}>
-          <FontAwesome5 name={isWatched ? "redo" : "play"} size={12} color="#FFFFFF" />
-          <Text style={styles.listWatchButtonText}>{isWatched ? "Rewatch" : "Watch"}</Text>
+        
+        {/* Watch Button */}
+        <TouchableOpacity 
+          style={[
+            styles.listWatchButton, 
+            isWatched && styles.listRewatchButton,
+            !audioAvailable && styles.listUnavailableButton
+          ]} 
+          onPress={handlePress}
+        >
+          <FontAwesome5 
+            name={!audioAvailable ? "exclamation-triangle" : isWatched ? "redo" : "play"} 
+            size={12} 
+            color="#FFFFFF" 
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.listWatchButtonText}>
+            {!audioAvailable 
+              ? "Unavailable" 
+              : `${isWatched ? "Rewatch" : "Watch"} (${preferredAudioType === 'sub' ? 'Subbed' : 'Dubbed'})`
+            }
+          </Text>
         </TouchableOpacity>
+        
+        {/* Progress Bar */}
+        {episodeProgress && episodeProgress.percentage > 0 && !isWatched && (
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBarBackground}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { width: `${episodeProgress.percentage}%` }
+                ]} 
+              />
+            </View>
+            <Text style={[styles.progressText, { color: currentTheme.colors.textSecondary }]}>
+              {Math.floor(episodeProgress.timestamp / 60)}:{Math.floor(episodeProgress.timestamp % 60).toString().padStart(2, '0')} / {Math.floor(episodeProgress.duration / 60)}:{Math.floor(episodeProgress.duration % 60).toString().padStart(2, '0')}
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -302,733 +511,824 @@ const OptimizedListEpisodeCard = memo<{
     prevProps.episode.number === nextProps.episode.number &&
     prevProps.currentProgress === nextProps.currentProgress &&
     prevProps.isVisible === nextProps.isVisible &&
-    prevProps.index === nextProps.index
+    prevProps.index === nextProps.index &&
+    prevProps.preferredAudioType === nextProps.preferredAudioType &&
+    prevProps.episode.isSubbed === nextProps.episode.isSubbed &&
+    prevProps.episode.isDubbed === nextProps.episode.isDubbed
   );
 });
-// #endregion
 
-// #region Continue Watching Button Component
-const ContinueWatchingButton = memo(({ 
-    episodes, 
-    currentProgress, 
-    onPress, 
-    currentTheme, 
-    coverImage 
-}: { 
-    episodes: Episode[]; 
-    currentProgress: number; 
-    onPress: (episode: Episode) => void; 
-    currentTheme: any; 
-    coverImage?: string; 
-}) => {
-    // Find the next unwatched episode
-    const nextEpisode = useMemo(() => {
-        if (currentProgress === 0) {
-            // If no progress, start from episode 1 or the first available episode
-            return episodes.find(ep => ep.number === 1) || episodes[0];
-        }
-        
-        // Find the next episode after current progress
-        const sortedEpisodes = [...episodes].sort((a, b) => a.number - b.number);
-        return sortedEpisodes.find(ep => ep.number > currentProgress);
-    }, [episodes, currentProgress]);
-
-    if (!nextEpisode || episodes.length === 0) {
-        return null; // Don't show button if no next episode or no episodes
-    }
-
-    const isFirstEpisode = currentProgress === 0;
-    const episodeNumber = nextEpisode.number;
-    const buttonText = isFirstEpisode ? 'Start Watching' : `Continue Ep. ${episodeNumber}`;
-    const progressText = isFirstEpisode ? 'Begin your journey' : `Last watched: Ep. ${currentProgress}`;
-
-    return (
-        <TouchableOpacity 
-            style={[styles.continueButton, { backgroundColor: currentTheme.colors.surface }]}
-            onPress={() => onPress(nextEpisode)}
-            activeOpacity={0.8}
-        >
-            <View style={styles.continueButtonContent}>
-                <View style={styles.continueThumbnailContainer}>
-                    <Image
-                        source={{ uri: nextEpisode.image || coverImage || '' }}
-                        style={styles.continueThumbnail}
-                        contentFit="cover"
-                        placeholder={PLACEHOLDER_BLUR_HASH}
-                        transition={200}
-                    />
-                    <View style={styles.continueOverlay}>
-                        <FontAwesome5 
-                            name={isFirstEpisode ? "play" : "play-circle"} 
-                            size={24} 
-                            color="#FFFFFF" 
-                        />
-                    </View>
-                </View>
-                <View style={styles.continueTextContainer}>
-                    <Text style={[styles.continueButtonText, { color: currentTheme.colors.text }]}>
-                        {buttonText}
-                    </Text>
-                    <Text style={[styles.continueProgressText, { color: currentTheme.colors.textSecondary }]}>
-                        {progressText}
-                    </Text>
-                    {nextEpisode.title && (
-                        <Text style={[styles.continueEpisodeTitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
-                            {nextEpisode.title}
-                        </Text>
-                    )}
-                </View>
-                <View style={styles.continueArrow}>
-                    <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} />
-                </View>
-            </View>
-        </TouchableOpacity>
-    );
-});
-// #endregion
-
-export default function EpisodeList({ episodes: initialEpisodes, loading: initialLoading, animeTitle, anilistId, malId, coverImage, mangaTitle }: EpisodeListProps) {
-    // #region State and Hooks
-    const { isDarkMode, currentTheme } = useTheme();
+// Main EpisodeList Component
+const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle, anilistId, malId, coverImage, mangaTitle }) => {
+    const { currentTheme, isDarkMode } = useTheme();
     const router = useRouter();
-    
-    // Load source settings
+    const { width } = useWindowDimensions();
     const sourceSettings = useSourceSettings();
-  
-    const [episodes, setEpisodes] = useState<Episode[]>(initialEpisodes || []);
-    const [isLoading, setIsLoading] = useState(initialLoading);
-    const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+    
+    // State for UI
     const [modalVisible, setModalVisible] = useState(false);
-    const [activeTab, setActiveTab] = useState(0);
+    const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
     const [currentProgress, setCurrentProgress] = useState(0);
-    const [airingSchedule, setAiringSchedule] = useState<AiringSchedule | null>(null);
-    const [timeUntilAiring, setTimeUntilAiring] = useState<string>('');
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-    const [columnCount, setColumnCount] = useState<number>(1);
-    const [isNewestFirst, setIsNewestFirst] = useState(true);
-    const [latestEpisodeInfo, setLatestEpisodeInfo] = useState<{ number: number; date: string; source: string; } | null>(null);
-
-    const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState<boolean>(false);
-    const [episodeRanges, setEpisodeRanges] = useState<Episode[][]>([]);
-    const [hiAnimeEpisodesLoaded, setHiAnimeEpisodesLoaded] = useState<boolean>(false);
-    
-    // Provider and search modal state
-    const [currentProvider, setCurrentProvider] = useState<string>('animepahe');
-    const [providerInitialized, setProviderInitialized] = useState<boolean>(false);
+    const [isNewestFirst, setIsNewestFirst] = useState(false);
+    const [columnCount, setColumnCount] = useState(width > 600 ? 2 : 1);
     const [showCorrectAnimeModal, setShowCorrectAnimeModal] = useState(false);
-    const [currentAnimeTitle, setCurrentAnimeTitle] = useState<string>('');
+    const [currentAnimeTitle, setCurrentAnimeTitle] = useState(animeTitle);
+    const [preferredAudioType, setPreferredAudioType] = useState<'sub' | 'dub'>(sourceSettings.preferredType);
     const [showProviderDropdown, setShowProviderDropdown] = useState(false);
-
-    const flashListRef = useRef<FlashList<any>>(null);
-    const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    // #endregion
-
-    // #region Data Fetching and Management Callbacks
-    const fetchUserProgress = useCallback(async () => {
-        if (!anilistId) return;
-        try {
-            const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
-            if (!token) return;
-            const query = `query ($mediaId: Int) { Media(id: $mediaId, type: ANIME) { mediaListEntry { progress } } }`;
-            const response = await axios.post(ANILIST_GRAPHQL_ENDPOINT, { query, variables: { mediaId: parseInt(anilistId) } }, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
-            const progress = response.data?.data?.Media?.mediaListEntry?.progress;
-            if (typeof progress === 'number') {
-                setCurrentProgress(progress);
-            }
-        } catch (error) {
-            console.error('Error fetching user progress:', error);
-        }
-    }, [anilistId]);
+    const [currentProvider, setCurrentProvider] = useState<'animepahe' | 'zoro'>(sourceSettings.defaultProvider);
+    const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false);
+    const [airingSchedule, setAiringSchedule] = useState<AiringSchedule>({});
+    const [episodeRanges, setEpisodeRanges] = useState<Record<string, Episode[]>>({});
+    const [activeTab, setActiveTab] = useState('1-12');
+    const [episodeProgressMap, setEpisodeProgressMap] = useState<Record<string, EpisodeProgress>>({});
     
-    const mergeEpisodes = useCallback((jikanEpisodes: Episode[], zoroEpisodes: any[]): Episode[] => {
-        const episodeMap = new Map<number, Episode>();
-        jikanEpisodes.forEach(ep => episodeMap.set(ep.number, ep));
-        
-        let highestJikanEpisode = jikanEpisodes.reduce((max, ep) => Math.max(max, ep.number), 0);
-        
-        zoroEpisodes.forEach((zoroEp: any) => {
-            if (zoroEp.number && !isNaN(zoroEp.number) && (!episodeMap.has(zoroEp.number) || zoroEp.number > highestJikanEpisode)) {
-                episodeMap.set(zoroEp.number, {
-                    id: zoroEp.id || `zoro-${zoroEp.number}`,
-                    number: zoroEp.number,
-                    title: zoroEp.title || `Episode ${zoroEp.number}`,
-                    image: coverImage,
-                    provider: 'Zoro/HiAnime'
-                });
-            }
-        });
-        
-        return Array.from(episodeMap.values()).sort((a, b) => a.number - b.number);
-    }, [coverImage]);
-
-    const fetchEpisodeAvailability = useCallback(async (animeId: string): Promise<{sub: Episode[], dub: Episode[]}> => {
-        try {
-            const [subResult, dubResult] = await Promise.all([
-                animeProviderManager.getEpisodesFromProvider('zoro', animeId, undefined, false),
-                animeProviderManager.getEpisodesFromProvider('zoro', animeId, undefined, true)
-            ]);
-            return { 
-                sub: subResult.success ? subResult.episodes : [], 
-                dub: dubResult.success ? dubResult.episodes : [] 
-            };
-        } catch (error) {
-            console.error('Error fetching episode availability:', error);
-            return { sub: [], dub: [] };
-        }
+    // NEW: State for provider-specific episodes
+    const [providerEpisodes, setProviderEpisodes] = useState<Episode[]>([]);
+    const [providerLoading, setProviderLoading] = useState(false);
+    const [providerError, setProviderError] = useState<string | null>(null);
+    const [animePaheAnimeId, setAnimePaheAnimeId] = useState<string | null>(null);
+    
+    // Refs for optimization
+    const flashListRef = useRef<any>(null);
+    const lastRefreshTime = useRef(0);
+    
+    // Memory management
+    useEffect(() => {
+        return () => {
+            MemoryManager.clearCache();
+        };
     }, []);
 
-    const fetchEpisodesFromProvider = useCallback(async (forceRefresh: boolean = false) => {
-        const searchTitle = mangaTitle || animeTitle;
-        if (!searchTitle || !anilistId || (!forceRefresh && hiAnimeEpisodesLoaded) || isBackgroundRefreshing) {
-            return; // Prevent multiple simultaneous fetches
-        }
-
-        setIsBackgroundRefreshing(true);
+    // NEW: Function to fetch episodes from selected provider
+    const fetchEpisodesFromProvider = useCallback(async (provider: 'animepahe' | 'zoro') => {
+        console.log(`\n🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH START ===================`);
+        console.log(`[EPISODE_LIST] 🔄 Fetching episodes from provider: ${provider}`);
+        console.log(`[EPISODE_LIST] 📊 Context:`, {
+            animeTitle,
+            anilistId,
+            malId,
+            provider
+        });
+        
+        setProviderLoading(true);
+        setProviderError(null);
+        
         try {
-            console.log(`[EpisodeList] Fetching episodes from ${currentProvider} provider for: ${searchTitle}`);
+            let fetchedEpisodes: Episode[] = [];
             
-            // Get episodes from the selected provider only
-            const providerResult = await animeProviderManager.getEpisodesFromSingleProvider(
-                currentProvider as 'zoro' | 'animepahe',
-                anilistId, 
-                animeTitle, 
-                mangaTitle
-            );
-
-            console.log(`[EpisodeList] Provider result from ${currentProvider}:`, {
-                provider: providerResult.provider,
-                success: providerResult.success,
-                episodeCount: providerResult.episodes.length,
-                error: providerResult.error
-            });
-
-            if (providerResult.success && providerResult.episodes.length > 0) {
-                console.log(`[EpisodeList] Got ${providerResult.episodes.length} episodes from ${currentProvider}`);
+            if (provider === 'animepahe') {
+                if (!animeTitle) {
+                    throw new Error('Anime title is required for AnimePahe provider');
+                }
                 
-                let episodesWithAvailability = providerResult.episodes;
+                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 1: Getting anime ID for: "${animeTitle}"`);
+                const animeId = await animePaheProvider.getAnimeIdByTitle(animeTitle);
                 
-                // If using zoro provider, fetch detailed availability information
-                if (currentProvider === 'zoro') {
-                    console.log(`[EpisodeList] Fetching availability information for zoro provider...`);
-                    
-                    try {
-                        // Get SUB and DUB episodes separately to determine availability
-                        const [subEpisodes, dubEpisodes] = await Promise.allSettled([
-                            zoroProvider.getEpisodes(anilistId, false), // SUB
-                            zoroProvider.getEpisodes(anilistId, true)   // DUB
-                        ]);
-                        
-                        const availableSubEpisodes = subEpisodes.status === 'fulfilled' ? subEpisodes.value : [];
-                        const availableDubEpisodes = dubEpisodes.status === 'fulfilled' ? dubEpisodes.value : [];
-                        
-                        console.log(`[EpisodeList] Zoro availability - SUB: ${availableSubEpisodes.length}, DUB: ${availableDubEpisodes.length}`);
-                        
-                        // Create lookup maps for faster checking
-                        const subEpisodeNumbers = new Set(availableSubEpisodes.map(ep => ep.number));
-                        const dubEpisodeNumbers = new Set(availableDubEpisodes.map(ep => ep.number));
-                        
-                        // Update episodes with availability information
-                        episodesWithAvailability = providerResult.episodes.map(episode => ({
-                            ...episode,
-                            isSubbed: subEpisodeNumbers.has(episode.number),
-                            isDubbed: dubEpisodeNumbers.has(episode.number),
-                            provider: 'Zoro/HiAnime'
-                        }));
-                        
-                        console.log(`[EpisodeList] Updated episodes with availability:`, {
-                            totalEpisodes: episodesWithAvailability.length,
-                            subbedCount: episodesWithAvailability.filter(ep => ep.isSubbed).length,
-                            dubbedCount: episodesWithAvailability.filter(ep => ep.isDubbed).length
-                        });
-                        
-                    } catch (availabilityError) {
-                        console.warn(`[EpisodeList] Failed to fetch zoro availability:`, availabilityError);
-                        // Fallback: assume all episodes have both SUB and DUB available
-                        episodesWithAvailability = providerResult.episodes.map(episode => ({
-                            ...episode,
-                            isSubbed: true,
-                            isDubbed: true,
-                            provider: 'Zoro/HiAnime'
-                        }));
+                if (!animeId) {
+                    throw new Error(`Could not find AnimePahe ID for: ${animeTitle}`);
+                }
+                
+                console.log(`[EPISODE_LIST] ✅ [ANIMEPAHE] Found anime ID: ${animeId}`);
+                setAnimePaheAnimeId(animeId);
+                
+                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 2: Getting episodes for anime ID: ${animeId}`);
+                fetchedEpisodes = await animePaheProvider.getEpisodes(animeId);
+                
+                // Enhance episodes with providerIds
+                fetchedEpisodes = fetchedEpisodes.map(ep => ({
+                    ...ep,
+                    providerIds: {
+                        animepahe: animeId
                     }
-                } else if (currentProvider === 'animepahe') {
-                    console.log(`[EpisodeList] Setting availability for AnimePahe provider (SUB only)...`);
-                    
-                    // AnimePahe only provides subtitled content, no dub
-                    episodesWithAvailability = providerResult.episodes.map(episode => ({
-                        ...episode,
-                        isSubbed: true,  // AnimePahe always has subtitles
-                        isDubbed: false, // AnimePahe never has dub
-                        provider: 'AnimePahe'
-                    }));
-                    
-                    console.log(`[EpisodeList] Updated AnimePahe episodes with availability:`, {
-                        totalEpisodes: episodesWithAvailability.length,
-                        subbedCount: episodesWithAvailability.filter(ep => ep.isSubbed).length,
-                        dubbedCount: episodesWithAvailability.filter(ep => ep.isDubbed).length
-                    });
+                }));
+                
+                console.log(`[EPISODE_LIST] ✅ [ANIMEPAHE] Fetched ${fetchedEpisodes.length} episodes`);
+                if (fetchedEpisodes.length > 0) {
+                    console.log(`[EPISODE_LIST] 📝 [ANIMEPAHE] First few episodes:`, 
+                        fetchedEpisodes.slice(0, 3).map(ep => ({
+                            id: ep.id,
+                            number: ep.number,
+                            title: ep.title,
+                            isSubbed: ep.isSubbed,
+                            isDubbed: ep.isDubbed,
+                            provider: ep.provider,
+                            animeId: ep.providerIds?.animepahe
+                        }))
+                    );
                 } else {
-                    // For other providers, set default availability
-                    console.log(`[EpisodeList] Setting default availability for ${currentProvider} provider...`);
-                    
-                    episodesWithAvailability = providerResult.episodes.map(episode => ({
-                        ...episode,
-                        isSubbed: true,  // Assume SUB is available by default
-                        isDubbed: false, // Assume DUB is not available by default for unknown providers
-                        provider: currentProvider
-                    }));
+                    console.log(`[EPISODE_LIST] ❌ [ANIMEPAHE] No episodes found for anime ID: ${animeId}`);
                 }
                 
-                setEpisodes(episodesWithAvailability);
-                await saveEpisodesToCache(episodesWithAvailability, anilistId, malId, animeTitle);
-            } else {
-                console.warn(`[EpisodeList] Failed to get episodes from ${currentProvider}:`, providerResult.error);
-                // If the selected provider fails, keep existing episodes but show an error
-                if (providerResult.error) {
-                    console.error(`Provider ${currentProvider} error:`, providerResult.error);
+            } else if (provider === 'zoro') {
+                if (!animeTitle) {
+                    throw new Error('Anime title is required for Zoro provider');
+                }
+                
+                const isDub = preferredAudioType === 'dub';
+                console.log(`[EPISODE_LIST] 🔍 [ZORO] Getting episodes for anime title: "${animeTitle}", audio type: ${preferredAudioType.toUpperCase()}`);
+                console.log(`[EPISODE_LIST] 🔄 [ZORO] Using new reliable search+info method (instead of AniList meta)`);
+                fetchedEpisodes = await zoroProvider.getEpisodes(animeTitle, isDub);
+                
+                console.log(`[EPISODE_LIST] ✅ [ZORO] Fetched ${fetchedEpisodes.length} episodes using search+info method`);
+                if (fetchedEpisodes.length > 0) {
+                    console.log(`[EPISODE_LIST] 📝 [ZORO] First few episodes:`, 
+                        fetchedEpisodes.slice(0, 3).map(ep => ({
+                            id: ep.id,
+                            number: ep.number,
+                            title: ep.title,
+                            isSubbed: ep.isSubbed,
+                            isDubbed: ep.isDubbed,
+                            provider: ep.provider
+                        }))
+                    );
+                } else {
+                    console.log(`[EPISODE_LIST] ❌ [ZORO] No episodes found for anime title: "${animeTitle}"`);
                 }
             }
             
-            setHiAnimeEpisodesLoaded(true); // Always mark as loaded after attempt
+            console.log(`[EPISODE_LIST] 📊 Provider episode fetch summary:`, {
+                provider,
+                episodesCount: fetchedEpisodes.length,
+                hasEpisodes: fetchedEpisodes.length > 0,
+                allSubbed: fetchedEpisodes.every(ep => ep.isSubbed),
+                anyDubbed: fetchedEpisodes.some(ep => ep.isDubbed),
+                sampleEpisode: fetchedEpisodes[0] ? {
+                    id: fetchedEpisodes[0].id,
+                    number: fetchedEpisodes[0].number,
+                    title: fetchedEpisodes[0].title,
+                    isSubbed: fetchedEpisodes[0].isSubbed,
+                    isDubbed: fetchedEpisodes[0].isDubbed,
+                    provider: fetchedEpisodes[0].provider
+                } : null
+            });
+            
+            setProviderEpisodes(fetchedEpisodes);
+            
+            console.log(`🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH END ===================\n`);
+            
         } catch (error) {
-            console.error('Error fetching episodes from provider:', error);
-            setHiAnimeEpisodesLoaded(true); // Mark as loaded even on error to prevent infinite retries
+            console.log(`🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH ERROR ===================`);
+            console.error(`[EPISODE_LIST] ❌ Error fetching episodes from ${provider}:`, {
+                errorMessage: (error as any)?.message,
+                errorCode: (error as any)?.code,
+                stack: (error as any)?.stack?.split('\n').slice(0, 3).join('\n')
+            });
+            console.log(`🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH ERROR END ===================\n`);
+            
+            setProviderError(`Failed to fetch episodes from ${provider}: ${(error as any)?.message || 'Unknown error'}`);
+            setProviderEpisodes([]);
         } finally {
-            setIsBackgroundRefreshing(false);
+            setProviderLoading(false);
         }
-    }, [mangaTitle, animeTitle, anilistId, malId, coverImage, hiAnimeEpisodesLoaded, isBackgroundRefreshing, currentProvider]);
+    }, [animeTitle, anilistId]);
 
-    const fetchAiringSchedule = useCallback(async () => {
-        if (!anilistId) return;
-        try {
-            const query = `query ($id: Int) { Media(id: $id, type: ANIME) { nextAiringEpisode { episode, airingAt, timeUntilAiring }, status } }`;
-            const response = await axios.post(ANILIST_GRAPHQL_ENDPOINT, { query, variables: { id: parseInt(anilistId) } });
-            const media = response.data?.data?.Media;
-            if (media?.nextAiringEpisode) {
-                setAiringSchedule({
-                    nextEpisode: media.nextAiringEpisode.episode,
-                    timeUntilAiring: media.nextAiringEpisode.timeUntilAiring,
-                    status: media.status
-                });
-                const timeUntil = media.nextAiringEpisode.timeUntilAiring;
-                if (timeUntil) {
-                    const d = Math.floor(timeUntil / 86400);
-                    const h = Math.floor((timeUntil % 86400) / 3600);
-                    const m = Math.floor((timeUntil % 3600) / 60);
-                    setTimeUntilAiring(`${d > 0 ? `${d}d ` : ''}${h > 0 ? `${h}h ` : ''}${m > 0 && d === 0 ? `${m}m` : ''}`.trim() || 'Soon');
-                }
-            } else {
-                setAiringSchedule({ status: media?.status });
-            }
-        } catch (error) {
-            console.error('Error fetching airing schedule:', error);
-        }
-    }, [anilistId]);
-    // #endregion
-
-    // #region Side Effects
+    // NEW: Effect to fetch episodes when provider changes
     useEffect(() => {
-        fetchUserProgress();
-        fetchAiringSchedule();
-        if (anilistId) {
-            isNotificationEnabled(anilistId).then(setNotificationsEnabled);
+        console.log(`[EPISODE_LIST] 🔄 Provider changed to: ${currentProvider}`);
+        if (currentProvider && (currentProvider !== sourceSettings.defaultProvider || providerEpisodes.length === 0)) {
+            console.log(`[EPISODE_LIST] 🚀 Triggering episode fetch for provider: ${currentProvider}`);
+            fetchEpisodesFromProvider(currentProvider);
         }
-        AsyncStorage.getItem('episodeColumnCount').then(val => {
-            if (val) setColumnCount(Number(val));
-        });
-        // Load sort order preference
-        AsyncStorage.getItem('episodeSortOrder').then(val => {
-            if (val !== null) {
-                setIsNewestFirst(val === 'newest');
-            }
-        });
-        // Load provider settings
-        AsyncStorage.getItem('animeProviderSettings').then(val => {
-            if (val) {
-                const settings = JSON.parse(val);
-                setCurrentProvider(settings.defaultProvider || 'animepahe');
-            }
-            setProviderInitialized(true);
-        });
-        // Reset episodes loaded flag when anime changes
-        setHiAnimeEpisodesLoaded(false);
-        setCurrentAnimeTitle(animeTitle);
-    }, [fetchUserProgress, fetchAiringSchedule, anilistId]);
+    }, [currentProvider, fetchEpisodesFromProvider]);
 
+    // NEW: Effect to refetch episodes when audio type changes for Zoro provider
     useEffect(() => {
-        if (initialEpisodes && initialEpisodes.length > 0) {
-            setEpisodes(initialEpisodes);
-            setIsLoading(false);
+        if (currentProvider === 'zoro' && providerEpisodes.length > 0) {
+            console.log(`[EPISODE_LIST] 🔄 Audio type changed to: ${preferredAudioType} for Zoro provider`);
+            console.log(`[EPISODE_LIST] 🚀 Refetching Zoro episodes for ${preferredAudioType.toUpperCase()}`);
+            fetchEpisodesFromProvider(currentProvider);
+        }
+    }, [preferredAudioType, currentProvider, fetchEpisodesFromProvider]);
+
+    // Audio type availability check - use provider episodes if available, otherwise use props episodes
+    const episodesToCheck = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+    const audioTypeAvailability = useMemo(() => {
+        // For Zoro provider, assume both sub and dub are available since HiAnime supports both
+        if (currentProvider === 'zoro') {
+            console.log(`[EPISODE_LIST] 🔊 Audio availability check (Zoro):`, {
+                provider: currentProvider,
+                episodeSource: providerEpisodes.length > 0 ? 'provider' : 'props',
+                episodeCount: episodesToCheck.length,
+                assumingBothAvailable: true,
+                reason: 'HiAnime/Zoro supports both SUB and DUB'
+            });
+            return { sub: true, dub: true };
         }
         
-        // Cleanup timeout on unmount or when dependencies change
-        return () => {
-            if (fetchTimeoutRef.current) {
-                clearTimeout(fetchTimeoutRef.current);
-                fetchTimeoutRef.current = null;
+        const hasSubbed = episodesToCheck.some(ep => ep.isSubbed === true);
+        const hasDubbed = episodesToCheck.some(ep => ep.isDubbed === true);
+        
+        console.log(`[EPISODE_LIST] 🔊 Audio availability check:`, {
+            provider: currentProvider,
+            episodeSource: providerEpisodes.length > 0 ? 'provider' : 'props',
+            episodeCount: episodesToCheck.length,
+            hasSubbed,
+            hasDubbed,
+            sampleEpisode: episodesToCheck[0] ? {
+                isSubbed: episodesToCheck[0].isSubbed,
+                isDubbed: episodesToCheck[0].isDubbed,
+                provider: episodesToCheck[0].provider
+            } : null
+        });
+        
+        return { sub: hasSubbed, dub: hasDubbed };
+    }, [episodesToCheck, currentProvider, providerEpisodes.length]);
+
+    const canToggle = audioTypeAvailability.sub && audioTypeAvailability.dub;
+
+    // Episode processing and sorting - use provider episodes if available
+    const episodesToProcess = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+    const processedEpisodes = useMemo(() => {
+        if (!episodesToProcess || episodesToProcess.length === 0) return [];
+        
+        console.log(`[EPISODE_LIST] 📋 Processing episodes:`, {
+            source: providerEpisodes.length > 0 ? 'provider' : 'props',
+            count: episodesToProcess.length,
+            isNewestFirst,
+            currentProvider,
+            preferredAudioType
+        });
+        
+        // Apply audio preference filtering only for Zoro provider
+        let filteredEpisodes = episodesToProcess;
+        if (currentProvider === 'zoro') {
+            console.log(`[EPISODE_LIST] 🔊 Applying Zoro audio filtering for ${preferredAudioType.toUpperCase()}...`);
+            
+            const prefersDub = preferredAudioType === 'dub';
+            const matchesAudioType = (ep: Episode) => {
+                // Handle undefined values with defaults
+                const isSubbed = ep.isSubbed ?? true; // assume subbed if undefined
+                const isDubbed = ep.isDubbed ?? false; // assume not dubbed if undefined
+                
+                return prefersDub ? isDubbed === true : isSubbed === true;
+            };
+            
+            const matchingEpisodes = episodesToProcess.filter(matchesAudioType);
+            
+            console.log(`[EPISODE_LIST] 📊 Zoro filtering results:`, {
+                originalCount: episodesToProcess.length,
+                matchingCount: matchingEpisodes.length,
+                preferredType: preferredAudioType,
+                removedCount: episodesToProcess.length - matchingEpisodes.length,
+                willFallback: matchingEpisodes.length === 0
+            });
+            
+            // Use matching episodes if found, otherwise fallback to all episodes
+            if (matchingEpisodes.length > 0) {
+                filteredEpisodes = matchingEpisodes;
+                console.log(`[EPISODE_LIST] ✅ Using ${matchingEpisodes.length} episodes matching ${preferredAudioType.toUpperCase()} preference`);
+            } else {
+                console.warn(`[EPISODE_LIST] ⚠️ No episodes found matching ${preferredAudioType.toUpperCase()}. Using fallback (showing all episodes).`);
+                filteredEpisodes = episodesToProcess;
+            }
+            
+            // Add matchesPreference flag for UI purposes
+            filteredEpisodes = filteredEpisodes.map(ep => ({
+                ...ep,
+                matchesPreference: matchesAudioType(ep)
+            }));
+            
+            // Log sample of final episodes with preference flags
+            if (filteredEpisodes.length > 0) {
+                console.log(`[EPISODE_LIST] 📝 Sample final episodes with preference flags:`, 
+                    filteredEpisodes.slice(0, 3).map(ep => ({
+                        number: ep.number,
+                        title: ep.title,
+                        isSubbed: ep.isSubbed ?? true,
+                        isDubbed: ep.isDubbed ?? false,
+                        matchesPreference: (ep as any).matchesPreference,
+                        preferredType: preferredAudioType
+                    }))
+                );
+                
+                const matchingCount = filteredEpisodes.filter(ep => (ep as any).matchesPreference).length;
+                const nonMatchingCount = filteredEpisodes.length - matchingCount;
+                console.log(`[EPISODE_LIST] 📊 Final preference breakdown: ${matchingCount} matching, ${nonMatchingCount} non-matching (${preferredAudioType.toUpperCase()} preference)`);
+            }
+        } else {
+            console.log(`[EPISODE_LIST] ℹ️ Skipping audio filtering for ${currentProvider} provider`);
+        }
+        
+        const sorted = [...filteredEpisodes].sort((a, b) => {
+            const aNum = a.number ?? 0;
+            const bNum = b.number ?? 0;
+            return isNewestFirst ? bNum - aNum : aNum - bNum;
+        });
+        
+        return sorted;
+    }, [episodesToProcess, isNewestFirst, providerEpisodes.length, currentProvider, preferredAudioType]);
+
+    // Episode ranges for pagination
+    const createEpisodeRanges = useCallback((episodesList: Episode[]) => {
+        const ranges: Record<string, Episode[]> = {};
+        const totalEpisodes = episodesList.length;
+        
+        if (totalEpisodes <= 12) {
+            ranges['All'] = episodesList;
+        } else {
+            // For newest first, we want to start from the highest episode number
+            const rangeSize = 12;
+            const numRanges = Math.ceil(totalEpisodes / rangeSize);
+            
+            for (let i = 0; i < numRanges; i++) {
+                const start = i * rangeSize;
+                const end = Math.min(start + rangeSize, totalEpisodes);
+                const rangeEpisodes = episodesList.slice(start, end);
+                
+                // Calculate the episode numbers for the range label
+                const firstEp = rangeEpisodes[0].number || 0;
+                const lastEp = rangeEpisodes[rangeEpisodes.length - 1].number || 0;
+                
+                // Create range key based on sort order
+                const rangeKey = isNewestFirst
+                    ? `${Math.max(firstEp, lastEp)}-${Math.min(firstEp, lastEp)}`
+                    : `${Math.min(firstEp, lastEp)}-${Math.max(firstEp, lastEp)}`;
+                
+                ranges[rangeKey] = rangeEpisodes;
+            }
+        }
+        
+        return ranges;
+    }, [isNewestFirst]);
+
+    useEffect(() => {
+        const ranges = createEpisodeRanges(processedEpisodes);
+        setEpisodeRanges(ranges);
+        
+        // Set active tab to first available range if current doesn't exist
+        const rangeKeys = Object.keys(ranges);
+        if (rangeKeys.length > 0 && !ranges[activeTab]) {
+            setActiveTab(rangeKeys[0]);
+        }
+    }, [processedEpisodes, createEpisodeRanges, activeTab]);
+
+    // Load episode progress - use correct episodes
+    useEffect(() => {
+        const episodesToUse = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+        
+        const loadEpisodeProgress = async () => {
+            if (!anilistId || episodesToUse.length === 0) return;
+            
+            try {
+                const progressData: Record<string, EpisodeProgress> = {};
+                
+                for (const episode of episodesToUse.slice(0, 20)) { // Load first 20 for performance
+                    const key = `episode_progress_${anilistId}_${episode.number}`;
+                    const stored = await AsyncStorage.getItem(key);
+                    if (stored) {
+                        progressData[episode.id] = JSON.parse(stored);
+                    }
+                }
+                
+                setEpisodeProgressMap(progressData);
+                console.log('[EPISODE_LIST] 📊 Loaded progress for', Object.keys(progressData).length, 'episodes from', providerEpisodes.length > 0 ? 'provider' : 'props');
+            } catch (error) {
+                console.error('[EPISODE_LIST] Failed to load episode progress:', error);
             }
         };
-    }, [initialEpisodes]);
 
-    // Separate effect to fetch episodes only after provider is initialized
-    useEffect(() => {
-        if (providerInitialized && initialEpisodes && initialEpisodes.length > 0 && !hiAnimeEpisodesLoaded && !isBackgroundRefreshing && !fetchTimeoutRef.current) {
-            console.log(`[EpisodeList] Provider initialized (${currentProvider}), scheduling episode fetch...`);
-            fetchTimeoutRef.current = setTimeout(() => {
-                fetchEpisodesFromProvider();
-                fetchTimeoutRef.current = null;
-            }, 1000); // Fetch episodes after a delay
-        }
-    }, [providerInitialized, initialEpisodes, hiAnimeEpisodesLoaded, isBackgroundRefreshing, currentProvider, fetchEpisodesFromProvider]);
+        loadEpisodeProgress();
+    }, [anilistId, episodes, providerEpisodes]);
 
-    useEffect(() => {
-        if (episodes && episodes.length > 0) {
-            const sorted = [...episodes].sort((a, b) => isNewestFirst ? (b.number ?? 0) - (a.number ?? 0) : (a.number ?? 0) - (b.number ?? 0));
-            const ranges = [];
-            for (let i = 0; i < sorted.length; i += 24) {
-                ranges.push(sorted.slice(i, i + 24));
-            }
-            setEpisodeRanges(ranges);
-            if(activeTab >= ranges.length) setActiveTab(0);
-        } else {
-            setEpisodeRanges([]);
-        }
-    }, [episodes, isNewestFirst, activeTab]);
-    
-    useEffect(() => {
-        AsyncStorage.setItem('episodeColumnCount', String(columnCount));
-    }, [columnCount]);
-
-    useEffect(() => {
-        if (hiAnimeEpisodesLoaded) {
-            console.log(`Episodes from ${currentProvider} have been loaded successfully`);
-        }
-    }, [hiAnimeEpisodesLoaded, currentProvider]);
-
-    // Watch for provider changes and re-fetch episodes
-    const prevProviderRef = useRef<string>('');
-    useEffect(() => {
-        if (providerInitialized) {
-            if (prevProviderRef.current === '') {
-                // First time initialization - set the reference but don't fetch
-                prevProviderRef.current = currentProvider;
-                console.log(`[EpisodeList] Initial provider set to: ${currentProvider}`);
-            } else if (currentProvider !== prevProviderRef.current && hiAnimeEpisodesLoaded) {
-                // Provider actually changed - fetch new episodes
-                console.log(`[EpisodeList] Provider changed from ${prevProviderRef.current} to ${currentProvider}, fetching episodes...`);
-                setHiAnimeEpisodesLoaded(false);
-                fetchEpisodesFromProvider(true);
-                prevProviderRef.current = currentProvider;
-            }
-        }
-    }, [currentProvider, hiAnimeEpisodesLoaded, fetchEpisodesFromProvider, providerInitialized]);
-    // #endregion
-
-    // #region Handlers & Callbacks
+    // Event handlers
     const handleEpisodePress = useCallback((episode: Episode) => {
-        setSelectedEpisode(episode);
-        setModalVisible(true);
-    }, []);
-
-    const handleSourceSelect = useCallback(async (sourceUrl: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string) => {
-        if (!selectedEpisode) return;
-        
-        console.log('\n=== EPISODE LIST SOURCE SELECT DEBUG ===');
-        console.log('🎬 Source URL:', sourceUrl ? sourceUrl.substring(0, 50) + '...' : 'none');
-        console.log('📋 Headers received:', headers ? JSON.stringify(headers, null, 2) : 'none');
-        console.log('🎯 Subtitles received:', subtitles ? `${subtitles.length} subtitles` : 'none');
-        console.log('⏱️ Timings received:', timings ? JSON.stringify(timings, null, 2) : 'none');
-        console.log('🔑 DataKey from modal:', dataKey || 'none');
-        console.log('📝 Episode info:', {
-            episodeId,
-            episodeNumber,
-            selectedEpisodeNumber: selectedEpisode.number,
-            anilistId: anilistIdParam || anilistId
+        console.log(`\n🎬 [EPISODE_LIST] EPISODE PRESS ===================`);
+        console.log(`[EPISODE_LIST] 🎬 User clicked episode:`, {
+            number: episode.number,
+            title: episode.title,
+            provider: episode.provider,
+            currentProvider,
+            providerIds: episode.providerIds
         });
         
-        // Generate a new dataKey if none provided (fallback)
-        const finalDataKey = dataKey || `episodelist_${Date.now()}`;
-        
-        try {
-            // Store complete video data for the player to access
-            const completeVideoData = {
-                source: sourceUrl,
-                headers: headers || {},
-                episodeId: episodeId,
-                episodeNumber: episodeNumber || selectedEpisode.number.toString(),
-                subtitles: subtitles || [],
-                timings: timings || null,
-                anilistId: anilistIdParam || anilistId || '',
-                animeTitle: animeTitle || '',
-                timestamp: Date.now()
-            };
-            
-            await AsyncStorage.setItem(finalDataKey, JSON.stringify(completeVideoData));
-            console.log('✅ [EPISODE LIST] Successfully stored complete video data with key:', finalDataKey);
-            console.log('📊 [EPISODE LIST] Stored data summary:', {
-                hasSource: Boolean(completeVideoData.source),
-                hasHeaders: Boolean(completeVideoData.headers && Object.keys(completeVideoData.headers).length > 0),
-                subtitleCount: completeVideoData.subtitles.length,
-                hasTimings: Boolean(completeVideoData.timings),
-                anilistId: completeVideoData.anilistId
-            });
-            
-        } catch (error) {
-            console.error('❌ [EPISODE LIST] Error storing video data:', error);
+        // Generate the episode ID that will be passed to EpisodeSourcesModal
+        let episodeId = '';
+        if (currentProvider === 'zoro') {
+            episodeId = episode.id;
+        } else if (currentProvider === 'animepahe' && episode.providerIds?.animepahe) {
+            episodeId = `${episode.providerIds.animepahe}/episode-${episode.number}`;
+        } else {
+            episodeId = `${anilistId}?ep=${episode.number}`;
         }
         
-        // Navigate to player with complete params
+        console.log(`[EPISODE_LIST] 📡 Episode ID for modal: "${episodeId}"`);
+        console.log(`[EPISODE_LIST] 🎯 This will be used for: https://takiapi.xyz/anime/animepahe/watch/${episodeId}`);
+        console.log(`🎬 [EPISODE_LIST] EPISODE PRESS END ===================\n`);
+        
+        setSelectedEpisode(episode);
+        setModalVisible(true);
+    }, [currentProvider, anilistId]);
+
+    const handleSourceSelect = useCallback((url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string) => {
+        if (!selectedEpisode) return;
+        
+        console.log(`\n🎬 [EPISODE_LIST] SOURCE SELECT ===================`);
+        console.log(`[EPISODE_LIST] 🎬 Source selected from modal:`, {
+            url: url.substring(0, 50) + '...',
+            episodeId,
+            episodeNumber,
+            dataKey,
+            hasHeaders: headers && Object.keys(headers).length > 0,
+            hasSubtitles: subtitles && subtitles.length > 0,
+            hasTimings: Boolean(timings)
+        });
+        
         router.push({
             pathname: '/player',
             params: {
-                source: sourceUrl,
-                episode: episodeId,
-                title: animeTitle,
-                episodeNumber: selectedEpisode.number.toString(),
-                anilistId: anilistIdParam || anilistId || '',
-                dataKey: finalDataKey,
-                // Also pass direct params as backup
-                headers: headers ? JSON.stringify(headers) : '',
-                subtitles: subtitles ? JSON.stringify(subtitles) : '',
-                timings: timings ? JSON.stringify(timings) : ''
-            }
+                episodeId: episodeId, // Use the episodeId from the modal
+                animeTitle: animeTitle,
+                episodeNumber: episodeNumber, // Use the episodeNumber from the modal
+                source: url, // Use the direct URL, not JSON.stringify
+                anilistId: anilistIdParam || anilistId,
+                malId: malId,
+                dataKey: dataKey, // Pass the dataKey for stored data
+            },
         });
         
-        console.log('🚀 [EPISODE LIST] Navigated to player with complete data');
-        console.log('=== END EPISODE LIST SOURCE SELECT DEBUG ===\n');
+        console.log(`[EPISODE_LIST] 🚀 Navigating to player with:`, {
+            episodeId,
+            episodeNumber,
+            dataKey,
+            url: url.substring(0, 50) + '...'
+        });
+        console.log(`🎬 [EPISODE_LIST] SOURCE SELECT END ===================\n`);
         
         setModalVisible(false);
-        setSelectedEpisode(null);
-        if (currentProgress < selectedEpisode.number) {
-            // syncProgress(selectedEpisode.number); // Call your progress sync function here
-        }
-    }, [selectedEpisode, router, animeTitle, anilistId, currentProgress]);
-    
-    const handleSortToggle = useCallback(() => {
-        setIsNewestFirst(prev => {
-            const newValue = !prev;
-            AsyncStorage.setItem('episodeSortOrder', newValue ? 'newest' : 'oldest');
-            return newValue;
-        });
+    }, [selectedEpisode, animeTitle, anilistId, malId, router]);
+
+    const handleAudioTypeToggle = useCallback(() => {
+        if (!canToggle) return;
+        const newType = preferredAudioType === 'sub' ? 'dub' : 'sub';
+        setPreferredAudioType(newType);
+        
+        // Save to settings
+        AsyncStorage.setItem('sourceSettings', JSON.stringify({
+            ...sourceSettings,
+            preferredType: newType
+        })).catch(console.error);
+    }, [preferredAudioType, canToggle, sourceSettings]);
+
+    const handleAudioError = useCallback((episode: Episode, requestedType: 'sub' | 'dub') => {
+        console.log(`[EPISODE_LIST] Audio type ${requestedType} not available for episode ${episode.number}`);
+        // Could show a toast or modal here
     }, []);
-    const handleColumnToggle = useCallback(() => setColumnCount(prev => (prev === 1 ? 2 : 1)), []);
-    
+
+    const handleSortToggle = useCallback(() => {
+        setIsNewestFirst(!isNewestFirst);
+        // Reset active tab to first range when sort order changes
+        const ranges = createEpisodeRanges(processedEpisodes);
+        const rangeKeys = Object.keys(ranges);
+        if (rangeKeys.length > 0) {
+            setActiveTab(rangeKeys[0]);
+        }
+    }, [isNewestFirst, createEpisodeRanges, processedEpisodes]);
+
+    const handleColumnToggle = useCallback(() => {
+        setColumnCount(columnCount === 1 ? 2 : 1);
+    }, [columnCount]);
+
     const handleNotificationToggle = useCallback(async () => {
         if (!anilistId) return;
-        const hasPermission = await requestNotificationPermissions();
-        if (hasPermission) {
-            const item: NotificationItem = {
+        
+        const episodesToUse = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+        
+        try {
+            if (!notificationsEnabled) {
+                const hasPermission = await requestNotificationPermissions();
+                if (!hasPermission) return;
+            }
+            
+            await toggleNotifications({
                 id: anilistId,
-                title: animeTitle,
                 type: 'anime',
-                lastKnownNumber: episodes.reduce((max, ep) => Math.max(max, ep.number), 0),
-                anilistId: anilistId
-            };
-            const isEnabled = await toggleNotifications(item);
-            setNotificationsEnabled(isEnabled);
+                title: animeTitle,
+                lastKnownNumber: Math.max(...episodesToUse.map(ep => ep.number || 0))
+            });
+            
+            const enabled = await isNotificationEnabled(anilistId);
+            setNotificationsEnabled(enabled);
+        } catch (error) {
+            console.error('Failed to toggle notifications:', error);
         }
-    }, [anilistId, animeTitle, episodes]);
+    }, [anilistId, animeTitle, episodes, providerEpisodes, notificationsEnabled]);
 
-    const handleProviderChange = useCallback((newProvider: string) => {
-        setCurrentProvider(newProvider);
-        const settings = { defaultProvider: newProvider };
-        AsyncStorage.setItem('animeProviderSettings', JSON.stringify(settings));
-        // Trigger re-fetch with new provider
-        setHiAnimeEpisodesLoaded(false);
-        fetchEpisodesFromProvider(true); // Force refresh with new provider
-    }, [fetchEpisodesFromProvider]);
+    const handleProviderChange = useCallback((provider: 'animepahe' | 'zoro') => {
+        console.log(`[EPISODE_LIST] 🔄 User changed provider to: ${provider}`);
+        
+        setCurrentProvider(provider);
+        setShowProviderDropdown(false);
+        setIsBackgroundRefreshing(true);
+        
+        // Save to settings
+        AsyncStorage.setItem('sourceSettings', JSON.stringify({
+            ...sourceSettings,
+            defaultProvider: provider
+        })).catch(console.error);
+        
+        console.log(`[EPISODE_LIST] 🚀 Starting episode fetch for ${provider}`);
+        
+        // Actually fetch episodes from the new provider
+        fetchEpisodesFromProvider(provider).finally(() => {
+            setIsBackgroundRefreshing(false);
+            console.log(`[EPISODE_LIST] ✅ Provider change complete for ${provider}`);
+        });
+    }, [sourceSettings, fetchEpisodesFromProvider]);
 
-    const handleAnimeChange = useCallback(() => {
-        setShowCorrectAnimeModal(true);
+    const handleAnimeSelect = useCallback((anime: any) => {
+        setCurrentAnimeTitle(anime.title);
+        setShowCorrectAnimeModal(false);
+        // Additional logic for anime selection if needed
     }, []);
 
-    const handleAnimeSelect = useCallback((animeId: string, poster: string, provider: string) => {
-        setCurrentProvider(provider);
-        setShowCorrectAnimeModal(false);
-        // Here you could implement logic to switch to the selected anime
-        // For now, we'll just update the provider and re-fetch
-        handleProviderChange(provider);
-    }, [handleProviderChange]);
+    // Render functions
+    const getProviderName = useCallback((provider: string) => {
+        return provider === 'animepahe' ? 'AnimePahe' : 'Zoro';
+    }, []);
 
-    const renderItem = useCallback(({ item }: { item: Episode }) => (
-        <View style={styles.cardWrapper}>
-            {columnCount === 1 ? (
-                <OptimizedListEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} index={0} isVisible={true} />
-            ) : (
-                <OptimizedGridEpisodeCard episode={item} onPress={handleEpisodePress} currentProgress={currentProgress} currentTheme={currentTheme} isDarkMode={isDarkMode} coverImage={coverImage} index={0} isVisible={true} />
-            )}
-        </View>
-    ), [columnCount, handleEpisodePress, currentProgress, currentTheme, isDarkMode, coverImage]);
-    // #endregion
-
-    // #region Production-Safe Render Functions
-    const renderTabLabel = useCallback((index: number, range: Episode[]) => {
-        if (!range || range.length === 0) return <Text style={[styles.rangeButtonText, activeTab === index && styles.activeRangeButtonText]}>...</Text>;
-        const first = range[0]?.number;
-        const last = range[range.length - 1]?.number;
-        const label = (typeof first === 'number' && typeof last === 'number') ? (first === last ? String(first) : `${first}-${last}`) : `Range ${index + 1}`;
-        return <Text style={[styles.rangeButtonText, activeTab === index && styles.activeRangeButtonText]} numberOfLines={1}>{label}</Text>;
-    }, [activeTab]);
-
-    const getProviderColor = (provider: string) => {
-        switch (provider) {
-            case 'animepahe': return '#02A9FF';
-            case 'zoro': return '#4CAF50';
-            case 'gogoanime': return '#FF6740';
-            default: return '#02A9FF';
+    const renderItem = useCallback(({ item, index }: { item: Episode; index: number }) => {
+        const isVisible = true; // Could implement viewport detection here
+        const episodeProgress = episodeProgressMap[item.id];
+        
+        if (columnCount === 1) {
+            return (
+                <View style={styles.cardWrapper}>
+                    <OptimizedListEpisodeCard
+                        episode={item}
+                        onPress={handleEpisodePress}
+                        currentProgress={currentProgress}
+                        currentTheme={currentTheme}
+                        isDarkMode={isDarkMode}
+                        coverImage={coverImage}
+                        index={index}
+                        isVisible={isVisible}
+                        preferredAudioType={preferredAudioType}
+                        onAudioError={handleAudioError}
+                        episodeProgress={episodeProgress}
+                    />
+                </View>
+            );
+        } else {
+            return (
+                <View style={styles.cardWrapper}>
+                    <OptimizedGridEpisodeCard
+                        episode={item}
+                        onPress={handleEpisodePress}
+                        currentProgress={currentProgress}
+                        currentTheme={currentTheme}
+                        isDarkMode={isDarkMode}
+                        coverImage={coverImage}
+                        index={index}
+                        isVisible={isVisible}
+                        preferredAudioType={preferredAudioType}
+                        onAudioError={handleAudioError}
+                        episodeProgress={episodeProgress}
+                    />
+                </View>
+            );
         }
-    };
+    }, [columnCount, handleEpisodePress, currentProgress, currentTheme, isDarkMode, coverImage, preferredAudioType, handleAudioError, episodeProgressMap]);
 
-    const getProviderName = (provider: string) => {
-        switch (provider) {
-            case 'animepahe': return 'AnimePahe';
-            case 'zoro': return 'Zoro/HiAnime';
-            case 'gogoanime': return 'GogoAnime';
-            default: return 'Unknown';
-        }
-    };
-
-    const renderProviderChanger = () => (
-        <View style={[styles.providerChanger, { backgroundColor: currentTheme.colors.surface }]}>
-            <View style={styles.providerInfo}>
-                <View style={styles.providerRow}>
-                    <TouchableOpacity 
-                        style={[styles.providerBadge, { backgroundColor: getProviderColor(currentProvider) }]}
-                        onPress={() => setShowProviderDropdown(!showProviderDropdown)}
-                    >
-                        <Text style={styles.providerBadgeText}>{getProviderName(currentProvider)}</Text>
-                        <FontAwesome5 
-                            name={showProviderDropdown ? "chevron-up" : "chevron-down"} 
-                            size={10} 
-                            color="#fff" 
-                            style={{ marginLeft: 6 }}
-                        />
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        style={styles.changeProviderButton}
-                        onPress={() => {
-                            // Cycle through providers
-                            const providers = ['animepahe', 'zoro', 'gogoanime'];
-                            const currentIndex = providers.indexOf(currentProvider);
-                            const nextProvider = providers[(currentIndex + 1) % providers.length];
-                            handleProviderChange(nextProvider);
-                        }}
-                    >
-                        <FontAwesome5 name="sync-alt" size={14} color={currentTheme.colors.text} />
-                    </TouchableOpacity>
+    const renderProviderChanger = () => {
+        return (
+            <View style={[styles.providerChanger, { backgroundColor: currentTheme.colors.surface }]}>
+                <View style={styles.providerInfo}>
+                    <View style={styles.providerRow}>
+                        <View style={[styles.providerBadge, { backgroundColor: currentProvider === 'animepahe' ? '#4CAF50' : '#2196F3' }]}>
+                            <Text style={styles.providerBadgeText}>
+                                {getProviderName(currentProvider)}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.changeProviderButton}
+                            onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+                        >
+                            <FontAwesome5 name="chevron-down" size={14} color={currentTheme.colors.text} />
+                        </TouchableOpacity>
+                    </View>
+                    <View style={styles.animeTitleContainer}>
+                        <Text style={[styles.animeTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
+                            {currentAnimeTitle}
+                        </Text>
+                        <TouchableOpacity onPress={() => setShowCorrectAnimeModal(true)}>
+                            <FontAwesome5 name="edit" size={14} color={currentTheme.colors.textSecondary} />
+                        </TouchableOpacity>
+                    </View>
                 </View>
                 
                 {showProviderDropdown && (
                     <View style={[styles.providerDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
-                        {[
-                            { id: 'animepahe', name: 'AnimePahe', color: '#02A9FF' },
-                            { id: 'zoro', name: 'Zoro/HiAnime', color: '#4CAF50' },
-                            { id: 'gogoanime', name: 'GogoAnime', color: '#FF6740' }
-                        ].map((providerOption) => (
+                        {(['animepahe', 'zoro'] as const).map((provider) => (
                             <TouchableOpacity
-                                key={providerOption.id}
+                                key={provider}
                                 style={[
                                     styles.providerDropdownItem,
-                                    currentProvider === providerOption.id && styles.providerDropdownItemActive,
+                                    currentProvider === provider && styles.providerDropdownItemActive,
                                     { borderBottomColor: currentTheme.colors.border }
                                 ]}
-                                onPress={() => {
-                                    handleProviderChange(providerOption.id);
-                                    setShowProviderDropdown(false);
-                                }}
+                                onPress={() => handleProviderChange(provider)}
                             >
-                                <View style={[styles.providerDropdownBadge, { backgroundColor: providerOption.color }]} />
+                                <View style={[
+                                    styles.providerDropdownBadge,
+                                    { backgroundColor: provider === 'animepahe' ? '#4CAF50' : '#2196F3' }
+                                ]} />
                                 <Text style={[
-                                    styles.providerDropdownText, 
+                                    styles.providerDropdownText,
                                     { color: currentTheme.colors.text },
-                                    currentProvider === providerOption.id && styles.providerDropdownTextActive
+                                    currentProvider === provider && styles.providerDropdownTextActive
                                 ]}>
-                                    {providerOption.name}
+                                    {getProviderName(provider)}
                                 </Text>
-                                {currentProvider === providerOption.id && (
-                                    <FontAwesome5 name="check" size={14} color={providerOption.color} />
+                                {currentProvider === provider && (
+                                    <FontAwesome5 name="check" size={14} color={currentTheme.colors.primary} />
                                 )}
                             </TouchableOpacity>
                         ))}
                     </View>
                 )}
-                
-                <TouchableOpacity 
-                    style={styles.animeTitleContainer}
-                    onPress={handleAnimeChange}
-                >
-                    <Text style={[styles.animeTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
-                        {currentAnimeTitle}
-                    </Text>
-                    <FontAwesome5 name="edit" size={12} color={currentTheme.colors.textSecondary} />
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
-
-    const renderHeader = () => {
-        const formatBannerDate = (dateInput: string | number) => safeFormatDate(String(dateInput), { month: 'short', day: 'numeric' }) || 'a recent date';
-        const hasAiringInfo = airingSchedule || latestEpisodeInfo;
-
-        return (
-            <View>
-                {hasAiringInfo && (
-                    <View style={[styles.latestEpisodeBanner, { backgroundColor: isDarkMode ? 'rgba(2, 169, 255, 0.1)' : 'rgba(2, 169, 255, 0.05)', borderColor: '#02A9FF' }]}>
-                        <View style={styles.latestEpisodeContent}>
-                            <View style={styles.latestEpisodeIconContainer}><FontAwesome5 name="play-circle" size={24} color="#02A9FF" /></View>
-                            <View style={styles.latestEpisodeInfo}>
-                                {latestEpisodeInfo ? (
-                                    <>
-                                        <Text style={[styles.latestEpisodeText, { color: currentTheme.colors.text }]}>{`Latest: Ep ${latestEpisodeInfo.number} - Released ${formatBannerDate(latestEpisodeInfo.date)}`}</Text>
-                                        <Text style={[styles.nextEpisodeText, { color: currentTheme.colors.textSecondary }]}>{`Source: ${latestEpisodeInfo.source}`}</Text>
-                                    </>
-                                ) : airingSchedule?.lastEpisode && (
-                                    <Text style={[styles.latestEpisodeText, { color: currentTheme.colors.text }]}>{`Latest: Episode ${airingSchedule.lastEpisode}`}</Text>
-                                )}
-                                {airingSchedule?.nextEpisode && airingSchedule.status === 'RELEASING' && (
-                                    <Text style={[styles.nextEpisodeText, { color: currentTheme.colors.textSecondary, marginTop: 4 }]}>{`Next: Ep ${airingSchedule.nextEpisode} - Airing in ${timeUntilAiring || 'soon'}`}</Text>
-                                )}
-                            </View>
-                        </View>
-                    </View>
-                )}
-                {episodeRanges.length > 1 && (
-                    <FlatList horizontal data={episodeRanges} keyExtractor={(_, index) => `range-${index}`} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rangeSelector}
-                        renderItem={({ item, index }) => (
-                            <TouchableOpacity style={[styles.rangeButton, activeTab === index && styles.activeRangeButton]} onPress={() => setActiveTab(index)}>
-                                {renderTabLabel(index, item)}
-                            </TouchableOpacity>
-                        )} />
-                )}
             </View>
         );
     };
-    // #endregion
+
+    const renderHeader = () => {
+        const rangeKeys = Object.keys(episodeRanges);
+        if (rangeKeys.length <= 1) return null;
+
+        return (
+            <FlatList
+                data={rangeKeys}
+                renderItem={({ item }) => (
+                    <TouchableOpacity
+                        style={[
+                            styles.rangeButton,
+                            activeTab === item && styles.activeRangeButton
+                        ]}
+                        onPress={() => setActiveTab(item)}
+                    >
+                        <Text style={[
+                            styles.rangeButtonText,
+                            activeTab === item && styles.activeRangeButtonText
+                        ]}>
+                            {item}
+                        </Text>
+                    </TouchableOpacity>
+                )}
+                keyExtractor={(item) => item}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rangeSelector}
+            />
+        );
+    };
+
+    const ContinueWatchingButton = ({ episodes, currentProgress, onPress, currentTheme, coverImage, preferredAudioType }: any) => {
+        const nextEpisode = episodes.find((ep: Episode) => ep.number === currentProgress + 1);
+        if (!nextEpisode) return null;
+
+        return (
+            <TouchableOpacity
+                style={[styles.continueButton, { backgroundColor: currentTheme.colors.surface }]}
+                onPress={() => onPress(nextEpisode)}
+            >
+                <View style={styles.continueButtonContent}>
+                    <View style={styles.continueThumbnailContainer}>
+                        <OptimizedImage
+                            uri={nextEpisode.image || coverImage || ''}
+                            width={80}
+                            height={60}
+                            style={styles.continueThumbnail}
+                            placeholder={PLACEHOLDER_BLUR_HASH}
+                            resizeMode="cover"
+                            isVisible={true}
+                            priority="high"
+                            reduceMemoryUsage={false}
+                            index={0}
+                        />
+                        <View style={styles.continueOverlay}>
+                            <FontAwesome5 name="play" size={20} color="#FFFFFF" />
+                        </View>
+                    </View>
+                    <View style={styles.continueTextContainer}>
+                        <Text style={[styles.continueButtonText, { color: currentTheme.colors.text }]}>
+                            Continue Watching
+                        </Text>
+                        <Text style={[styles.continueProgressText, { color: currentTheme.colors.textSecondary }]}>
+                            Episode {nextEpisode.number} • {preferredAudioType === 'sub' ? 'Subbed' : 'Dubbed'}
+                        </Text>
+                        <Text style={[styles.continueEpisodeTitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+                            {nextEpisode.title || `Episode ${nextEpisode.number}`}
+                        </Text>
+                    </View>
+                    <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} style={styles.continueArrow} />
+                </View>
+            </TouchableOpacity>
+        );
+    };
+
+    const AudioTypeToggle = () => {
+        return (
+            <View style={styles.audioToggleContainer}>
+                <TouchableOpacity
+                    style={[
+                        styles.audioToggleButton,
+                        !canToggle && styles.audioToggleDisabled,
+                        { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }
+                    ]}
+                    onPress={canToggle ? handleAudioTypeToggle : undefined}
+                    disabled={!canToggle}
+                >
+                    <View style={styles.audioToggleContent}>
+                        <Text style={[
+                            styles.audioToggleText,
+                            preferredAudioType === 'sub' && styles.audioToggleTextActive,
+                            !audioTypeAvailability.sub && styles.audioToggleTextDisabled,
+                            { color: currentTheme.colors.text }
+                        ]}>
+                            SUB
+                        </Text>
+                        <View style={[
+                            styles.audioToggleSwitch,
+                            preferredAudioType === 'dub' && styles.audioToggleSwitchDub,
+                            !canToggle && styles.audioToggleSwitchDisabled
+                        ]}>
+                            <View style={[
+                                styles.audioToggleSwitchThumb,
+                                preferredAudioType === 'dub' && styles.audioToggleSwitchThumbDub
+                            ]} />
+                        </View>
+                        <Text style={[
+                            styles.audioToggleText,
+                            preferredAudioType === 'dub' && styles.audioToggleTextActive,
+                            !audioTypeAvailability.dub && styles.audioToggleTextDisabled,
+                            { color: currentTheme.colors.text }
+                        ]}>
+                            DUB
+                        </Text>
+                    </View>
+                    {!audioTypeAvailability.dub && (
+                        <Text style={[styles.audioToggleHint, { color: currentTheme.colors.textSecondary }]}>
+                            SUB only
+                        </Text>
+                    )}
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
     // #region Main Return
-    if (isLoading && episodes.length === 0) {
+    // Show loading if either main loading or provider loading
+    const isLoading = loading || providerLoading || isBackgroundRefreshing;
+    const episodesToShow = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+    
+    console.log(`[EPISODE_LIST] 🎬 Render state check:`, {
+        mainLoading: loading,
+        providerLoading,
+        isBackgroundRefreshing,
+        isLoading,
+        mainEpisodesCount: episodes.length,
+        providerEpisodesCount: providerEpisodes.length,
+        episodesToShowCount: episodesToShow.length,
+        currentProvider,
+        providerError
+    });
+    
+    if (isLoading && episodesToShow.length === 0) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={currentTheme.colors.primary} />
-                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>Loading Episodes...</Text>
+                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>
+                    {providerLoading ? `Loading episodes from ${getProviderName(currentProvider)}...` : 'Loading Episodes...'}
+                </Text>
             </View>
         );
     }
     
-    if (!isLoading && episodes.length === 0) {
-        if (isBackgroundRefreshing) {
-            return (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={currentTheme.colors.primary} />
-                    <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>Loading episodes from {getProviderName(currentProvider)}...</Text>
-                </View>
-            );
-        }
-        
+    // Show provider error if exists
+    if (providerError && episodesToShow.length === 0) {
+        return (
+            <View style={styles.emptyEpisodes}>
+                <FontAwesome5 name="exclamation-triangle" size={48} color={isDarkMode ? '#ff6666' : '#ff4444'} />
+                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>
+                    {providerError}
+                </Text>
+                <TouchableOpacity 
+                    style={[styles.headerButton, { backgroundColor: currentTheme.colors.primary, marginTop: 16 }]}
+                    onPress={() => fetchEpisodesFromProvider(currentProvider)}
+                >
+                    <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Retry</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
+    
+    if (!isLoading && episodesToShow.length === 0) {
         return (
             <View style={styles.emptyEpisodes}>
                 <FontAwesome5 name="video-slash" size={48} color={isDarkMode ? '#666' : '#ccc'} />
-                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>No episodes available from {getProviderName(currentProvider)} for this series yet.</Text>
+                <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>
+                    No episodes available from {getProviderName(currentProvider)} for this series yet.
+                </Text>
             </View>
         );
     }
@@ -1046,23 +1346,36 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
             )}
             {renderProviderChanger()}
             <ContinueWatchingButton 
-                episodes={episodes}
+                episodes={episodesToShow}
                 currentProgress={currentProgress}
                 onPress={handleEpisodePress}
                 currentTheme={currentTheme}
                 coverImage={coverImage}
+                preferredAudioType={preferredAudioType}
             />
             <View style={styles.headerWrapper}>
                 <View style={styles.header}>
                     <Text style={[styles.titleText, { color: currentTheme.colors.text }]}>Episodes</Text>
                     <View style={styles.headerButtons}>
-                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleSortToggle}><FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={16} color={currentTheme.colors.text} /></TouchableOpacity>
-                        <TouchableOpacity style={[styles.notificationButton, notificationsEnabled && styles.notificationButtonEnabled]} onPress={handleNotificationToggle}><FontAwesome5 name={notificationsEnabled ? "bell" : "bell-slash"} size={16} color={notificationsEnabled ? "#FFFFFF" : currentTheme.colors.text} /></TouchableOpacity>
-                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleColumnToggle}><FontAwesome5 name={columnCount === 1 ? "th-large" : "th-list"} size={16} color={currentTheme.colors.text} /></TouchableOpacity>
+                        <AudioTypeToggle />
+                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleSortToggle}>
+                            <FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={16} color={currentTheme.colors.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.notificationButton, notificationsEnabled && styles.notificationButtonEnabled]} onPress={handleNotificationToggle}>
+                            <FontAwesome5 name={notificationsEnabled ? "bell" : "bell-slash"} size={16} color={notificationsEnabled ? "#FFFFFF" : currentTheme.colors.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleColumnToggle}>
+                            <FontAwesome5 name={columnCount === 1 ? "th-large" : "th-list"} size={16} color={currentTheme.colors.text} />
+                        </TouchableOpacity>
                     </View>
                 </View>
                 {renderHeader()}
-                {isBackgroundRefreshing && <View style={styles.backgroundRefreshIndicator}><ActivityIndicator size="small" color="#02A9FF" /><Text style={styles.backgroundRefreshText}>Updating from {getProviderName(currentProvider)}...</Text></View>}
+                {isBackgroundRefreshing && (
+                    <View style={styles.backgroundRefreshIndicator}>
+                        <ActivityIndicator size="small" color="#02A9FF" />
+                        <Text style={styles.backgroundRefreshText}>Updating from {getProviderName(currentProvider)}...</Text>
+                    </View>
+                )}
             </View>
 
             <FlashList
@@ -1081,16 +1394,20 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 episodeId={selectedEpisode ? (
                     currentProvider === 'zoro' 
                         ? selectedEpisode.id  // Use actual episode ID for Zoro (e.g., "episode$1304")
-                        : `${anilistId}?ep=${selectedEpisode.number}`  // Keep legacy format for other providers
+                        : currentProvider === 'animepahe' && selectedEpisode.providerIds?.animepahe
+                            ? `${selectedEpisode.providerIds.animepahe}/episode-${selectedEpisode.number}`  // AnimePahe format: {anime_id}/episode-{num}
+                            : `${anilistId}?ep=${selectedEpisode.number}`  // Legacy format fallback
                 ) : ''}
-                animeTitle={animeTitle}
                 onClose={() => setModalVisible(false)}
                 onSelectSource={handleSourceSelect}
-                preferredType={sourceSettings.preferredType}
+                preferredType={preferredAudioType}
+                animeTitle={animeTitle}
                 anilistId={anilistId}
                 malId={malId}
                 mangaTitle={mangaTitle}
                 currentProvider={currentProvider}
+                skipTypeSelection={true}
+                episodeNumber={selectedEpisode?.number}
             />
 
             <CorrectAnimeSearchModal
@@ -1099,12 +1416,14 @@ export default function EpisodeList({ episodes: initialEpisodes, loading: initia
                 onSelectAnime={handleAnimeSelect}
                 initialQuery={currentAnimeTitle}
                 currentProvider={currentProvider}
-                onProviderChange={handleProviderChange}
+                onProviderChange={(provider: string) => handleProviderChange(provider as 'animepahe' | 'zoro')}
             />
         </View>
     );
     // #endregion
-}
+};
+
+export default EpisodeList;
 
 const styles = StyleSheet.create({
     container: { flex: 1, width: '100%' },
@@ -1133,51 +1452,226 @@ const styles = StyleSheet.create({
     backgroundRefreshText: { fontSize: 12, color: '#02A9FF', fontWeight: '500' },
     listContentContainer: { paddingHorizontal: 10, paddingBottom: Platform.OS === 'ios' ? 100 : 90 },
     cardWrapper: { flex: 1, padding: 6 },
-    gridEpisodeCard: { backgroundColor: '#1c1c1e', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
+    // Modern Grid Card Styles
+    gridEpisodeCard: { 
+        backgroundColor: '#1c1c1e', 
+        borderRadius: 16, 
+        overflow: 'hidden', 
+        shadowColor: '#000', 
+        shadowOpacity: 0.4, 
+        shadowRadius: 8, 
+        shadowOffset: { width: 0, height: 4 }, 
+        elevation: 8,
+        marginBottom: 4,
+    },
     gridThumbnailContainer: { width: '100%', aspectRatio: 16 / 9, position: 'relative' },
     gridEpisodeThumbnail: { width: '100%', height: '100%' },
-    gridWatchedBadge: { position: 'absolute', top: 6, right: 6, backgroundColor: '#02A9FF', width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#1c1c1e' },
-    gridEpisodeNumberBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-    gridEpisodeNumberText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-    gridAvailabilityContainer: { position: 'absolute', top: 6, left: 6, flexDirection: 'row', gap: 4 },
-    gridAvailabilityBadge: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
-    gridSubBadge: { backgroundColor: 'rgba(76, 175, 80, 0.9)' },
-    gridDubBadge: { backgroundColor: 'rgba(255, 152, 0, 0.9)' },
-    gridAvailabilityText: { color: '#FFFFFF', fontSize: 9, fontWeight: 'bold' },
-    gridEpisodeContent: { padding: 8 },
-    gridEpisodeTitle: { fontSize: 13, fontWeight: '600', minHeight: 32 },
-    gridEpisodeMeta: { fontSize: 11, marginTop: 4 },
-    gridWatchButton: { marginTop: 8, backgroundColor: '#02A9FF', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
-    gridRewatchButton: { backgroundColor: '#01579B' },
+    gridWatchedBadge: { 
+        position: 'absolute', 
+        top: 8, 
+        right: 8, 
+        backgroundColor: '#02A9FF', 
+        width: 22, 
+        height: 22, 
+        borderRadius: 11, 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    gridEpisodeNumberBadge: { 
+        position: 'absolute', 
+        bottom: 8, 
+        left: 8, 
+        backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+        paddingHorizontal: 10, 
+        paddingVertical: 4, 
+        borderRadius: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    gridEpisodeNumberText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+    gridEpisodeContent: { padding: 16 },
+    gridEpisodeTitle: { 
+        fontSize: 16, 
+        fontWeight: '700', 
+        lineHeight: 22,
+        marginBottom: 12,
+    },
+    
+    // New Grid Audio Pills & Meta
+    gridMetaRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    gridAudioPills: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    gridAudioPill: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    gridSubPill: {
+        backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    },
+    gridDubPill: {
+        backgroundColor: 'rgba(255, 152, 0, 0.9)',
+    },
+    gridPreferredPill: {
+        opacity: 1,
+        shadowOpacity: 0.4,
+        elevation: 4,
+        transform: [{ scale: 1.05 }],
+    },
+    gridPillText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    gridDateText: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    
+    // Updated Grid Watch Button
+    gridWatchButton: { 
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#02A9FF', 
+        paddingVertical: 12, 
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        shadowColor: '#02A9FF',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        elevation: 6,
+    },
+    gridRewatchButton: { 
+        backgroundColor: '#01579B',
+        shadowColor: '#01579B',
+    },
     watchedGridCard: { opacity: 0.8 },
     watchedGridThumbnail: { opacity: 0.6 },
-    listEpisodeCard: { flexDirection: 'row', backgroundColor: '#1c1c1e', borderRadius: 10, padding: 8, alignItems: 'flex-start' },
+    // Modern List Card Styles
+    listEpisodeCard: { 
+        flexDirection: 'row', 
+        backgroundColor: '#1c1c1e', 
+        borderRadius: 14, 
+        padding: 12, 
+        alignItems: 'flex-start',
+        shadowColor: '#000',
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 4,
+        marginBottom: 3,
+    },
     listThumbnailContainer: { position: 'relative' },
-    listEpisodeThumbnail: { width: 100, height: 65, borderRadius: 6, marginRight: 12 },
+    listEpisodeThumbnail: { width: 110, height: 75, borderRadius: 8, marginRight: 16 },
     watchedListThumbnail: { opacity: 0.6 },
-    listWatchedBadge: { position: 'absolute', top: 4, right: 16, backgroundColor: '#02A9FF', width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
-    listEpisodeNumberBadge: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-    listEpisodeNumberText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+    listWatchedBadge: { 
+        position: 'absolute', 
+        top: 6, 
+        right: 20, 
+        backgroundColor: '#02A9FF', 
+        width: 20, 
+        height: 20, 
+        borderRadius: 10, 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+        elevation: 3,
+    },
     listEpisodeContent: { flex: 1, justifyContent: 'space-between' },
-    listEpisodeTitle: { fontSize: 14, fontWeight: '600' },
-    listMetaRow: { flexDirection: 'row', gap: 12, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' },
-    listMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    listMetaText: { fontSize: 11 },
-    listTagsContainer: { flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' },
-    listEpisodeTypeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-    listEpisodeTypeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
-      listAvailabilityContainer: { flexDirection: 'row', gap: 4 },
-  listAvailabilityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  listSubBadge: { backgroundColor: 'rgba(76, 175, 80, 0.9)' },
-  listDubBadge: { backgroundColor: 'rgba(255, 152, 0, 0.9)' },
-  listAvailabilityText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
-    listEpisodeFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-    listProgressContainer: { flex: 1, marginRight: 12 },
-    listProgressBar: { height: 4, backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
-    listProgressFill: { height: '100%', backgroundColor: '#02A9FF' },
-    listProgressText: { fontSize: 11 },
-    listWatchButton: { backgroundColor: '#02A9FF', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
-    listRewatchButton: { backgroundColor: '#01579B' },
+    listEpisodeTitle: { 
+        fontSize: 16, 
+        fontWeight: '700',
+        lineHeight: 22,
+        marginBottom: 8,
+    },
+    
+    // New List Audio Pills & Meta
+    listMetaRow: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between',
+        alignItems: 'center', 
+        marginBottom: 12,
+        flexWrap: 'wrap',
+    },
+    listAudioPills: {
+        flexDirection: 'row',
+        gap: 6,
+    },
+    listAudioPill: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    listSubPill: {
+        backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    },
+    listDubPill: {
+        backgroundColor: 'rgba(255, 152, 0, 0.9)',
+    },
+    listPreferredPill: {
+        opacity: 1,
+        shadowOpacity: 0.4,
+        elevation: 3,
+        transform: [{ scale: 1.03 }],
+    },
+    listPillText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    listDateText: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    
+    // Updated List Watch Button
+    listWatchButton: { 
+        backgroundColor: '#02A9FF', 
+        paddingHorizontal: 16, 
+        paddingVertical: 10, 
+        borderRadius: 10, 
+        flexDirection: 'row', 
+        alignItems: 'center',
+        shadowColor: '#02A9FF',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    listRewatchButton: { 
+        backgroundColor: '#01579B',
+        shadowColor: '#01579B',
+    },
     listWatchButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
     watchedListCard: { backgroundColor: '#2c2c2e' },
     
@@ -1342,5 +1836,178 @@ const styles = StyleSheet.create({
     },
     continueArrow: {
         marginLeft: 12,
+    },
+    
+    // Audio Type Toggle Styles
+    audioToggleContainer: {
+        marginRight: 8,
+    },
+    audioToggleButton: {
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: 8,
+        borderRadius: 20,
+        minWidth: 60,
+    },
+    audioToggleDisabled: {
+        opacity: 0.5,
+    },
+    audioToggleContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    audioToggleText: {
+        fontSize: 11,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    audioToggleTextActive: {
+        fontWeight: '700',
+        color: '#02A9FF',
+    },
+    audioToggleTextDisabled: {
+        opacity: 0.4,
+    },
+    audioToggleSwitch: {
+        width: 24,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        position: 'relative',
+        marginHorizontal: 2,
+    },
+    audioToggleSwitchDub: {
+        backgroundColor: '#02A9FF',
+    },
+    audioToggleSwitchDisabled: {
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    audioToggleSwitchThumb: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#FFFFFF',
+        position: 'absolute',
+        top: 1,
+        left: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    audioToggleSwitchThumbDub: {
+        left: 13,
+    },
+    audioToggleHint: {
+        fontSize: 9,
+        fontWeight: '500',
+        marginTop: 2,
+        textAlign: 'center',
+    },
+
+    // Unavailable Episode Styles
+    unavailableCard: {
+        opacity: 0.6,
+        borderWidth: 1,
+        borderColor: '#FF4444',
+    },
+    unavailableText: {
+        opacity: 0.7,
+    },
+    unavailableThumbnail: {
+        opacity: 0.4,
+    },
+    gridUnavailableBadge: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        backgroundColor: 'rgba(255, 68, 68, 0.9)',
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#1c1c1e',
+    },
+    listUnavailableBadge: {
+        position: 'absolute',
+        top: 4,
+        right: 16,
+        backgroundColor: 'rgba(255, 68, 68, 0.9)',
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#1c1c1e',
+    },
+    gridEpisodeAudioType: {
+        fontSize: 11,
+        fontWeight: '500',
+        marginTop: 2,
+    },
+    listEpisodeAudioType: {
+        fontSize: 12,
+        fontWeight: '500',
+        marginRight: 8,
+    },
+    gridUnavailableButton: {
+        backgroundColor: '#FF4444',
+    },
+    listUnavailableButton: {
+        backgroundColor: '#FF4444',
+    },
+    gridWatchButtonText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+        marginLeft: 4,
+    },
+    // Badge priority styles
+    gridPreferredBadge: {
+        opacity: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+        elevation: 3,
+    },
+    gridNonPreferredBadge: {
+        opacity: 0.6,
+    },
+    listPreferredBadge: {
+        opacity: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.3,
+        shadowRadius: 2,
+        elevation: 3,
+    },
+    listNonPreferredBadge: {
+        opacity: 0.6,
+    },
+    // Progress Bar Styles
+    progressContainer: {
+        marginTop: 12,
+    },
+    progressBarBackground: {
+        height: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        borderRadius: 2,
+        overflow: 'hidden',
+    },
+    progressBarFill: {
+        height: '100%',
+        backgroundColor: '#02A9FF',
+        borderRadius: 2,
+    },
+    progressText: {
+        fontSize: 11,
+        marginTop: 4,
+        fontWeight: '500',
     },
 });

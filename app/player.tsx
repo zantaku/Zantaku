@@ -252,30 +252,31 @@ export default function Player() {
     logPlayerData();
   }, [params]);
 
-  // Force landscape mode immediately and maintain it
+  // Handle orientation for fullscreen video player (but allow PiP to rotate freely)
   useEffect(() => {
     let isMounted = true;
     let subscription: ScreenOrientation.Subscription | null = null;
 
-    const lockToLandscape = async () => {
+    const setupOrientation = async () => {
       if (!isMounted || isLocked.current) return;
       
       try {
-        console.log('[PLAYER] 🔒 Preparing to switch to landscape mode...');
+        console.log('[PLAYER] 🔒 Setting up orientation handling...');
         
-        // Hide status bar immediately before orientation change to reduce visual artifacts
+        // Hide status bar for fullscreen experience
         StatusBar.setHidden(true, 'fade');
         
-        // Use a smoother transition by directly going to LANDSCAPE instead of LANDSCAPE_RIGHT first
+        // For fullscreen video player, prefer landscape but don't force it aggressively
+        // This allows the system to handle PiP orientation changes naturally
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
         
         if (isMounted) {
           isLocked.current = true;
           setIsReady(true);
-          console.log('[PLAYER] ✅ Locked to landscape mode');
+          console.log('[PLAYER] ✅ Initial orientation set to landscape');
         }
       } catch (error) {
-        console.error('[PLAYER] ❌ Failed to lock orientation:', error);
+        console.error('[PLAYER] ❌ Failed to set orientation:', error);
         if (isMounted) {
           setIsReady(true); // Still show the player even if orientation lock fails
         }
@@ -283,48 +284,48 @@ export default function Player() {
     };
 
     // Execute immediately
-    lockToLandscape();
+    setupOrientation();
 
-    // Debounced orientation change handler to prevent infinite loops
+    // More relaxed orientation change handler that doesn't interfere with PiP
     const handleOrientationChange = async (event: ScreenOrientation.OrientationChangeEvent) => {
-      if (!isMounted || !isLocked.current) return;
+      if (!isMounted || !isLocked.current || isInPipMode) return;
       
       // Clear any existing timeout
       if (lockTimeout.current) {
         clearTimeout(lockTimeout.current);
       }
 
-      // Debounce the orientation change to prevent rapid successive calls
+      // Only handle orientation changes when NOT in PiP mode
       lockTimeout.current = setTimeout(async () => {
-        if (!isMounted) return;
+        if (!isMounted || isInPipMode) return;
         
         const currentOrientation = event.orientationInfo.orientation;
         console.log('[PLAYER] 📱 Orientation changed to:', currentOrientation);
         
-        // Only force landscape if currently in portrait and we're still mounted
-        if (currentOrientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
-            currentOrientation === ScreenOrientation.Orientation.PORTRAIT_DOWN) {
-          console.log('[PLAYER] 🔄 Detected portrait orientation, forcing back to landscape');
+        // Less aggressive approach - only force landscape in specific cases
+        if (!isInPipMode && (currentOrientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
+            currentOrientation === ScreenOrientation.Orientation.PORTRAIT_DOWN)) {
+          console.log('[PLAYER] 🔄 Detected portrait orientation while fullscreen, suggesting landscape');
           
           try {
             await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-            console.log('[PLAYER] ✅ Successfully re-locked to landscape');
+            console.log('[PLAYER] ✅ Successfully suggested landscape orientation');
           } catch (error) {
-            console.error('[PLAYER] ❌ Failed to re-lock orientation:', error);
+            console.error('[PLAYER] ❌ Failed to suggest orientation:', error);
           }
         }
-      }, 100); // 100ms debounce
+      }, 150); // Slightly longer debounce for smoother experience
     };
 
-    // Add orientation change listener only after initial lock
+    // Add orientation change listener
     const addListener = () => {
       if (isMounted) {
         subscription = ScreenOrientation.addOrientationChangeListener(handleOrientationChange);
-        console.log('[PLAYER] 👂 Added orientation change listener');
+        console.log('[PLAYER] 👂 Added orientation change listener with PiP awareness');
       }
     };
 
-    // Add listener after a short delay to ensure initial lock is complete
+    // Add listener after a short delay to ensure initial setup is complete
     setTimeout(addListener, 200);
 
     // Cleanup: unlock and return to portrait when unmounting
@@ -346,44 +347,31 @@ export default function Player() {
         console.log('[PLAYER] 👂 Removed orientation change listener');
       }
       
-      const unlockAndRotate = async () => {
+      const restoreOrientation = async () => {
         try {
-          console.log('[PLAYER] 🔄 Preparing to restore orientation...');
+          console.log('[PLAYER] 🔄 Restoring normal orientation behavior...');
           
-          // Force back to portrait with a cleaner transition
-          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-          console.log('[PLAYER] 📱 Locked to portrait');
+          // Restore status bar first
+          StatusBar.setHidden(false, 'fade');
+          console.log('[PLAYER] 📱 Status bar restored');
           
-          // Show status bar after orientation change is complete
-          setTimeout(() => {
-            StatusBar.setHidden(false, 'fade');
-            console.log('[PLAYER] 📱 Status bar restored');
-            // Then unlock completely if the app needs to allow rotation elsewhere
-            setTimeout(async () => {
-              try {
-                await ScreenOrientation.unlockAsync();
-                console.log('[PLAYER] 🔄 Orientation unlocked - restored to normal');
-              } catch (err) {
-                console.error('[PLAYER] ❌ Error unlocking orientation:', err);
-              }
-            }, 100); // Small delay to ensure the portrait lock has taken effect
-          }, 400); // Slightly longer delay for smoother transition
+          // Unlock orientation to allow natural rotation
+          await ScreenOrientation.unlockAsync();
+          console.log('[PLAYER] 🔄 Orientation unlocked - restored to normal');
+          
         } catch (error) {
           console.error('[PLAYER] ❌ Failed to restore orientation:', error);
-          // Fallback attempt if the first try fails
-          setTimeout(async () => {
-            try {
-              await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-              StatusBar.setHidden(false, 'fade');
-              await ScreenOrientation.unlockAsync();
-              console.log('[PLAYER] ✅ Fallback orientation restore successful');
-            } catch (err) {
-              console.error('[PLAYER] ❌ Critical orientation error:', err);
-            }
-          }, 500);
+          // Fallback: try to at least restore the status bar
+          try {
+            StatusBar.setHidden(false, 'fade');
+            await ScreenOrientation.unlockAsync();
+            console.log('[PLAYER] ✅ Fallback orientation restore successful');
+          } catch (err) {
+            console.error('[PLAYER] ❌ Critical orientation error:', err);
+          }
         }
       };
-      unlockAndRotate();
+      restoreOrientation();
     };
   }, []); // Empty dependency array to prevent re-running
 

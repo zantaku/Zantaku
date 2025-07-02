@@ -200,6 +200,13 @@ interface Episode {
   image: string;
   duration: number;
   isFiller: boolean;
+  provider?: string;
+  isSubbed?: boolean;
+  isDubbed?: boolean;
+  providerIds?: {
+    [key: string]: string;
+  };
+  aired?: string;
 }
 
 interface JikanEpisode {
@@ -563,15 +570,24 @@ export default function AnimeDetailsScreen() {
     
     try {
       setEpisodesLoading(true);
+      console.log(`\n🎬 [ANIME DETAILS] EPISODE FETCH START ===================`);
+      console.log(`[ANIME DETAILS] 🎬 Fetching episodes for:`, {
+        title: details.title.userPreferred,
+        anilistId: details.id,
+        malId: details.idMal,
+        format: details.format,
+        episodes: details.episodes
+      });
       
       if (!details.idMal) {
-        console.log('No MAL ID available');
+        console.log('[ANIME DETAILS] ❌ No MAL ID available');
         setEpisodes([]);
         setEpisodesLoading(false);
+        console.log(`🎬 [ANIME DETAILS] EPISODE FETCH END ===================\n`);
         return;
       }
 
-      console.log('Fetching episodes list from Jikan API for MAL ID:', details.idMal);
+      console.log('[ANIME DETAILS] 📡 Fetching episodes list from Jikan API for MAL ID:', details.idMal);
       const [episodesResponse, videosResponse] = await Promise.all([
         axios.get(`${JIKAN_API_ENDPOINT}/anime/${details.idMal}/episodes`, {
           params: { page: 1 }
@@ -582,16 +598,19 @@ export default function AnimeDetailsScreen() {
       const jikanEpisodes = episodesResponse.data?.data || [];
       const pagination = episodesResponse.data?.pagination;
       const episodeVideos = videosResponse.data?.data || [];
-      console.log('Found episodes on page 1:', jikanEpisodes.length);
-      console.log('Found episode videos:', episodeVideos.length);
-      console.log('Pagination info:', pagination);
+      console.log('[ANIME DETAILS] 📊 Jikan API response:', {
+        episodesFound: jikanEpisodes.length,
+        videosFound: episodeVideos.length,
+        hasNextPage: pagination?.has_next_page,
+        totalPages: pagination?.last_visible_page
+      });
 
       let allEpisodes = [...jikanEpisodes];
 
       // Fetch remaining pages if any
       if (pagination?.has_next_page) {
         const totalPages = pagination.last_visible_page;
-        console.log('Fetching remaining pages, total pages:', totalPages);
+        console.log('[ANIME DETAILS] 📄 Fetching remaining pages, total pages:', totalPages);
 
         const remainingPages = [];
         for (let page = 2; page <= totalPages; page++) {
@@ -608,13 +627,13 @@ export default function AnimeDetailsScreen() {
             allEpisodes = [...allEpisodes, ...pageResponse.data.data];
           }
         }
-        console.log('Total episodes after fetching all pages:', allEpisodes.length);
+        console.log('[ANIME DETAILS] 📄 Total episodes after fetching all pages:', allEpisodes.length);
       }
 
       // Create a map of episode videos by episode number
       const videoMap = new Map<number, JikanEpisodeVideo>();
       episodeVideos.forEach((video: JikanEpisodeVideo) => {
-        console.log('Processing video:', video);
+        console.log('[ANIME DETAILS] 🎥 Processing video:', video.episode, video.title);
         // Extract just the number from "Episode X"
         const episodeNumber = parseInt(video.episode.replace('Episode ', ''));
         if (!isNaN(episodeNumber)) {
@@ -626,16 +645,18 @@ export default function AnimeDetailsScreen() {
 
       if (allEpisodes.length > 0) {
         // Normal case: we have episode data
+        console.log('[ANIME DETAILS] 📝 Formatting episodes with metadata...');
         formattedEpisodes = allEpisodes
           .filter((ep): ep is JikanEpisode => ep !== null)
           .map((ep: JikanEpisode, index: number) => {
             // Use index + 1 to match episode numbers since they start from 1
             const episodeNumber = index + 1;
             const video = videoMap.get(episodeNumber);
-            console.log(`Episode ${episodeNumber} mapped to video:`, video);
             
-            // Keep the original episode data but use the video thumbnail if available
-            return {
+            // ⚠️ CRITICAL FIX: Add provider availability flags
+            // Since this is from Jikan, we don't know actual streaming availability
+            // But we can set default flags that will be updated by the provider system
+            const episode = {
               id: `${details.idMal}-${episodeNumber}`,
               number: episodeNumber,
               title: ep.title || `Episode ${episodeNumber}`,
@@ -643,15 +664,37 @@ export default function AnimeDetailsScreen() {
               image: video?.images?.jpg?.image_url || details.coverImage.large,
               duration: ep.duration || details.duration || 24,
               isFiller: ep.filler || false,
-              aired: ep.aired
+              aired: ep.aired,
+              // 🔧 ADD MISSING AVAILABILITY FLAGS
+              provider: 'Jikan (metadata only)',
+              isSubbed: true,  // Assume SUB available by default (will be updated by provider)
+              isDubbed: true,  // Assume DUB available by default (will be updated by provider)
+              providerIds: {
+                jikan: `${details.idMal}-${episodeNumber}`
+              }
             };
+            
+            if (index < 3) {
+              console.log(`[ANIME DETAILS] 📝 Episode ${index + 1}:`, {
+                id: episode.id,
+                number: episode.number,
+                title: episode.title,
+                hasImage: !!episode.image,
+                hasVideo: !!video,
+                isSubbed: episode.isSubbed,
+                isDubbed: episode.isDubbed,
+                provider: episode.provider
+              });
+            }
+            
+            return episode;
           });
       } else if (episodeVideos.length > 0) {
         // Movie case: no episodes but we have videos
-        console.log('No episodes found but videos exist - treating as movie');
+        console.log('[ANIME DETAILS] 🎬 No episodes found but videos exist - treating as movie');
         formattedEpisodes = episodeVideos.map((video: JikanEpisodeVideo, index: number) => {
           const episodeNumber = parseInt(video.episode.replace('Episode ', '')) || (index + 1);
-          console.log(`Creating movie episode ${episodeNumber} from video:`, video);
+          console.log(`[ANIME DETAILS] 🎬 Creating movie episode ${episodeNumber} from video:`, video.title);
           
           return {
             id: `${details.idMal}-${episodeNumber}`,
@@ -661,12 +704,19 @@ export default function AnimeDetailsScreen() {
             image: video.images?.jpg?.image_url || details.coverImage.large,
             duration: details.duration || 120, // Default movie duration
             isFiller: false,
-            aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined
+            aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined,
+            // 🔧 ADD MISSING AVAILABILITY FLAGS FOR MOVIES
+            provider: 'Jikan (metadata only)',
+            isSubbed: true,  // Assume SUB available by default
+            isDubbed: true,  // Assume DUB available by default
+            providerIds: {
+              jikan: `${details.idMal}-${episodeNumber}`
+            }
           };
         });
       } else if (details.format === 'MOVIE' || details.episodes === 1) {
         // Fallback for movies with no video data
-        console.log('Creating fallback movie episode');
+        console.log('[ANIME DETAILS] 🎬 Creating fallback movie episode');
         formattedEpisodes = [{
           id: `${details.idMal}-1`,
           number: 1,
@@ -675,21 +725,49 @@ export default function AnimeDetailsScreen() {
           image: details.coverImage.large,
           duration: details.duration || 120,
           isFiller: false,
-          aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined
+          aired: details.startDate ? `${details.startDate.year}-${String(details.startDate.month).padStart(2, '0')}-${String(details.startDate.day).padStart(2, '0')}` : undefined,
+          // 🔧 ADD MISSING AVAILABILITY FLAGS FOR FALLBACK
+          provider: 'Jikan (metadata only)',
+          isSubbed: true,  // Assume SUB available by default
+          isDubbed: true,  // Assume DUB available by default
+          providerIds: {
+            jikan: `${details.idMal}-1`
+          }
         }];
       }
       
-      console.log('Final formatted episodes:', formattedEpisodes.map(ep => ({
-        number: ep.number,
-        title: ep.title,
-        image: ep.image
-      })));
+      console.log('[ANIME DETAILS] 📊 Final formatted episodes summary:', {
+        totalEpisodes: formattedEpisodes.length,
+        firstEpisode: formattedEpisodes[0]?.number,
+        lastEpisode: formattedEpisodes[formattedEpisodes.length - 1]?.number,
+        allHaveSubFlags: formattedEpisodes.every(ep => ep.isSubbed === true),
+        allHaveDubFlags: formattedEpisodes.every(ep => ep.isDubbed === true),
+        sampleEpisode: formattedEpisodes[0] ? {
+          number: formattedEpisodes[0].number,
+          title: formattedEpisodes[0].title,
+          isSubbed: formattedEpisodes[0].isSubbed,
+          isDubbed: formattedEpisodes[0].isDubbed,
+          provider: formattedEpisodes[0].provider
+        } : null
+      });
       
+      console.log('[ANIME DETAILS] ✅ Episodes formatted successfully, setting state...');
       setEpisodes(formattedEpisodes);
+      console.log(`🎬 [ANIME DETAILS] EPISODE FETCH END ===================\n`);
     } catch (error) {
-      console.error('Error fetching episodes from Jikan:', error);
+      console.log(`🎬 [ANIME DETAILS] EPISODE FETCH ERROR ===================`);
+      console.error('[ANIME DETAILS] ❌ Error fetching episodes from Jikan:', {
+        errorMessage: (error as any)?.message,
+        errorCode: (error as any)?.code,
+        httpStatus: (error as any)?.response?.status,
+        httpStatusText: (error as any)?.response?.statusText,
+        responseData: (error as any)?.response?.data,
+        stack: (error as any)?.stack?.split('\n').slice(0, 3).join('\n')
+      });
+      
       // Create a fallback episode for movies even on error
       if (details.format === 'MOVIE' || details.episodes === 1) {
+        console.log('[ANIME DETAILS] 🔧 Creating fallback movie episode due to error');
         setEpisodes([{
           id: `${details.idMal}-1`,
           number: 1,
@@ -697,9 +775,17 @@ export default function AnimeDetailsScreen() {
           description: details.description || 'Movie',
           image: details.coverImage.large,
           duration: details.duration || 120,
-          isFiller: false
+          isFiller: false,
+          // 🔧 ADD MISSING AVAILABILITY FLAGS FOR ERROR FALLBACK
+          provider: 'Jikan (fallback)',
+          isSubbed: true,  // Assume SUB available
+          isDubbed: true,  // Assume DUB available
+          providerIds: {
+            jikan: `${details.idMal}-1`
+          }
         }]);
       } else {
+        console.log('[ANIME DETAILS] 🔧 Creating error episode');
         setEpisodes([{
           id: 'error',
           number: 0,
@@ -707,9 +793,15 @@ export default function AnimeDetailsScreen() {
           description: 'Unable to load episodes. Please try again later.',
           image: details.coverImage.large,
           duration: 0,
-          isFiller: false
+          isFiller: false,
+          // 🔧 ADD MISSING AVAILABILITY FLAGS FOR ERROR STATE
+          provider: 'Error',
+          isSubbed: false,  // Mark as unavailable
+          isDubbed: false,  // Mark as unavailable
+          providerIds: {}
         }]);
       }
+      console.log(`🎬 [ANIME DETAILS] EPISODE FETCH ERROR END ===================\n`);
     } finally {
       setEpisodesLoading(false);
     }
@@ -1445,6 +1537,11 @@ export default function AnimeDetailsScreen() {
       // First try to use the trailer from AniList
       if (details?.trailer?.site === 'youtube' && details.trailer.id) {
         console.log('Using AniList trailer:', details.trailer.id);
+        // Validate the video ID format
+        if (!/^[a-zA-Z0-9_-]{11}$/.test(details.trailer.id)) {
+          console.log('Invalid YouTube video ID format:', details.trailer.id);
+          return null;
+        }
         return details.trailer.id;
       }
 
@@ -1475,11 +1572,13 @@ export default function AnimeDetailsScreen() {
         }
       );
 
-      // Log the entire response
-      console.log('Full YouTube API Response:', JSON.stringify(response.data, null, 2));
-
       if (response.data?.items?.length > 0) {
         const videoId = response.data.items[0].id.videoId;
+        // Validate the video ID format
+        if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+          console.log('Invalid YouTube video ID format from search:', videoId);
+          return null;
+        }
         console.log('Found video ID:', videoId);
         console.log('Video title:', response.data.items[0].snippet.title);
         return videoId;
@@ -1500,13 +1599,26 @@ export default function AnimeDetailsScreen() {
     }
   };
 
-  // Add effect to load YouTube video
+  // Add effect to load YouTube video with error handling
   useEffect(() => {
     if (details?.title?.userPreferred) {
       getYoutubeVideoId(details.title.userPreferred).then(videoId => {
         if (videoId) {
           setYoutubeVideoId(videoId);
+          // Reset video state
+          setIsVideoEnded(false);
+          setIsPlaying(true);
+          setIsMuted(true);
+          setIsVideoLoading(true);
+          // Start with full opacity for the cover image
+          fadeAnim.setValue(0);
+        } else {
+          setYoutubeVideoId(null);
+          setIsVideoLoading(false);
         }
+      }).catch(error => {
+        console.error('Error setting up video:', error);
+        setYoutubeVideoId(null);
         setIsVideoLoading(false);
       });
     }
@@ -1694,6 +1806,12 @@ export default function AnimeDetailsScreen() {
                                           type: 'playerStateChange',
                                           state: event.data
                                         }));
+                                      },
+                                      'onError': function(event) {
+                                        window.ReactNativeWebView.postMessage(JSON.stringify({
+                                          type: 'playerError',
+                                          error: event.data
+                                        }));
                                       }
                                     }
                                   });
@@ -1709,6 +1827,40 @@ export default function AnimeDetailsScreen() {
                       mediaPlaybackRequiresUserAction={false}
                       onLoadStart={() => setIsVideoLoading(true)}
                       onLoadEnd={() => setIsVideoLoading(false)}
+                      onMessage={(event) => {
+                        const data = JSON.parse(event.nativeEvent.data);
+                        if (data.type === 'playerError') {
+                          console.log('YouTube player error:', data.error);
+                          // Hide video player and show cover image instead
+                          Animated.timing(fadeAnim, {
+                            toValue: 0,
+                            duration: 300,
+                            useNativeDriver: true,
+                          }).start(() => {
+                            setYoutubeVideoId(null);
+                          });
+                        } else if (data.type === 'playerStateChange') {
+                          if (data.state === -1) { // unstarted
+                            console.log('Video unstarted');
+                          } else if (data.state === 0) { // ended
+                            setIsVideoEnded(true);
+                            Animated.timing(fadeAnim, {
+                              toValue: 0,
+                              duration: 300,
+                              useNativeDriver: true,
+                            }).start();
+                          } else if (data.state === 1) { // playing
+                            setIsPlaying(true);
+                            setIsVideoEnded(false);
+                          } else if (data.state === 2) { // paused
+                            setIsPlaying(false);
+                          } else if (data.state === 3) { // buffering
+                            console.log('Video buffering');
+                          } else if (data.state === 5) { // video cued
+                            console.log('Video cued');
+                          }
+                        }
+                      }}
                     />
                   </Animated.View>
 
@@ -1727,68 +1879,64 @@ export default function AnimeDetailsScreen() {
                       source={{ uri: details.coverImage.extraLarge }}
                       style={styles.coverImage}
                       contentFit="cover"
+                      transition={200}
                     />
                   </Animated.View>
 
                   <BlurView intensity={30} tint="dark" style={[styles.overlay, { backgroundColor: 'rgba(0, 0, 0, 0.3)' }]} />
                   
-                  <View style={styles.playerControls}>
-                    <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
-                    <View style={styles.controlsContent}>
-                      <TouchableOpacity
-                        style={styles.controlButton}
-                        onPress={() => {
-                          if (isVideoEnded) {
-                            setIsVideoEnded(false);
+                  {youtubeVideoId && (
+                    <View style={styles.playerControls}>
+                      <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
+                      <View style={styles.controlsContent}>
+                        <TouchableOpacity
+                          style={styles.controlButton}
+                          onPress={() => {
+                            if (isVideoEnded) {
+                              setIsVideoEnded(false);
+                              webviewRef.current?.injectJavaScript(`
+                                player.seekTo(0);
+                                player.playVideo();
+                                true;
+                              `);
+                              Animated.timing(fadeAnim, {
+                                toValue: 1,
+                                duration: 500,
+                                useNativeDriver: true,
+                              }).start();
+                            } else {
+                              setIsPlaying(!isPlaying);
+                              webviewRef.current?.injectJavaScript(`
+                                player.${isPlaying ? 'pauseVideo' : 'playVideo'}();
+                                true;
+                              `);
+                            }
+                          }}
+                        >
+                          <FontAwesome5 
+                            name={isVideoEnded ? 'redo' : (isPlaying ? 'pause' : 'play')} 
+                            size={16} 
+                            color="#fff" 
+                          />
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity
+                          style={styles.controlButton}
+                          onPress={() => {
+                            setIsMuted(!isMuted);
                             webviewRef.current?.injectJavaScript(`
-                              player.seekTo(0);
-                              player.playVideo();
+                              player.${isMuted ? 'unMute' : 'mute'}();
                               true;
                             `);
-                            Animated.timing(fadeAnim, {
-                              toValue: 1,
-                              duration: 500,
-                              useNativeDriver: true,
-                            }).start();
-                          } else {
-                            setIsPlaying(!isPlaying);
-                            webviewRef.current?.injectJavaScript(`
-                              player.${isPlaying ? 'pauseVideo' : 'playVideo'}();
-                              true;
-                            `);
-                          }
-                        }}
-                      >
-                        <FontAwesome5 
-                          name={isVideoEnded ? 'redo' : (isPlaying ? 'pause' : 'play')} 
-                          size={16} 
-                          color="#fff" 
-                        />
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        style={styles.controlButton}
-                        onPress={() => {
-                          setIsMuted(!isMuted);
-                          webviewRef.current?.injectJavaScript(`
-                            player.${isMuted ? 'unMute' : 'mute'}();
-                            true;
-                          `);
-                        }}
-                      >
-                        <FontAwesome5 
-                          name={isMuted ? 'volume-mute' : 'volume-up'} 
-                          size={16} 
-                          color="#fff" 
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  
-                  {isVideoLoading && (
-                    <View style={styles.loadingOverlay}>
-                      <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-                      <ActivityIndicator size="large" color="#fff" />
+                          }}
+                        >
+                          <FontAwesome5 
+                            name={isMuted ? 'volume-mute' : 'volume-up'} 
+                            size={16} 
+                            color="#fff" 
+                          />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   )}
                 </View>

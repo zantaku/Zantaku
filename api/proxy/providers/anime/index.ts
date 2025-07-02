@@ -244,7 +244,7 @@ export class AnimeProviderManager {
     if (!autoSelectEnabled && specificProvider) {
       console.log(`[ProviderManager] Auto-select OFF, trying only ${specificProvider} for episode ${episodeNumber || episodeId}`);
       
-      // AnimePahe can now handle both sub and dub content
+      // AnimePahe only provides SUB content
       
       const result = await this.getWatchDataFromProvider(
         specificProvider,
@@ -264,9 +264,9 @@ export class AnimeProviderManager {
     }
     
     // Auto-select is ON - try providers in order of preference
-    let providers: ProviderType[] = ['animepahe', 'zoro'];
+    // For DUB requests, prioritize Zoro since AnimePahe doesn't provide DUB content
+    let providers: ProviderType[] = isDub ? ['zoro', 'animepahe'] : ['animepahe', 'zoro'];
     
-    // Note: AnimePahe can provide both sub and dub content, so we don't skip it
     console.log(`[ProviderManager] Will try providers for ${isDub ? 'DUB' : 'SUB'}: ${providers.join(' → ')}`);
     
     
@@ -330,7 +330,8 @@ export class AnimeProviderManager {
     // Check AnimePahe availability
     if (animeTitle && episodeNumber) {
       try {
-        availability.animepahe = await animePaheProvider.checkEpisodeAvailability(animeTitle, episodeNumber);
+        const paheResult = await animePaheProvider.checkEpisodeAvailability(animeTitle, episodeNumber);
+        availability.animepahe = paheResult.sub; // AnimePahe only provides SUB content
       } catch (error) {
         console.error('[ProviderManager] AnimePahe availability check failed:', error);
       }
