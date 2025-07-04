@@ -52,11 +52,13 @@ import SpeedOptions from './components/SpeedOptions';
 import SaveProgressModal from './components/SaveProgressModal';
 import EnhancedExitModal from './components/EnhancedExitModal';
 import BufferingIndicator from './components/BufferingIndicator';
+import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 // import DebugOverlay from './components/DebugOverlay'; // Temporarily disabled
 
 // Import types and constants
 import { VideoProgressData, Subtitle, SubtitleCue, VideoTimings, AudioTrack } from './types';
 import { usePlayerContext } from './PlayerContext';
+import { EpisodeNavigationUtils, NextEpisodeResult } from '../../utils/episodeNavigation';
 import {
   PLAYER_COLORS,
   PLAYER_BEHAVIOR,
@@ -189,6 +191,14 @@ const PlayerScreen: React.FC = () => {
   // NEW: Resume state
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [savedTimestamp, setSavedTimestamp] = useState<number | null>(null);
+  
+  // NEW: Next episode countdown state
+  const [showNextEpisodeCountdown, setShowNextEpisodeCountdown] = useState(false);
+  const [nextEpisodeData, setNextEpisodeData] = useState<NextEpisodeResult | null>(null);
+  const [countdownDismissed, setCountdownDismissed] = useState(false);
+  
+  // Progress save throttling
+  const lastProgressSaveRef = useRef(0);
   
   // Optimized subtitle lookup with binary search and caching
   const currentSubtitleIndexRef = useRef<number>(-1);
@@ -569,6 +579,15 @@ const PlayerScreen: React.FC = () => {
           if (Math.abs(newTime - lastTimeRef.current) > 0.1) {
             lastTimeRef.current = newTime;
             setCurrentTime(newTime);
+            
+            // Enhanced progress saving - save every 10 seconds during playback
+            if (videoData && isPlaying && newTime > 30 && newDuration > 0) {
+              const now = Date.now();
+              if (now - lastProgressSaveRef.current > 10000) { // Save every 10 seconds
+                lastProgressSaveRef.current = now;
+                EpisodeNavigationUtils.saveProgressForNavigation(videoData, newTime, newDuration);
+              }
+            }
           }
           
           // Set duration only once when video is loaded
@@ -580,6 +599,48 @@ const PlayerScreen: React.FC = () => {
           
           // Update paused state
           setPaused(!isPlaying);
+          
+          // NEW: Countdown logic - trigger when outro marker is reached (Netflix style)
+          if (newDuration > 0 && !countdownDismissed && nextEpisodeData?.hasNext && preferences.markerSettings.autoPlayNextEpisode) {
+            // Get timing data (provided or auto-detected)
+            const timingData = videoData?.timings || autoDetectedTiming;
+            let shouldShowCountdown = false;
+            
+            if (timingData?.outro) {
+              // Use outro marker timing (like Netflix)
+              const outroStart = timingData.outro.start;
+              const outroEnd = timingData.outro.end;
+              
+              // Show countdown when we reach the outro marker
+              shouldShowCountdown = newTime >= outroStart && newTime <= outroEnd + 10; // Add 10 seconds buffer after outro
+              
+              if (shouldShowCountdown && !showNextEpisodeCountdown) {
+                console.log('[COUNTDOWN] 🎬 Reached outro marker, showing Netflix-style countdown overlay', {
+                  currentTime: newTime.toFixed(2),
+                  outroStart: outroStart.toFixed(2),
+                  outroEnd: outroEnd.toFixed(2)
+                });
+                setShowNextEpisodeCountdown(true);
+              }
+            } else {
+              // Fallback: Use last 30 seconds if no outro marker (more conservative than last minute)
+              const remainingTime = newDuration - newTime;
+              shouldShowCountdown = remainingTime <= 30 && remainingTime > 0;
+              
+              if (shouldShowCountdown && !showNextEpisodeCountdown) {
+                console.log('[COUNTDOWN] ⏰ No outro marker found, using fallback (last 30 seconds)', {
+                  remainingTime: remainingTime.toFixed(2)
+                });
+                setShowNextEpisodeCountdown(true);
+              }
+            }
+            
+            // Hide countdown if we're no longer in the trigger zone
+            if (!shouldShowCountdown && showNextEpisodeCountdown) {
+              console.log('[COUNTDOWN] 🚫 Left countdown trigger zone, hiding overlay');
+              setShowNextEpisodeCountdown(false);
+            }
+          }
           
         } catch (error: any) {
           console.error('🔥 [TIME UPDATE ERROR] ===================');
@@ -610,7 +671,7 @@ const PlayerScreen: React.FC = () => {
         }
       };
     }
-  }, [videoPlayer, videoData]); // Depend on both videoPlayer and videoData
+  }, [videoPlayer, videoData, autoDetectedTiming, nextEpisodeData, countdownDismissed, showNextEpisodeCountdown, preferences.markerSettings.autoPlayNextEpisode]); // Added dependencies for countdown logic
 
   // Auto-enter PiP when app goes to background (for seamless UX)
   useEffect(() => {
@@ -836,6 +897,67 @@ const PlayerScreen: React.FC = () => {
 
     loadVideoData();
   }, [params.dataKey, params.url, preferences.rememberPosition, setPreferences]);
+
+  // NEW: Find next episode for countdown functionality
+  useEffect(() => {
+    if (videoData && videoData.anilistId && videoData.episodeNumber) {
+      console.log('[NEXT_EPISODE] 🔍 Finding next episode for countdown functionality');
+      
+      EpisodeNavigationUtils.findNextEpisode(videoData).then((result) => {
+        setNextEpisodeData(result);
+        console.log('[NEXT_EPISODE] 📊 Next episode lookup result:', {
+          hasNext: result.hasNext,
+          nextEpisode: result.nextEpisode?.number,
+          nextTitle: result.nextEpisode?.title
+        });
+      }).catch((error) => {
+        console.error('[NEXT_EPISODE] ❌ Error finding next episode:', error);
+        setNextEpisodeData({ hasNext: false });
+      });
+    }
+  }, [videoData]);
+
+  // NEW: Handle skip to next episode
+  const handleSkipToNextEpisode = async () => {
+    if (!nextEpisodeData?.hasNext || !nextEpisodeData.nextEpisode) {
+      console.log('[COUNTDOWN] ❌ No next episode available');
+      return;
+    }
+
+    console.log('[COUNTDOWN] ⏭️ Skipping to next episode:', {
+      current: videoData?.episodeNumber,
+      next: nextEpisodeData.nextEpisode.number
+    });
+
+    try {
+      // Save current progress before navigating
+      if (videoData) {
+        await EpisodeNavigationUtils.saveProgressForNavigation(videoData, currentTime, duration);
+      }
+
+      // Hide countdown overlay
+      setShowNextEpisodeCountdown(false);
+      setCountdownDismissed(true);
+
+      // Navigate to next episode
+      const nextEpisodeId = nextEpisodeData.episodeId;
+      if (nextEpisodeId) {
+        console.log('[COUNTDOWN] 🎯 Navigating to next episode ID:', nextEpisodeId);
+        
+        // Replace current route with next episode
+        router.replace(`/anime/${nextEpisodeId}`);
+      }
+    } catch (error) {
+      console.error('[COUNTDOWN] ❌ Error navigating to next episode:', error);
+    }
+  };
+
+  // NEW: Handle dismiss countdown
+  const handleDismissCountdown = () => {
+    console.log('[COUNTDOWN] 🚫 User dismissed countdown overlay');
+    setShowNextEpisodeCountdown(false);
+    setCountdownDismissed(true);
+  };
 
   // Load subtitle cues from URL - Enhanced with indexing
   const loadSubtitleCues = async (subtitleUrl: string) => {
@@ -1406,7 +1528,7 @@ const PlayerScreen: React.FC = () => {
     return {
       width,
       height,
-      alignSelf: 'center',
+      alignSelf: 'center' as const,
       backgroundColor: '#000000',
     };
   }, [dimensions]);
@@ -1649,6 +1771,33 @@ const PlayerScreen: React.FC = () => {
           duration={duration}
           anilistId={videoData.anilistId}
           anilistUser={anilistUser || undefined}
+        />
+      )}
+
+      {/* Next Episode Countdown */}
+      {showNextEpisodeCountdown && nextEpisodeData?.hasNext && nextEpisodeData.nextEpisode && (
+        <NextEpisodeCountdown
+          isVisible={showNextEpisodeCountdown}
+          nextEpisodeTitle={nextEpisodeData.nextEpisode.title || `Episode ${nextEpisodeData.nextEpisode.number}`}
+          nextEpisodeNumber={nextEpisodeData.nextEpisode.number}
+          remainingSeconds={(() => {
+            // Calculate remaining seconds based on outro timing (Netflix style)
+            const timingData = videoData?.timings || autoDetectedTiming;
+            if (timingData?.outro) {
+              // Show countdown time based on outro end + buffer time
+              const outroEnd = timingData.outro.end;
+              const bufferTime = 10; // 10 seconds buffer after outro
+              const countdownEndTime = outroEnd + bufferTime;
+              const remaining = Math.max(0, countdownEndTime - currentTime);
+              return remaining;
+            } else {
+              // Fallback: remaining time from current position (for episodes without outro markers)
+              return duration > 0 ? Math.max(0, duration - currentTime) : 0;
+            }
+          })()}
+          onSkipToNext={handleSkipToNextEpisode}
+          onDismiss={handleDismissCountdown}
+          canAutoPlay={preferences.markerSettings?.autoPlayNextEpisode || false}
         />
       )}
 

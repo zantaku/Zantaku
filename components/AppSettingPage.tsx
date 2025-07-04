@@ -24,10 +24,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
       isUserAuthenticated: !!user
     });
 
-    if (id === 'notifications') {
-      onClose();
-      router.push('/activenotificationslist');
-    } else if (id === 'theme') {
+    if (id === 'theme') {
       onClose();
       router.push('/appsettings/themesettings');
     } else if (id === 'commons') {

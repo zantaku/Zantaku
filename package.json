@@ -42,7 +42,7 @@
     "@shopify/flash-list": "^1.7.3",
     "@shopify/react-native-skia": "1.5.0",
     "@supabase/supabase-js": "^2.48.0",
-    "@tanstack/react-query": "^5.71.1",
+    "@tanstack/react-query": "^5.81.5",
     "@types/cheerio": "^0.22.35",
     "@types/express": "^5.0.0",
     "@types/he": "^1.2.3",
@@ -85,7 +85,6 @@
     "expo-web-browser": "~14.0.2",
     "express": "^4.21.2",
     "fast-xml-parser": "^4.5.1",
-
     "graphql": "^16.10.0",
     "he": "^1.2.0",
     "jszip": "^3.10.1",

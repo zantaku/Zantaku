@@ -874,10 +874,26 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 const progressData: Record<string, EpisodeProgress> = {};
                 
                 for (const episode of episodesToUse.slice(0, 20)) { // Load first 20 for performance
-                    const key = `episode_progress_${anilistId}_${episode.number}`;
-                    const stored = await AsyncStorage.getItem(key);
-                    if (stored) {
-                        progressData[episode.id] = JSON.parse(stored);
+                    // Try both key formats for compatibility
+                    const keys = [
+                        `episode_progress_${anilistId}_${episode.number}`,
+                        `progress_anilist_${anilistId}_ep_${episode.number}`,
+                    ];
+                    
+                    for (const key of keys) {
+                        const stored = await AsyncStorage.getItem(key);
+                        if (stored) {
+                            const progressInfo = JSON.parse(stored);
+                            // Convert to EpisodeProgress format if needed
+                            if (progressInfo.timestamp !== undefined) {
+                                progressData[episode.id] = {
+                                    timestamp: progressInfo.timestamp,
+                                    duration: progressInfo.duration || 0,
+                                    percentage: progressInfo.percentage || 0,
+                                };
+                            }
+                            break; // Use first available format
+                        }
                     }
                 }
                 
