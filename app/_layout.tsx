@@ -5,7 +5,7 @@ import { ThemeProvider, useTheme } from '../hooks/useTheme';
 import { IncognitoProvider, useIncognito } from '../hooks/useIncognito';
 import { OrientationProvider } from '../hooks/useOrientation';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, Component } from 'react';
@@ -362,7 +362,7 @@ function ThemedLayout() {
           }}
         />
         <Stack.Screen
-          name="@profile"
+          name="profile"
           options={{
             headerShown: false,
           }}
@@ -561,14 +561,28 @@ export default function RootLayout() {
     // Load fonts
     const loadFonts = async () => {
       try {
+        // Load basic fonts first
         await Font.loadAsync({
           ...Ionicons.font,
           ...FontAwesome5.font,
         });
-        console.log('✅ Vector icon fonts loaded successfully');
+        console.log('✅ Basic vector icon fonts loaded successfully');
+        
+        // Try to load MaterialCommunityIcons separately with error handling
+        try {
+          await Font.loadAsync({
+            ...MaterialCommunityIcons.font,
+          });
+          console.log('✅ MaterialCommunityIcons loaded successfully');
+        } catch (mciError) {
+          console.warn('⚠️ MaterialCommunityIcons failed to load, using fallback:', mciError);
+          // Continue without MaterialCommunityIcons - the app will still work
+        }
+        
         setFontsLoaded(true);
       } catch (error) {
         console.error('❌ Error loading fonts:', error);
+        console.log('🔄 Continuing without custom fonts...');
         setFontsLoaded(true); // Continue anyway
       }
     };

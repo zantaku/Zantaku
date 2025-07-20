@@ -1225,4 +1225,171 @@ const getCurrentSeason = () => {
   if (month >= 6 && month <= 8) return 'SUMMER';
   if (month >= 9 && month <= 11) return 'FALL';
   return 'WINTER';
+};
+
+export const fetchRelatedSeasons = async (anilistId: string, searchTitle?: string) => {
+  const query = `
+    query ($id: Int, $search: String) {
+      Media(id: $id, type: ANIME) {
+        id
+        title {
+          userPreferred
+          english
+          romaji
+          native
+        }
+        format
+        status
+        startDate {
+          year
+          month
+          day
+        }
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              format
+              status
+              startDate {
+                year
+                month
+                day
+              }
+              episodes
+              coverImage {
+                large
+                color
+              }
+              averageScore
+              season
+              seasonYear
+            }
+          }
+        }
+      }
+      ${searchTitle ? `
+      Search: Page(perPage: 20) {
+        media(search: $search, type: ANIME, sort: START_DATE) {
+          id
+          title {
+            userPreferred
+            english
+            romaji
+            native
+          }
+          format
+          status
+          startDate {
+            year
+            month
+            day
+          }
+          episodes
+          coverImage {
+            large
+            color
+          }
+          averageScore
+          season
+          seasonYear
+        }
+      }
+      ` : ''}
+    }
+  `;
+
+  const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+  
+  const response = await axios.post(
+    ANILIST_API,
+    {
+      query,
+      variables: { 
+        id: parseInt(anilistId), 
+        search: searchTitle 
+      }
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      timeout: 30000
+    }
+  );
+
+  const mainMedia = response.data.data.Media;
+  const searchResults = response.data.data.Search?.media || [];
+  
+  // Extract related seasons from relations
+  const relatedSeasons = mainMedia.relations.edges
+    .filter((edge: any) => 
+      ['SEQUEL', 'PREQUEL', 'SIDE_STORY', 'ALTERNATIVE'].includes(edge.relationType) &&
+      edge.node.format === 'TV' &&
+      edge.node.status !== 'CANCELLED'
+    )
+    .map((edge: any) => edge.node);
+
+  // Combine main media with related seasons
+  const allSeasons = [mainMedia, ...relatedSeasons];
+  
+  // If search results are provided, merge them with relation results
+  if (searchResults.length > 0) {
+    const baseTitle = mainMedia.title.romaji || mainMedia.title.english || mainMedia.title.userPreferred;
+    const baseTitleWords = baseTitle.toLowerCase().split(/[\s:]+/);
+    
+    // Filter search results to only include likely seasons
+    const filteredSearchResults = searchResults.filter((media: any) => {
+      const mediaTitle = media.title.romaji || media.title.english || media.title.userPreferred;
+      const mediaTitleLower = mediaTitle.toLowerCase();
+      
+      // Check if it contains the base title words
+      const containsBaseWords = baseTitleWords.some((word: string) => 
+        word.length > 2 && mediaTitleLower.includes(word)
+      );
+      
+      // Check for season indicators
+      const hasSeasonIndicator = /season|part|cour|series|\d+(?:st|nd|rd|th)|final|ova|movie/i.test(mediaTitle);
+      
+      return containsBaseWords && (hasSeasonIndicator || media.format === 'TV');
+    });
+    
+    // Merge with existing seasons, avoiding duplicates
+    filteredSearchResults.forEach((searchMedia: any) => {
+      const exists = allSeasons.some(season => season.id === searchMedia.id);
+      if (!exists) {
+        allSeasons.push(searchMedia);
+      }
+    });
+  }
+  
+  // Sort by start date
+  const sortedSeasons = allSeasons.sort((a: any, b: any) => {
+    const aDate = a.startDate;
+    const bDate = b.startDate;
+    
+    if (!aDate || !bDate) return 0;
+    
+    const aYear = aDate.year || 0;
+    const bYear = bDate.year || 0;
+    const aMonth = aDate.month || 1;
+    const bMonth = bDate.month || 1;
+    const aDay = aDate.day || 1;
+    const bDay = bDate.day || 1;
+    
+    if (aYear !== bYear) return aYear - bYear;
+    if (aMonth !== bMonth) return aMonth - bMonth;
+    return aDay - bDay;
+  });
+  
+  return sortedSeasons;
 }; 

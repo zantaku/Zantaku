@@ -59,7 +59,7 @@ export class ZoroHiAnimeProvider {
   private provider = 'zoro';
   private takiApiUrl = 'https://takiapi.xyz';
   private hianimeUrl = 'https://hianime.to';
-  private sourceParserUrl = 'https://shih.kaoru.cat';
+  private sourceParserUrl = 'http://yesgogogototheapi.xyz/proxy?url=';
   private proxyUrl = 'http://yesgogogototheapi.xyz/proxy?url=';
   private videoProxyUrl = 'http://yesgogogototheapi.xyz/proxy/';
 

@@ -1,6 +1,5 @@
 import { Chapter, Provider } from './index';
 import { MangaDexProvider } from './mangadx';
-import { KatanaProvider } from './katana';
 import MangaFireProvider from './mangafire';
 import axios from 'axios';
 
@@ -45,7 +44,7 @@ export class MangaProviderService {
     
     // Determine which providers to try
     const providersToTry: Provider[] = autoSelectSource 
-      ? ['mangafire', 'katana', 'mangadex'] // Try best sources first when auto-select is ON
+      ? ['mangafire', 'mangadex'] // Try best sources first when auto-select is ON
       : [defaultProvider]; // Only try the selected provider when auto-select is OFF
 
     this.logDebug(`Auto-select is ${autoSelectSource ? 'ON' : 'OFF'}`);
@@ -72,24 +71,6 @@ export class MangaProviderService {
               summary: r.description,
               lastUpdated: r.lastUpdated
             }));
-            break;
-
-          case 'katana':
-            const katanaUrl = KatanaProvider.getSearchUrl(title);
-            const katanaResponse = await KatanaProvider.fetchWithFallback(katanaUrl, title, true);
-            
-            if (katanaResponse.success && katanaResponse.data?.results) {
-              results = katanaResponse.data.results.map((r: any) => ({
-                id: r.slugId || r.id,
-                title: r.title,
-                source: 'katana' as Provider,
-                coverImage: r.coverImage,
-                status: r.status,
-                genres: r.genres,
-                summary: r.summary,
-                lastUpdated: r.lastUpdated
-              }));
-            }
             break;
 
           case 'mangadex':
@@ -159,20 +140,6 @@ export class MangaProviderService {
           }));
           break;
 
-        case 'katana':
-          const katanaUrl = KatanaProvider.getSeriesUrl(mangaId);
-          const katanaResponse = await KatanaProvider.fetchWithFallback(katanaUrl, '', false, false);
-          
-          if (katanaResponse.success) {
-            chapters = KatanaProvider.formatChaptersFromResponse(katanaResponse, 'katana')
-              .map(ch => ({
-                ...ch,
-                thumbnail: coverImage,
-                source: 'katana'
-              }));
-          }
-          break;
-
         case 'mangadex':
           const mangadxResponse = await MangaDexProvider.fetchInfo(mangaId);
           
@@ -215,24 +182,6 @@ export class MangaProviderService {
             url: p.url,
             headers: p.headers
           }));
-          break;
-
-        case 'katana':
-          // For Katana, we need to extract the manga slug and chapter ID
-          const [mangaSlug, katanaChapterId] = chapterId.includes('/') 
-            ? chapterId.split('/') 
-            : ['', chapterId];
-          
-          const katanaUrl = KatanaProvider.getChapterUrl(mangaSlug, katanaChapterId);
-          const katanaResponse = await KatanaProvider.fetchWithFallback(katanaUrl, '', false, true, chapterId);
-          
-          if (katanaResponse.success) {
-            const urls = KatanaProvider.parseChapterResponse(katanaResponse);
-            pages = urls.map(url => ({
-              url,
-              headers: KatanaProvider.getImageHeaders()
-            }));
-          }
           break;
 
         case 'mangadex':
@@ -295,8 +244,6 @@ export class MangaProviderService {
           return "MangaDex is currently unavailable due to DMCA restrictions. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
         case 'mangafire':
           return "MangaFire is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
-        case 'katana':
-          return "Katana is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
         default:
           return "The selected provider is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
       }

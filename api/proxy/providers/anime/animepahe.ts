@@ -638,17 +638,133 @@ export class AnimePaheProvider {
 
       console.log(`[ANIMEPAHE] 🎯 Step 2: Finding best match from ${searchResults.length} results...`);
       
-      // Find the best match
+      // Helper function to clean titles for comparison
+      const cleanTitle = (title: string) => {
+        return title
+          .toLowerCase()
+          .replace(/[^\w\s]/g, ' ') // Replace special chars with spaces
+          .replace(/\s+/g, ' ') // Normalize spaces
+          .trim();
+      };
+      
+      // Helper function to extract base title (remove season/arc/part indicators)
+      const getBaseTitle = (title: string) => {
+        return title
+          .replace(/(season|arc|part|cour|series|movie|ova|special)\s*\d*/gi, '')
+          .replace(/\d+(st|nd|rd|th)\s*(season|arc|part|cour|series)/gi, '')
+          .replace(/(final|infinity|castle|entertainment|district|mugen|train|hashira|training)/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+      
+      const queryClean = cleanTitle(animeTitle);
+      const queryBase = cleanTitle(getBaseTitle(animeTitle));
+      
+      console.log(`[ANIMEPAHE] 🔍 Query analysis:`, {
+        original: animeTitle,
+        cleaned: queryClean,
+        baseTitle: queryBase
+      });
+      
+      // Find the best match using multiple strategies
+      let selectedAnime = null;
+      let matchType = '';
+      
+      // 1. Exact match
       const exactMatch = searchResults.find((anime: any) => 
-        anime.title.toLowerCase().trim() === animeTitle.toLowerCase().trim()
+        cleanTitle(anime.title) === queryClean
       );
       
-      const selectedAnime = exactMatch || searchResults[0];
+      if (exactMatch) {
+        selectedAnime = exactMatch;
+        matchType = 'exact';
+      } else {
+        // 2. Base title match (prefer TV series over movies)
+        const baseMatches = searchResults.filter((anime: any) => {
+          const animeBase = cleanTitle(getBaseTitle(anime.title));
+          return animeBase === queryBase || animeBase.includes(queryBase) || queryBase.includes(animeBase);
+        });
+        
+        if (baseMatches.length > 0) {
+          // Prefer TV series over movies, and older releases over newer ones
+          selectedAnime = baseMatches.sort((a: any, b: any) => {
+            // TV series gets priority over movies
+            if (a.type === 'TV' && b.type !== 'TV') return -1;
+            if (b.type === 'TV' && a.type !== 'TV') return 1;
+            
+            // Prefer older releases (more likely to be the main series)
+            const aYear = a.releaseDate ? parseInt(a.releaseDate) : 9999;
+            const bYear = b.releaseDate ? parseInt(b.releaseDate) : 9999;
+            return aYear - bYear;
+          })[0];
+          matchType = 'base-title';
+        } else {
+          // 3. Fuzzy match - find the one with most words in common
+          const scoredResults = searchResults.map((anime: any) => {
+            const animeWords = cleanTitle(anime.title).split(' ');
+            const queryWords = queryBase.split(' ');
+            
+            const commonWords = animeWords.filter(word => 
+              word.length > 2 && queryWords.includes(word)
+            );
+            
+            const score = commonWords.length / Math.max(animeWords.length, queryWords.length);
+            
+            return {
+              anime,
+              score,
+              commonWords: commonWords.length,
+              animeWords: animeWords.length,
+              queryWords: queryWords.length
+            };
+          });
+          
+          // Sort by score, then prefer TV series, then prefer older releases
+          const bestMatch = scoredResults.sort((a, b) => {
+            if (a.score !== b.score) return b.score - a.score;
+            if (a.anime.type === 'TV' && b.anime.type !== 'TV') return -1;
+            if (b.anime.type === 'TV' && a.anime.type !== 'TV') return 1;
+            
+            const aYear = a.anime.releaseDate ? parseInt(a.anime.releaseDate) : 9999;
+            const bYear = b.anime.releaseDate ? parseInt(b.anime.releaseDate) : 9999;
+            return aYear - bYear;
+          })[0];
+          
+          selectedAnime = bestMatch.anime;
+          matchType = `fuzzy (score: ${bestMatch.score.toFixed(2)})`;
+          
+          console.log(`[ANIMEPAHE] 🔍 Fuzzy match analysis:`, {
+            topMatches: scoredResults.slice(0, 3).map(r => ({
+              title: r.anime.title,
+              score: r.score.toFixed(2),
+              type: r.anime.type,
+              year: r.anime.releaseDate,
+              commonWords: r.commonWords
+            }))
+          });
+        }
+      }
+      
+      // Fallback to first result if nothing worked
+      if (!selectedAnime) {
+        // Try to find a TV series first
+        const tvSeries = searchResults.find((anime: any) => anime.type === 'TV');
+        if (tvSeries) {
+          selectedAnime = tvSeries;
+          matchType = 'fallback-tv';
+        } else {
+          selectedAnime = searchResults[0];
+          matchType = 'fallback-first';
+        }
+      }
+      
       console.log(`[ANIMEPAHE] ✅ Selected anime: "${selectedAnime.title}" (ID: ${selectedAnime.id})`);
       console.log(`[ANIMEPAHE] 📊 Match info:`, {
-        isExactMatch: !!exactMatch,
+        matchType,
         selectedTitle: selectedAnime.title,
         selectedId: selectedAnime.id,
+        selectedType: selectedAnime.type,
+        selectedYear: selectedAnime.releaseDate,
         totalEpisodes: selectedAnime.totalEpisodes,
         status: selectedAnime.status
       });

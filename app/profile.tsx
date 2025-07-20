@@ -108,7 +108,7 @@ const TopBar = ({ title, leftIcon, onLeftPress, rightIcon, onRightPress, colors 
         onPress={onLeftPress} 
         activeOpacity={0.7}
       >
-        <MaterialCommunityIcons name={leftIcon} size={22} color={colors.text} />
+        <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
       </TouchableOpacity>
       
       <Text style={[styles.topBarTitle, { color: colors.text }]} numberOfLines={1}>{title}</Text>
@@ -119,10 +119,10 @@ const TopBar = ({ title, leftIcon, onLeftPress, rightIcon, onRightPress, colors 
           onPress={onRightPress} 
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name={rightIcon} size={22} color={colors.text} />
+          <Ionicons name={rightIcon} size={28} color="#FFFFFF" />
         </TouchableOpacity>
       ) : (
-        <View style={styles.topBarButton} />
+        <View style={[styles.topBarButton, { backgroundColor: 'transparent' }]} />
       )}
     </View>
   );
@@ -174,7 +174,7 @@ const CleanHeader = ({ userProfile, isVerified, currentStreak, colors }: any) =>
               </Text>
               {isVerified && (
                 <View style={styles.verifiedBadgeIcon}>
-                  <MaterialCommunityIcons name="check-circle" size={20} color="#1DA1F2" />
+                  <Ionicons name="checkmark-circle" size={24} color="#1DA1F2" />
                 </View>
               )}
             </View>
@@ -182,7 +182,7 @@ const CleanHeader = ({ userProfile, isVerified, currentStreak, colors }: any) =>
             <View style={styles.tagsRow}>
               {currentStreak > 0 && (
                 <View style={[styles.streakTag, { backgroundColor: colors.warning + '15' }]}>
-                  <MaterialCommunityIcons name="fire" size={14} color={colors.warning} />
+                  <Ionicons name="flame" size={18} color="#FF6B35" />
                   <Text style={[styles.streakText, { color: colors.warning }]}>{currentStreak} day streak</Text>
                 </View>
               )}
@@ -202,7 +202,7 @@ const StatPill = ({ icon, label, value, color, colors }: any) => (
     tokens.shadows.light
   ]}>
     <View style={[styles.statIconContainer, { backgroundColor: color + '15' }]}>
-      <MaterialCommunityIcons name={icon} size={24} color={color} />
+      <Ionicons name={icon} size={28} color={color} />
     </View>
     <View>
       <Text style={[styles.statValue, { color: colors.text }]}>{value}</Text>
@@ -221,7 +221,7 @@ const SectionCard = ({ title, icon, children, action, colors }: any) => (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleRow}>
         <View style={[styles.sectionIconContainer, { backgroundColor: colors.accent + '15' }]}>
-          <MaterialCommunityIcons name={icon} size={24} color={colors.accent} />
+          <Ionicons name={icon} size={24} color="#3B82F6" />
         </View>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
       </View>
@@ -251,11 +251,11 @@ const FavoriteCard = ({ item, type, onPress, colors }: any) => {
           <Image source={{ uri: imageUrl }} style={styles.favoriteImage} resizeMode="cover" />
         ) : (
           <View style={styles.favoritePlaceholder}>
-            <MaterialCommunityIcons name="image" size={32} color={colors.subtext} />
+            <Ionicons name="image" size={32} color="#6B7280" />
           </View>
         )}
-        <View style={[styles.favoriteHeart, { backgroundColor: colors.error + 'CC' }]}>
-          <MaterialCommunityIcons name="heart" size={14} color="#FFFFFF" />
+        <View style={[styles.favoriteHeart, { backgroundColor: "#EF4444" }]}>
+          <Ionicons name="heart" size={16} color="#FFFFFF" />
         </View>
       </View>
       <Text style={[styles.favoriteName, { color: colors.text }]} numberOfLines={2}>
@@ -271,37 +271,37 @@ const StatusGrid = ({ title, data, type, colors }: any) => {
     CURRENT: { 
       label: type === 'anime' ? 'Watching' : 'Reading', 
       icon: 'play-circle', 
-      color: colors.accent 
+      color: '#3B82F6' 
     },
     COMPLETED: { 
       label: 'Completed', 
-      icon: 'check-circle', 
-      color: colors.success 
+      icon: 'checkmark-circle', 
+      color: '#10B981' 
     },
     PLANNING: { 
       label: 'Planning', 
-      icon: 'calendar-plus', 
-      color: colors.purple 
+      icon: 'calendar', 
+      color: '#8B5CF6' 
     },
     DROPPED: { 
       label: 'Dropped', 
       icon: 'close-circle', 
-      color: colors.error 
+      color: '#EF4444' 
     },
   };
 
   return (
-    <SectionCard title={title} icon={type === 'anime' ? 'television' : 'book-open-variant'} colors={colors}>
+    <SectionCard title={title} icon={type === 'anime' ? 'tv' : 'library'} colors={colors}>
       <View style={styles.statusGrid}>
         {Object.entries(statusConfig).map(([key, config]) => (
           <TouchableOpacity key={key} style={styles.statusCardContainer} activeOpacity={0.8}>
             <View style={[
               styles.statusCard, 
-              { backgroundColor: config.color + '10', borderColor: config.color + '20' },
+              { backgroundColor: colors.elevated, borderColor: colors.border },
               tokens.shadows.light
             ]}>
-              <View style={styles.statusIconContainer}>
-                <MaterialCommunityIcons name={config.icon as any} size={32} color={config.color} />
+              <View style={[styles.statusIconContainer, { backgroundColor: config.color + '15' }]}>
+                <Ionicons name={config.icon as any} size={32} color={config.color} />
               </View>
               <Text style={[styles.statusValue, { color: colors.text }]}>
                 {data[key as keyof typeof data] || 0}
@@ -463,7 +463,7 @@ const ProfileScreen = () => {
         <TopBar title="Profile" leftIcon="chevron-left" onLeftPress={() => router.back()} colors={colors} />
         <View style={styles.centerContainer}>
           <View style={[styles.emptyIconContainer, { backgroundColor: colors.card }]}>
-            <MaterialCommunityIcons name="account-circle" size={64} color={colors.subtext} />
+            <Ionicons name="person-circle" size={64} color="#6B7280" />
           </View>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>Sign in to AniList</Text>
           <Text style={[styles.emptySubtitle, { color: colors.subtext }]}>Track your anime and manga progress</Text>
@@ -498,7 +498,7 @@ const ProfileScreen = () => {
         <TopBar title="Profile" leftIcon="chevron-left" onLeftPress={() => router.back()} colors={colors} />
         <View style={styles.centerContainer}>
           <View style={[styles.emptyIconContainer, { backgroundColor: colors.card }]}>
-            <MaterialCommunityIcons name="alert-circle" size={64} color={colors.error} />
+            <Ionicons name="alert-circle" size={64} color="#EF4444" />
           </View>
           <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
           <TouchableOpacity 
@@ -534,41 +534,41 @@ const ProfileScreen = () => {
           {/* Clean Stats Pills Row */}
           <View style={styles.statsRow}>
             <StatPill 
-              icon="television" 
+              icon="tv" 
               label="Anime" 
               value={stats.totalAnime} 
-              color={colors.accent}
+              color="#3B82F6"
               colors={colors} 
             />
             <StatPill 
-              icon="clock-outline" 
+              icon="time" 
               label="Days" 
               value={stats.daysWatched} 
-              color={colors.success}
+              color="#10B981"
               colors={colors} 
             />
           </View>
           
           <View style={styles.statsRow}>
             <StatPill 
-              icon="book-open-variant" 
+              icon="library" 
               label="Manga" 
               value={stats.totalManga} 
-              color={colors.purple}
+              color="#8B5CF6"
               colors={colors} 
             />
             <StatPill 
-              icon="bookmark-outline" 
+              icon="bookmark" 
               label="Chapters" 
               value={`${(stats.chaptersRead / 1000).toFixed(1)}k`} 
-              color={colors.warning}
+              color="#F59E0B"
               colors={colors} 
             />
           </View>
         
           {/* About Section */}
           {userProfile?.about && (
-            <SectionCard title="About" icon="account-heart" colors={colors}>
+            <SectionCard title="About" icon="person" colors={colors}>
               <View style={styles.aboutContainer}>
                 <Text style={[styles.aboutText, { color: colors.text }]}>
                   {userProfile.about.replace(/<[^>]*>/g, '')}
@@ -581,7 +581,7 @@ const ProfileScreen = () => {
           {userProfile?.favourites?.anime?.nodes && userProfile.favourites.anime.nodes.length > 0 && (
             <SectionCard 
               title="Favorite Anime" 
-              icon="television"
+              icon="tv"
               action={
                 <View style={[styles.countBadge, { backgroundColor: colors.accent + '15' }]}>
                   <Text style={[styles.countText, { color: colors.accent }]}>
@@ -609,7 +609,7 @@ const ProfileScreen = () => {
           {userProfile?.favourites?.manga?.nodes && userProfile.favourites.manga.nodes.length > 0 && (
             <SectionCard 
               title="Favorite Manga" 
-              icon="book-open-variant"
+              icon="library"
               action={
                 <View style={[styles.countBadge, { backgroundColor: colors.purple + '15' }]}>
                   <Text style={[styles.countText, { color: colors.purple }]}>
@@ -637,7 +637,7 @@ const ProfileScreen = () => {
           {userProfile?.favourites?.characters?.nodes && userProfile.favourites.characters.nodes.length > 0 && (
             <SectionCard 
               title="Favorite Characters" 
-              icon="account-group"
+              icon="people"
               action={
                 <View style={[styles.countBadge, { backgroundColor: colors.success + '15' }]}>
                   <Text style={[styles.countText, { color: colors.success }]}>
@@ -801,9 +801,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   statIconContainer: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
+    width: 48, 
+    height: 48, 
+    borderRadius: 24, 
     justifyContent: 'center', 
     alignItems: 'center', 
     marginRight: 12,
@@ -819,15 +819,21 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacing.md },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center' },
   sectionIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: tokens.spacing.sm,
   },
   sectionTitle: { fontSize: 18, fontWeight: '600' },
-  countBadge: { paddingHorizontal: tokens.spacing.sm, paddingVertical: 4, borderRadius: tokens.radius.sm },
+  countBadge: { 
+    paddingHorizontal: tokens.spacing.sm, 
+    paddingVertical: 4, 
+    borderRadius: tokens.radius.sm,
+    minWidth: 24,
+    alignItems: 'center',
+  },
   countText: { fontSize: 12, fontWeight: '600' },
   
   // About
@@ -854,11 +860,11 @@ const styles = StyleSheet.create({
   },
   favoriteHeart: { 
     position: 'absolute', 
-    top: 8, 
-    right: 8, 
-    borderRadius: 12, 
-    width: 24, 
-    height: 24, 
+    top: 6, 
+    right: 6, 
+    borderRadius: 10, 
+    width: 20, 
+    height: 20, 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
@@ -879,7 +885,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  statusIconContainer: { marginBottom: tokens.spacing.sm },
+  statusIconContainer: { 
+    marginBottom: tokens.spacing.sm,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   statusValue: { 
     fontSize: 24, 
     fontWeight: '700', 

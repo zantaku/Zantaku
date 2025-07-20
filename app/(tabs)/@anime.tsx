@@ -13,6 +13,7 @@ import { useOrientation } from '../../hooks/useOrientation';
 import { useSettings } from '../../hooks/useSettings';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../../constants/auth';
+import PersonalizedRecommendations from '../../components/PersonalizedRecommendations';
 
 // Use the correct AniList GraphQL endpoint
 const ANILIST_API = 'https://graphql.anilist.co';
@@ -157,10 +158,25 @@ export default function AnimeScreen() {
   const [top100Anime, setTop100Anime] = useState<Anime[]>([]);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [showSearch, setShowSearch] = useState(false);
+  const [userId, setUserId] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     // Fetch data immediately without waiting for settings
     fetchData();
+    
+    // Get user ID for personalized recommendations
+    const getUserId = async () => {
+      try {
+        const userIdStr = await SecureStore.getItemAsync(STORAGE_KEY.USER_ID);
+        if (userIdStr) {
+          setUserId(parseInt(userIdStr, 10));
+        }
+      } catch (error) {
+        console.error('Error getting user ID:', error);
+      }
+    };
+    
+    getUserId();
 
     // Listen for search event
     const searchSubscription = DeviceEventEmitter.addListener('showSearch', () => {
@@ -1006,6 +1022,13 @@ export default function AnimeScreen() {
           />
           {renderPaginationDots()}
         </View>
+        
+        {/* Personalized Recommendations Section */}
+        {userId && (
+          <View style={styles.section}>
+            <PersonalizedRecommendations userId={userId} showAdultContent={settings?.displayAdultContent || false} />
+          </View>
+        )}
 
         {/* Airing Schedule Section */}
         <View style={styles.section}>
@@ -1927,4 +1950,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-}); 
+});

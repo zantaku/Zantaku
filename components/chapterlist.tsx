@@ -319,7 +319,44 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
             mangaTitle.english
         ].filter((title): title is string => Boolean(title)); // Remove null/undefined values and ensure type safety
 
-        if (titleVariations.length === 0) {
+        // Add specific title mappings for common variations
+        const titleMappings: Record<string, string[]> = {
+            'Uma Musume: Peace Peace★Supi Supi Gol': [
+                'Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan',
+                'ウマ娘 ピスピス☆スピスピ ゴルシちゃん',
+                'Uma Musume PisuPisu☆SupiSupi Golshi-chan',
+                'golshi-chan',
+                'golshi chan',
+                'PisuPisu SupiSupi'
+            ],
+            'Uma Musume: Peace Peace☆Supi Supi Gol': [
+                'Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan',
+                'ウマ娘 ピスピス☆スピスピ ゴルシちゃん',
+                'Uma Musume PisuPisu☆SupiSupi Golshi-chan',
+                'golshi-chan',
+                'golshi chan',
+                'PisuPisu SupiSupi'
+            ],
+            'Uma Musume: Peace Peace': [
+                'Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan',
+                'golshi-chan',
+                'PisuPisu SupiSupi'
+            ]
+        };
+
+        // Add mapped variations to the search list
+        for (const originalTitle of titleVariations) {
+            if (titleMappings[originalTitle]) {
+                titleVariations.push(...titleMappings[originalTitle]);
+            }
+        }
+
+        // Remove duplicates while preserving order
+        const uniqueTitleVariations = titleVariations.filter((title, index) => 
+            titleVariations.indexOf(title) === index
+        );
+
+        if (uniqueTitleVariations.length === 0) {
             setError("Manga title is missing.");
             setIsLoading(false);
             return;
@@ -327,8 +364,87 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
 
         let lastError: Error | null = null;
 
+        // Helper function to find the best match from search results
+        const findBestMatch = (results: any[], searchTitle: string): any => {
+            if (results.length === 0) return null;
+            
+            // First, try to find an exact match (case insensitive)
+            const exactMatch = results.find(r => 
+                r.title.toLowerCase() === searchTitle.toLowerCase()
+            );
+            if (exactMatch) return exactMatch;
+            
+            // Special case: Look for "golshi" or "gol-shi" in the title
+            // This is a unique identifier for "Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan"
+            const golshiMatch = results.find(r => 
+                r.title.toLowerCase().includes('golshi') || 
+                r.title.toLowerCase().includes('gol-shi') ||
+                r.title.toLowerCase().includes('golshi-chan')
+            );
+            if (golshiMatch) {
+                logDebug(`Found golshi match: "${golshiMatch.title}" for search "${searchTitle}"`);
+                logDebug(`Golshi match ID: "${golshiMatch.id}"`);
+                return golshiMatch;
+            }
+            
+            // Additional check: Look for the specific ID we know is correct
+            const correctIdMatch = results.find(r => 
+                r.id === 'uma-musume-pretty-derby-pisupisusupisupi-golshi-chann.3p4v8'
+            );
+            if (correctIdMatch) {
+                logDebug(`Found correct ID match: "${correctIdMatch.title}" with ID: "${correctIdMatch.id}"`);
+                return correctIdMatch;
+            }
+            
+            // If no exact match, try to find the best partial match
+            const searchWords = searchTitle.toLowerCase().split(/\s+/).filter(word => word.length > 2);
+            let bestMatch = results[0];
+            let bestScore = 0;
+            
+            for (const result of results) {
+                const resultTitle = result.title.toLowerCase();
+                let score = 0;
+                
+                // Check how many search words are found in the result title
+                for (const word of searchWords) {
+                    if (resultTitle.includes(word)) {
+                        score += word.length; // Longer words get more weight
+                    }
+                }
+                
+                // Bonus for matching at the beginning of the title
+                if (resultTitle.startsWith(searchWords[0] || '')) {
+                    score += 10;
+                }
+                
+                // Bonus for having similar length
+                const lengthDiff = Math.abs(resultTitle.length - searchTitle.length);
+                if (lengthDiff < 10) {
+                    score += 5;
+                }
+                
+                // Special bonus for "Uma Musume Pretty Derby" titles
+                if (resultTitle.includes('uma musume pretty derby')) {
+                    score += 15;
+                }
+                
+                // Penalty for "Cinderella Gray" when we're looking for something else
+                if (resultTitle.includes('cinderella gray') && !searchTitle.toLowerCase().includes('cinderella')) {
+                    score -= 20;
+                }
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = result;
+                }
+            }
+            
+            logDebug(`Best match found: "${bestMatch.title}" with score ${bestScore} for search "${searchTitle}"`);
+            return bestMatch;
+        };
+
         // Try each title variation until we find results
-        for (const titleToSearch of titleVariations) {
+        for (const titleToSearch of uniqueTitleVariations) {
             try {
                 logDebug(`Searching for "${titleToSearch}" with preferences:`, prefs);
                 
@@ -340,12 +456,30 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                     continue;
                 }
 
-                // Step 2: Find the best match
-                const bestMatch = results.find(r => r.title.toLowerCase() === titleToSearch.toLowerCase()) || results[0];
+                // Step 2: Find the best match using improved algorithm
+                const bestMatch = findBestMatch(results, titleToSearch);
+                if (!bestMatch) {
+                    logDebug(`No suitable match found for "${titleToSearch}", trying next variation...`);
+                    continue;
+                }
+                
                 setInternalMangaId(bestMatch.id);
                 setProvider(successfulProvider);
                 
                 logDebug(`Found manga: ${bestMatch.title} (ID: ${bestMatch.id}) from ${successfulProvider} using title: "${titleToSearch}"`);
+                
+                // Log if this might be the wrong manga
+                if (mangaTitle.userPreferred && bestMatch.title !== mangaTitle.userPreferred) {
+                    logDebug(`⚠️ Potential wrong manga detected! Expected: "${mangaTitle.userPreferred}", Found: "${bestMatch.title}"`);
+                }
+                
+                // Log the exact ID being used
+                logDebug(`🔍 Using manga ID: "${bestMatch.id}" for title: "${bestMatch.title}"`);
+                
+                // Check if this is the correct golshi-chan manga
+                if (bestMatch.title.includes('Golshi-chan') || bestMatch.title.includes('golshi')) {
+                    logDebug(`✅ Found correct golshi-chan manga: "${bestMatch.title}" with ID: "${bestMatch.id}"`);
+                }
 
                 // Step 3: Get chapters for the manga
                 const chapters = await MangaProviderService.getChapters(bestMatch.id, successfulProvider, coverImage);
@@ -375,7 +509,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
 
         // If we get here, all title variations failed
         logError('Failed to load chapters with any title variation:', lastError);
-        const errorMessage = `Could not find manga with any of the available titles: ${titleVariations.join(', ')}. ${MangaProviderService.getProviderErrorMessage(prefs.defaultProvider, prefs.autoSelectSource)}`;
+        const errorMessage = `Could not find manga with any of the available titles: ${uniqueTitleVariations.join(', ')}. ${MangaProviderService.getProviderErrorMessage(prefs.defaultProvider, prefs.autoSelectSource)}`;
         setError(errorMessage);
         setIsLoading(false);
     }, [mangaTitle, coverImage]);
@@ -384,9 +518,18 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         const loadPrefs = async () => {
             try {
                 const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
-                                 setPreferences(prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' };
+                
+                // Migrate from Katana to MangaFire if needed
+                if (prefs.defaultProvider === 'katana') {
+                    prefs.defaultProvider = 'mangafire';
+                    await AsyncStorage.setItem('mangaProviderPreferences', JSON.stringify(prefs));
+                    logDebug('Migrated default provider from katana to mangafire');
+                }
+                
+                setPreferences(prefs);
             } catch {
-                                 setPreferences({ defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                setPreferences({ defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' });
             }
         };
         const loadSortOrder = async () => {
@@ -534,7 +677,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         switch (provider) {
             case 'mangafire': return '#f44336';
             case 'mangadex': return '#FF6740';
-            case 'katana': return '#4CAF50';
+    
             default: return '#02A9FF';
         }
     };
@@ -543,7 +686,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         switch (provider) {
             case 'mangafire': return 'Mangafire';
             case 'mangadex': return 'MangaDex';
-            case 'katana': return 'Katana';
+    
             default: return 'Unknown';
         }
     };
@@ -568,7 +711,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                         style={styles.changeProviderButton}
                         onPress={() => {
                             // Cycle through providers
-                            const providers: Provider[] = ['mangafire', 'mangadex', 'katana'];
+                            const providers: Provider[] = ['mangafire', 'mangadex'];
                             const currentIndex = providers.indexOf(provider);
                             const nextProvider = providers[(currentIndex + 1) % providers.length];
                             handleProviderChange(nextProvider);
@@ -583,7 +726,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                         {[
                             { id: 'mangafire', name: 'Mangafire', color: '#f44336' },
                             { id: 'mangadex', name: 'MangaDex', color: '#FF6740' },
-                            { id: 'katana', name: 'Katana', color: '#4CAF50' }
                         ].map((providerOption) => (
                             <TouchableOpacity
                                 key={providerOption.id}
@@ -621,6 +763,34 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                         {currentMangaTitle}
                     </Text>
                     <FontAwesome5 name="edit" size={12} color={currentTheme.colors.textSecondary} />
+                    {/* Warning indicator if wrong manga detected */}
+                    {(() => {
+                        if (!currentMangaTitle || !mangaTitle.userPreferred) return null;
+                        
+                        const currentWords = currentMangaTitle.toLowerCase().split(/\s+/);
+                        const expectedWords = mangaTitle.userPreferred.toLowerCase().split(/\s+/);
+                        
+                        // Check if the current manga title is significantly different from expected
+                        const hasCommonWords = expectedWords.some(word => 
+                            word.length > 2 && currentWords.some(cw => cw.includes(word) || word.includes(cw))
+                        );
+                        
+                        // Check for specific cases like "Uma Musume" vs "Uma Musume: Cinderella Gray"
+                        const isWrongManga = !hasCommonWords || 
+                            (currentMangaTitle.includes('Cinderella Gray') && !mangaTitle.userPreferred.includes('Cinderella Gray'));
+                        
+                        if (isWrongManga) {
+                            return (
+                                <TouchableOpacity 
+                                    style={styles.warningIndicator}
+                                    onPress={() => setShowCorrectMangaModal(true)}
+                                >
+                                    <FontAwesome5 name="exclamation-triangle" size={10} color="#FFA500" />
+                                </TouchableOpacity>
+                            );
+                        }
+                        return null;
+                    })()}
                 </TouchableOpacity>
             </View>
         </View>
@@ -927,5 +1097,11 @@ const styles = StyleSheet.create({
     },
     continueArrow: {
         marginLeft: 12,
+    },
+    warningIndicator: {
+        marginLeft: 8,
+        padding: 4,
+        borderRadius: 4,
+        backgroundColor: 'rgba(255, 165, 0, 0.2)',
     },
 });

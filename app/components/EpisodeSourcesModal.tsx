@@ -853,7 +853,7 @@ export default function EpisodeSourcesModal({
             console.log(`📡 [ZORO] 1. Extract episode ID from: "${episodeId}"`);
             console.log(`📡 [ZORO] 2. Get servers from: https://hianime.to/ajax/v2/episode/servers?episodeId={extracted_id}`);
             console.log(`📡 [ZORO] 3. Get source link from: https://hianime.to/ajax/v2/episode/sources?id={server_id}`);
-            console.log(`📡 [ZORO] 4. Parse stream data from iframe URL via: https://shih.kaoru.cat/sources?url={iframe_url}`);
+            console.log(`📡 [ZORO] 4. Parse stream data from Megacloud getSources with AES decryption`);
             console.log(`📡 [ZORO] 5. All URLs will be proxied through: http://yesgogogototheapi.xyz/proxy?url={encoded_url}`);
             
             try {

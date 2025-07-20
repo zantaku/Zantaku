@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ import {
   MemoryManager 
 } from '../utils/performanceOptimization';
 import OptimizedImage from './OptimizedImage';
+import { fetchRelatedSeasons } from '../api/anilist/queries';
 
 // Device capabilities for performance optimization
 const deviceCapabilities = detectDeviceCapabilities();
@@ -128,6 +129,31 @@ interface NotificationItem {
   title: string;
   lastKnownNumber: number;
   anilistId?: string;
+}
+
+interface Season {
+  id: string;
+  title: {
+    userPreferred: string;
+    english?: string;
+    romaji?: string;
+    native?: string;
+  };
+  format: string;
+  status: string;
+  startDate: {
+    year?: number;
+    month?: number;
+    day?: number;
+  };
+  episodes?: number;
+  coverImage?: {
+    large: string;
+    color?: string;
+  };
+  averageScore?: number;
+  season?: string;
+  seasonYear?: number;
 }
 // #endregion
 
@@ -543,6 +569,13 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [activeTab, setActiveTab] = useState('1-12');
     const [episodeProgressMap, setEpisodeProgressMap] = useState<Record<string, EpisodeProgress>>({});
     
+    // NEW: State for season switching
+    const [availableSeasons, setAvailableSeasons] = useState<Season[]>([]);
+    const [currentSeason, setCurrentSeason] = useState<Season | null>(null);
+    const [showSeasonDropdown, setShowSeasonDropdown] = useState(false);
+    const [seasonsLoading, setSeasonsLoading] = useState(false);
+    const [seasonsCache, setSeasonsCache] = useState<Record<string, Season[]>>({});
+    
     // NEW: State for provider-specific episodes
     const [providerEpisodes, setProviderEpisodes] = useState<Episode[]>([]);
     const [providerLoading, setProviderLoading] = useState(false);
@@ -560,15 +593,80 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         };
     }, []);
 
+    // NEW: Function to fetch related seasons
+    const fetchRelatedSeasonsData = useCallback(async (anilistId: string, animeTitle: string) => {
+        console.log(`\n🔄 [EPISODE_LIST] SEASONS FETCH START ===================`);
+        console.log(`[EPISODE_LIST] 🔄 Fetching seasons for:`, { anilistId, animeTitle });
+        
+        // Check cache first
+        const cacheKey = `${anilistId}_${animeTitle}`;
+        if (seasonsCache[cacheKey]) {
+            console.log(`[EPISODE_LIST] 📦 Using cached seasons for ${animeTitle}`);
+            setAvailableSeasons(seasonsCache[cacheKey]);
+            return seasonsCache[cacheKey];
+        }
+        
+        setSeasonsLoading(true);
+        
+        try {
+            // Fetch related seasons using AniList API
+            const seasons = await fetchRelatedSeasons(anilistId, animeTitle);
+            
+            console.log(`[EPISODE_LIST] ✅ Fetched ${seasons.length} seasons:`, 
+                seasons.map(s => ({
+                    id: s.id,
+                    title: s.title.userPreferred || s.title.romaji,
+                    year: s.startDate?.year,
+                    episodes: s.episodes
+                }))
+            );
+            
+            setAvailableSeasons(seasons);
+            
+            // Cache the results
+            setSeasonsCache(prev => ({
+                ...prev,
+                [cacheKey]: seasons
+            }));
+            
+            // Set current season if not already set
+            if (!currentSeason) {
+                const currentSeasonData = seasons.find(s => s.id === anilistId) || seasons[0];
+                setCurrentSeason(currentSeasonData);
+                console.log(`[EPISODE_LIST] 🎯 Set current season:`, currentSeasonData?.title.userPreferred);
+            }
+            
+            console.log(`🔄 [EPISODE_LIST] SEASONS FETCH END ===================\n`);
+            return seasons;
+            
+        } catch (error) {
+            console.error(`[EPISODE_LIST] ❌ Error fetching seasons:`, error);
+            setAvailableSeasons([]);
+            return [];
+        } finally {
+            setSeasonsLoading(false);
+        }
+    }, [anilistId, seasonsCache, currentSeason]);
+
     // NEW: Function to fetch episodes from selected provider
     const fetchEpisodesFromProvider = useCallback(async (provider: 'animepahe' | 'zoro') => {
         console.log(`\n🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH START ===================`);
         console.log(`[EPISODE_LIST] 🔄 Fetching episodes from provider: ${provider}`);
+        
+        // Use current season's title if available, otherwise use the current anime title (which may have been updated by CorrectAnimeSearchModal)
+        // This ensures that the season switcher and correct anime search work independently
+        const titleToUse = currentSeason?.title.userPreferred || currentSeason?.title.romaji || currentAnimeTitle || animeTitle;
+        const anilistIdToUse = currentSeason?.id || anilistId;
+        
         console.log(`[EPISODE_LIST] 📊 Context:`, {
-            animeTitle,
-            anilistId,
-            malId,
-            provider
+            originalTitle: animeTitle,
+            currentAnimeTitle,
+            currentSeasonTitle: currentSeason?.title.userPreferred,
+            titleToUse,
+            originalAnilistId: anilistId,
+            currentSeasonId: anilistIdToUse,
+            provider,
+            hasCurrentSeason: !!currentSeason
         });
         
         setProviderLoading(true);
@@ -578,15 +676,15 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             let fetchedEpisodes: Episode[] = [];
             
             if (provider === 'animepahe') {
-                if (!animeTitle) {
+                if (!titleToUse) {
                     throw new Error('Anime title is required for AnimePahe provider');
                 }
                 
-                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 1: Getting anime ID for: "${animeTitle}"`);
-                const animeId = await animePaheProvider.getAnimeIdByTitle(animeTitle);
+                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 1: Getting anime ID for: "${titleToUse}"`);
+                const animeId = await animePaheProvider.getAnimeIdByTitle(titleToUse);
                 
                 if (!animeId) {
-                    throw new Error(`Could not find AnimePahe ID for: ${animeTitle}`);
+                    throw new Error(`Could not find AnimePahe ID for: ${titleToUse}`);
                 }
                 
                 console.log(`[EPISODE_LIST] ✅ [ANIMEPAHE] Found anime ID: ${animeId}`);
@@ -621,14 +719,14 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 }
                 
             } else if (provider === 'zoro') {
-                if (!animeTitle) {
+                if (!titleToUse) {
                     throw new Error('Anime title is required for Zoro provider');
                 }
                 
                 const isDub = preferredAudioType === 'dub';
-                console.log(`[EPISODE_LIST] 🔍 [ZORO] Getting episodes for anime title: "${animeTitle}", audio type: ${preferredAudioType.toUpperCase()}`);
+                console.log(`[EPISODE_LIST] 🔍 [ZORO] Getting episodes for anime title: "${titleToUse}", audio type: ${preferredAudioType.toUpperCase()}`);
                 console.log(`[EPISODE_LIST] 🔄 [ZORO] Using new reliable search+info method (instead of AniList meta)`);
-                fetchedEpisodes = await zoroProvider.getEpisodes(animeTitle, isDub);
+                fetchedEpisodes = await zoroProvider.getEpisodes(titleToUse, isDub);
                 
                 console.log(`[EPISODE_LIST] ✅ [ZORO] Fetched ${fetchedEpisodes.length} episodes using search+info method`);
                 if (fetchedEpisodes.length > 0) {
@@ -643,7 +741,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                         }))
                     );
                 } else {
-                    console.log(`[EPISODE_LIST] ❌ [ZORO] No episodes found for anime title: "${animeTitle}"`);
+                    console.log(`[EPISODE_LIST] ❌ [ZORO] No episodes found for anime title: "${titleToUse}"`);
                 }
             }
             
@@ -672,16 +770,36 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             console.error(`[EPISODE_LIST] ❌ Error fetching episodes from ${provider}:`, {
                 errorMessage: (error as any)?.message,
                 errorCode: (error as any)?.code,
+                httpStatus: (error as any)?.response?.status,
+                titleUsed: titleToUse,
+                anilistIdUsed: anilistIdToUse,
                 stack: (error as any)?.stack?.split('\n').slice(0, 3).join('\n')
             });
             console.log(`🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH ERROR END ===================\n`);
             
-            setProviderError(`Failed to fetch episodes from ${provider}: ${(error as any)?.message || 'Unknown error'}`);
+            // More specific error messages
+            let errorMessage = `Failed to fetch episodes from ${provider}`;
+            if ((error as any)?.response?.status === 404) {
+                errorMessage = `Season not found on ${getProviderName(provider)}. Try switching to ${getProviderName(provider === 'animepahe' ? 'zoro' : 'animepahe')} provider.`;
+            } else if ((error as any)?.code === 'ERR_NETWORK') {
+                errorMessage = `Network error. Please check your connection and try again.`;
+            } else if ((error as any)?.message) {
+                errorMessage = `${getProviderName(provider)} error: ${(error as any).message}`;
+            }
+            
+            setProviderError(errorMessage);
             setProviderEpisodes([]);
         } finally {
             setProviderLoading(false);
         }
-    }, [animeTitle, anilistId]);
+    }, [animeTitle, anilistId, currentSeason, currentAnimeTitle, preferredAudioType]);
+
+    // NEW: Effect to fetch seasons when component mounts
+    useEffect(() => {
+        if (anilistId && animeTitle) {
+            fetchRelatedSeasonsData(anilistId, animeTitle);
+        }
+    }, [anilistId, animeTitle, fetchRelatedSeasonsData]);
 
     // NEW: Effect to fetch episodes when provider changes
     useEffect(() => {
@@ -1053,10 +1171,48 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     }, [sourceSettings, fetchEpisodesFromProvider]);
 
     const handleAnimeSelect = useCallback((anime: any) => {
+        console.log(`[EPISODE_LIST] 🔄 User selected new anime from search:`, {
+            title: anime.title,
+            id: anime.id,
+            currentSeasonTitle: currentSeason?.title.userPreferred,
+            currentSeasonId: currentSeason?.id
+        });
+        
         setCurrentAnimeTitle(anime.title);
         setShowCorrectAnimeModal(false);
-        // Additional logic for anime selection if needed
-    }, []);
+        
+        // Clear current episodes and fetch new ones for the selected anime
+        setProviderEpisodes([]);
+        setProviderError(null);
+        
+        // Fetch episodes for the selected anime with current provider
+        fetchEpisodesFromProvider(currentProvider);
+    }, [currentProvider, fetchEpisodesFromProvider, currentSeason]);
+
+    const handleSeasonChange = useCallback((season: Season) => {
+        console.log(`[EPISODE_LIST] 🔄 Season changed to:`, season.title.userPreferred);
+        setCurrentSeason(season);
+        setShowSeasonDropdown(false);
+        
+        // Clear current episodes and fetch new ones for the selected season
+        setProviderEpisodes([]);
+        setProviderError(null);
+        
+        // Update anime title for the new season
+        const newTitle = season.title.userPreferred || season.title.romaji || season.title.english || '';
+        setCurrentAnimeTitle(newTitle);
+        
+        console.log(`[EPISODE_LIST] 📝 Season change details:`, {
+            oldTitle: currentAnimeTitle,
+            newTitle,
+            seasonId: season.id,
+            originalAnilistId: anilistId,
+            provider: currentProvider
+        });
+        
+        // Fetch episodes for the new season
+        fetchEpisodesFromProvider(currentProvider);
+    }, [currentProvider, fetchEpisodesFromProvider, currentAnimeTitle, anilistId]);
 
     // Render functions
     const getProviderName = useCallback((provider: string) => {
@@ -1106,114 +1262,202 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         }
     }, [columnCount, handleEpisodePress, currentProgress, currentTheme, isDarkMode, coverImage, preferredAudioType, handleAudioError, episodeProgressMap]);
 
-    const renderProviderChanger = () => {
+    // NEW: Unified Filter Card Component
+    const renderUnifiedFilterCard = () => {
         return (
-            <View style={[styles.providerChanger, { backgroundColor: currentTheme.colors.surface }]}>
-                <View style={styles.providerInfo}>
-                    <View style={styles.providerRow}>
-                        <View style={[styles.providerBadge, { backgroundColor: currentProvider === 'animepahe' ? '#4CAF50' : '#2196F3' }]}>
-                            <Text style={styles.providerBadgeText}>
-                                {getProviderName(currentProvider)}
-                            </Text>
-                        </View>
-                        <TouchableOpacity
-                            style={styles.changeProviderButton}
-                            onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+            <View style={[styles.unifiedFilterCard, { backgroundColor: currentTheme.colors.surface }]}>
+                {/* Anime Title Row */}
+                <View style={styles.filterRow}>
+                    <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: currentTheme.colors.textSecondary }]}>🎬 Anime Title</Text>
+                        <TouchableOpacity 
+                            style={[styles.filterDropdown, { borderColor: currentTheme.colors.border }]}
+                            onPress={() => setShowCorrectAnimeModal(true)}
                         >
-                            <FontAwesome5 name="chevron-down" size={14} color={currentTheme.colors.text} />
+                            <Text style={[styles.filterDropdownText, { color: currentTheme.colors.text }]} numberOfLines={1}>
+                                {currentAnimeTitle}
+                            </Text>
+                            <FontAwesome5 name="chevron-down" size={12} color={currentTheme.colors.textSecondary} />
+                        </TouchableOpacity>
+                        </View>
+                </View>
+
+                {/* Three-Column Filter Row */}
+                <View style={styles.filterTripleRow}>
+                    {/* Season Selector */}
+                    {availableSeasons.length > 1 && (
+                        <View style={styles.filterSectionSmall}>
+                            <Text style={[styles.filterLabelSmall, { color: currentTheme.colors.textSecondary }]}>📺 Season</Text>
+                        <TouchableOpacity
+                                style={[styles.filterDropdownSmall, { borderColor: currentTheme.colors.border }]}
+                            onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
+                            disabled={seasonsLoading}
+                        >
+                                <Text style={[styles.filterDropdownTextSmall, { color: currentTheme.colors.text }]} numberOfLines={1}>
+                                    {currentSeason?.startDate?.year ? `S${currentSeason.startDate.year}` : 'S1'}
+                                </Text>
+                            {seasonsLoading ? (
+                                    <ActivityIndicator size="small" color={currentTheme.colors.textSecondary} />
+                            ) : (
+                                    <FontAwesome5 name="chevron-down" size={10} color={currentTheme.colors.textSecondary} />
+                            )}
                         </TouchableOpacity>
                     </View>
-                    <View style={styles.animeTitleContainer}>
-                        <Text style={[styles.animeTitle, { color: currentTheme.colors.text }]} numberOfLines={1}>
-                            {currentAnimeTitle}
+                    )}
+
+                    {/* Provider Selector */}
+                    <View style={styles.filterSectionSmall}>
+                        <Text style={[styles.filterLabelSmall, { color: currentTheme.colors.textSecondary }]}>🌐 Provider</Text>
+                        <TouchableOpacity 
+                            style={[styles.filterDropdownSmall, { borderColor: currentTheme.colors.border }]}
+                            onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+                        >
+                            <Text style={[styles.filterDropdownTextSmall, { color: currentTheme.colors.text }]}>
+                                {getProviderName(currentProvider)}
                         </Text>
-                        <TouchableOpacity onPress={() => setShowCorrectAnimeModal(true)}>
-                            <FontAwesome5 name="edit" size={14} color={currentTheme.colors.textSecondary} />
+                            <FontAwesome5 name="chevron-down" size={10} color={currentTheme.colors.textSecondary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Audio Preference */}
+                    <View style={styles.filterSectionSmall}>
+                        <Text style={[styles.filterLabelSmall, { color: currentTheme.colors.textSecondary }]}>🎧 Language</Text>
+                        <TouchableOpacity 
+                            style={[
+                                styles.filterDropdownSmall, 
+                                { borderColor: currentTheme.colors.border },
+                                !canToggle && styles.filterDropdownDisabled
+                            ]}
+                            onPress={canToggle ? handleAudioTypeToggle : undefined}
+                            disabled={!canToggle}
+                        >
+                            <Text style={[
+                                styles.filterDropdownTextSmall, 
+                                { color: currentTheme.colors.text },
+                                !canToggle && styles.filterDropdownTextDisabled
+                            ]}>
+                                {preferredAudioType.toUpperCase()}
+                            </Text>
+                            <FontAwesome5 name="chevron-down" size={10} color={currentTheme.colors.textSecondary} />
                         </TouchableOpacity>
                     </View>
                 </View>
                 
+                {/* Reset/Refresh Button */}
+                <View style={styles.filterActionsRow}>
+                    <TouchableOpacity 
+                        style={[styles.refreshButton, { backgroundColor: currentTheme.colors.primary }]}
+                        onPress={() => fetchEpisodesFromProvider(currentProvider)}
+                    >
+                        <FontAwesome5 name="sync-alt" size={12} color="#FFFFFF" />
+                        <Text style={styles.refreshButtonText}>Refresh Episodes</Text>
+                    </TouchableOpacity>
+                    
+                    {notificationsEnabled && (
+                        <View style={styles.notificationIndicator}>
+                            <FontAwesome5 name="bell" size={12} color="#02A9FF" />
+                            <Text style={[styles.notificationText, { color: currentTheme.colors.textSecondary }]}>
+                                Notifications On
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                {/* Dropdowns */}
+                {showSeasonDropdown && availableSeasons.length > 1 && (
+                    <View style={[styles.inlineDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
+                        <ScrollView style={styles.inlineDropdownScroll} showsVerticalScrollIndicator={false}>
+                            {availableSeasons.map((season) => (
+                                <TouchableOpacity
+                                    key={season.id}
+                                    style={[
+                                        styles.inlineDropdownItem,
+                                        currentSeason?.id === season.id && styles.inlineDropdownItemActive,
+                                        { borderBottomColor: currentTheme.colors.border }
+                                    ]}
+                                    onPress={() => handleSeasonChange(season)}
+                                >
+                                        <Text style={[
+                                        styles.inlineDropdownItemText,
+                                            { color: currentTheme.colors.text },
+                                        currentSeason?.id === season.id && styles.inlineDropdownItemTextActive
+                                        ]} numberOfLines={1}>
+                                            {season.title.userPreferred || season.title.romaji}
+                                        </Text>
+                                    <Text style={[styles.inlineDropdownItemMeta, { color: currentTheme.colors.textSecondary }]}>
+                                        {season.startDate?.year || 'Unknown'} • {season.episodes || '?'} eps
+                                        </Text>
+                                    {currentSeason?.id === season.id && (
+                                        <FontAwesome5 name="check" size={12} color={currentTheme.colors.primary} />
+                                    )}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+                
                 {showProviderDropdown && (
-                    <View style={[styles.providerDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
+                    <View style={[styles.inlineDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
                         {(['animepahe', 'zoro'] as const).map((provider) => (
                             <TouchableOpacity
                                 key={provider}
                                 style={[
-                                    styles.providerDropdownItem,
-                                    currentProvider === provider && styles.providerDropdownItemActive,
+                                    styles.inlineDropdownItem,
+                                    currentProvider === provider && styles.inlineDropdownItemActive,
                                     { borderBottomColor: currentTheme.colors.border }
                                 ]}
                                 onPress={() => handleProviderChange(provider)}
                             >
                                 <View style={[
-                                    styles.providerDropdownBadge,
+                                    styles.inlineProviderDot,
                                     { backgroundColor: provider === 'animepahe' ? '#4CAF50' : '#2196F3' }
                                 ]} />
                                 <Text style={[
-                                    styles.providerDropdownText,
+                                    styles.inlineDropdownItemText,
                                     { color: currentTheme.colors.text },
-                                    currentProvider === provider && styles.providerDropdownTextActive
+                                    currentProvider === provider && styles.inlineDropdownItemTextActive
                                 ]}>
                                     {getProviderName(provider)}
                                 </Text>
                                 {currentProvider === provider && (
-                                    <FontAwesome5 name="check" size={14} color={currentTheme.colors.primary} />
+                                    <FontAwesome5 name="check" size={12} color={currentTheme.colors.primary} />
                                 )}
                             </TouchableOpacity>
                         ))}
+                    </View>
+                )}
+
+                {/* Status Messages */}
+                {isBackgroundRefreshing && (
+                    <View style={styles.statusMessage}>
+                        <ActivityIndicator size="small" color="#02A9FF" />
+                        <Text style={[styles.statusMessageText, { color: currentTheme.colors.textSecondary }]}>
+                            ✅ Switched to {getProviderName(currentProvider)} • Fetching episodes...
+                        </Text>
                     </View>
                 )}
             </View>
         );
     };
 
-    const renderHeader = () => {
-        const rangeKeys = Object.keys(episodeRanges);
-        if (rangeKeys.length <= 1) return null;
-
-        return (
-            <FlatList
-                data={rangeKeys}
-                renderItem={({ item }) => (
-                    <TouchableOpacity
-                        style={[
-                            styles.rangeButton,
-                            activeTab === item && styles.activeRangeButton
-                        ]}
-                        onPress={() => setActiveTab(item)}
-                    >
-                        <Text style={[
-                            styles.rangeButtonText,
-                            activeTab === item && styles.activeRangeButtonText
-                        ]}>
-                            {item}
-                        </Text>
-                    </TouchableOpacity>
-                )}
-                keyExtractor={(item) => item}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rangeSelector}
-            />
-        );
-    };
-
-    const ContinueWatchingButton = ({ episodes, currentProgress, onPress, currentTheme, coverImage, preferredAudioType }: any) => {
-        const nextEpisode = episodes.find((ep: Episode) => ep.number === currentProgress + 1);
+    // NEW: Simplified Continue Watching Banner
+    const renderContinueWatchingBanner = () => {
+        const episodesToUse = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+        const nextEpisode = episodesToUse.find((ep: Episode) => ep.number === currentProgress + 1);
         if (!nextEpisode) return null;
 
         return (
             <TouchableOpacity
-                style={[styles.continueButton, { backgroundColor: currentTheme.colors.surface }]}
-                onPress={() => onPress(nextEpisode)}
+                style={[styles.continueWatchingBanner, { backgroundColor: currentTheme.colors.surface }]}
+                onPress={() => handleEpisodePress(nextEpisode)}
             >
-                <View style={styles.continueButtonContent}>
-                    <View style={styles.continueThumbnailContainer}>
+                <View style={styles.continueWatchingContent}>
+                    <View style={styles.continueWatchingThumbnail}>
                         <OptimizedImage
                             uri={nextEpisode.image || coverImage || ''}
-                            width={80}
-                            height={60}
-                            style={styles.continueThumbnail}
+                            width={60}
+                            height={40}
+                            style={styles.continueWatchingImage}
                             placeholder={PLACEHOLDER_BLUR_HASH}
                             resizeMode="cover"
                             isVisible={true}
@@ -1221,73 +1465,100 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                             reduceMemoryUsage={false}
                             index={0}
                         />
-                        <View style={styles.continueOverlay}>
-                            <FontAwesome5 name="play" size={20} color="#FFFFFF" />
+                        <View style={styles.continueWatchingPlayIcon}>
+                            <FontAwesome5 name="play" size={12} color="#FFFFFF" />
                         </View>
                     </View>
-                    <View style={styles.continueTextContainer}>
-                        <Text style={[styles.continueButtonText, { color: currentTheme.colors.text }]}>
-                            Continue Watching
+                    <View style={styles.continueWatchingText}>
+                        <Text style={[styles.continueWatchingTitle, { color: currentTheme.colors.text }]}>
+                            ⏯️ Continue Watching: Ep {nextEpisode.number}
                         </Text>
-                        <Text style={[styles.continueProgressText, { color: currentTheme.colors.textSecondary }]}>
-                            Episode {nextEpisode.number} • {preferredAudioType === 'sub' ? 'Subbed' : 'Dubbed'}
-                        </Text>
-                        <Text style={[styles.continueEpisodeTitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
+                        <Text style={[styles.continueWatchingSubtitle, { color: currentTheme.colors.textSecondary }]} numberOfLines={1}>
                             {nextEpisode.title || `Episode ${nextEpisode.number}`}
                         </Text>
                     </View>
-                    <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} style={styles.continueArrow} />
+                    <View style={styles.continueWatchingButton}>
+                        <Text style={styles.continueWatchingButtonText}>▶ Resume</Text>
+                    </View>
                 </View>
             </TouchableOpacity>
         );
     };
 
-    const AudioTypeToggle = () => {
+    // NEW: Swipeable Episode Range Tabs
+    const renderEpisodeRangeTabs = () => {
+        const rangeKeys = Object.keys(episodeRanges);
+        if (rangeKeys.length <= 1) return null;
+
         return (
-            <View style={styles.audioToggleContainer}>
+            <View style={styles.episodeRangeTabsContainer}>
+                <FlatList
+                    data={rangeKeys}
+                    renderItem={({ item }) => (
                 <TouchableOpacity
                     style={[
-                        styles.audioToggleButton,
-                        !canToggle && styles.audioToggleDisabled,
-                        { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }
+                                styles.episodeRangeTab,
+                                activeTab === item && [styles.episodeRangeTabActive, { backgroundColor: currentTheme.colors.primary }],
+                                { borderColor: currentTheme.colors.border }
                     ]}
-                    onPress={canToggle ? handleAudioTypeToggle : undefined}
-                    disabled={!canToggle}
+                            onPress={() => setActiveTab(item)}
                 >
-                    <View style={styles.audioToggleContent}>
                         <Text style={[
-                            styles.audioToggleText,
-                            preferredAudioType === 'sub' && styles.audioToggleTextActive,
-                            !audioTypeAvailability.sub && styles.audioToggleTextDisabled,
-                            { color: currentTheme.colors.text }
+                                styles.episodeRangeTabText,
+                                { color: currentTheme.colors.text },
+                                activeTab === item && styles.episodeRangeTabTextActive
                         ]}>
-                            SUB
+                                {item === 'All' ? 'All Episodes' : `Episodes ${item}`}
                         </Text>
-                        <View style={[
-                            styles.audioToggleSwitch,
-                            preferredAudioType === 'dub' && styles.audioToggleSwitchDub,
-                            !canToggle && styles.audioToggleSwitchDisabled
-                        ]}>
-                            <View style={[
-                                styles.audioToggleSwitchThumb,
-                                preferredAudioType === 'dub' && styles.audioToggleSwitchThumbDub
-                            ]} />
-                        </View>
-                        <Text style={[
-                            styles.audioToggleText,
-                            preferredAudioType === 'dub' && styles.audioToggleTextActive,
-                            !audioTypeAvailability.dub && styles.audioToggleTextDisabled,
-                            { color: currentTheme.colors.text }
-                        ]}>
-                            DUB
-                        </Text>
-                    </View>
-                    {!audioTypeAvailability.dub && (
-                        <Text style={[styles.audioToggleHint, { color: currentTheme.colors.textSecondary }]}>
-                            SUB only
-                        </Text>
+                        </TouchableOpacity>
                     )}
+                    keyExtractor={(item) => item}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.episodeRangeTabsList}
+                />
+                        </View>
+        );
+    };
+
+    // NEW: Episode Header with Controls
+    const renderEpisodeHeader = () => {
+        const episodesToUse = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+        
+        return (
+            <View style={styles.episodeHeader}>
+                <View style={styles.episodeHeaderLeft}>
+                    <Text style={[styles.episodeHeaderTitle, { color: currentTheme.colors.text }]}>
+                        Episodes
+                        </Text>
+                    <Text style={[styles.episodeHeaderCount, { color: currentTheme.colors.textSecondary }]}>
+                        {episodesToUse.length} episodes
+                        </Text>
+                </View>
+                <View style={styles.episodeHeaderRight}>
+                    <TouchableOpacity 
+                        style={[styles.episodeHeaderButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} 
+                        onPress={handleSortToggle}
+                    >
+                        <FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={14} color={currentTheme.colors.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={[styles.episodeHeaderButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} 
+                        onPress={handleColumnToggle}
+                    >
+                        <FontAwesome5 name={columnCount === 1 ? "th-large" : "th-list"} size={14} color={currentTheme.colors.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={[
+                            styles.episodeHeaderButton, 
+                            notificationsEnabled && styles.episodeHeaderButtonActive,
+                            { backgroundColor: notificationsEnabled ? currentTheme.colors.primary : (isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)') }
+                        ]} 
+                        onPress={handleNotificationToggle}
+                    >
+                        <FontAwesome5 name={notificationsEnabled ? "bell" : "bell-slash"} size={14} color={notificationsEnabled ? "#FFFFFF" : currentTheme.colors.text} />
                 </TouchableOpacity>
+                </View>
             </View>
         );
     };
@@ -1328,12 +1599,30 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 <Text style={[styles.emptyText, { color: currentTheme.colors.textSecondary }]}>
                     {providerError}
                 </Text>
-                <TouchableOpacity 
-                    style={[styles.headerButton, { backgroundColor: currentTheme.colors.primary, marginTop: 16 }]}
-                    onPress={() => fetchEpisodesFromProvider(currentProvider)}
-                >
-                    <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Retry</Text>
-                </TouchableOpacity>
+                <View style={styles.errorButtons}>
+                    <TouchableOpacity 
+                        style={[styles.headerButton, { backgroundColor: currentTheme.colors.primary, marginTop: 16 }]}
+                        onPress={() => fetchEpisodesFromProvider(currentProvider)}
+                    >
+                        <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Retry</Text>
+                    </TouchableOpacity>
+                    {currentProvider === 'animepahe' && (
+                        <TouchableOpacity 
+                            style={[styles.headerButton, { backgroundColor: '#2196F3', marginTop: 8 }]}
+                            onPress={() => handleProviderChange('zoro')}
+                        >
+                            <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Try Zoro</Text>
+                        </TouchableOpacity>
+                    )}
+                    {currentProvider === 'zoro' && (
+                        <TouchableOpacity 
+                            style={[styles.headerButton, { backgroundColor: '#4CAF50', marginTop: 8 }]}
+                            onPress={() => handleProviderChange('animepahe')}
+                        >
+                            <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Try AnimePahe</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
         );
     }
@@ -1353,47 +1642,31 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
 
     return (
         <View style={styles.container}>
-            {showProviderDropdown && (
+            {/* Dropdown Overlay */}
+            {(showProviderDropdown || showSeasonDropdown) && (
                 <TouchableOpacity 
                     style={styles.dropdownOverlay}
                     activeOpacity={1}
-                    onPress={() => setShowProviderDropdown(false)}
+                    onPress={() => {
+                        setShowProviderDropdown(false);
+                        setShowSeasonDropdown(false);
+                    }}
                 />
             )}
-            {renderProviderChanger()}
-            <ContinueWatchingButton 
-                episodes={episodesToShow}
-                currentProgress={currentProgress}
-                onPress={handleEpisodePress}
-                currentTheme={currentTheme}
-                coverImage={coverImage}
-                preferredAudioType={preferredAudioType}
-            />
-            <View style={styles.headerWrapper}>
-                <View style={styles.header}>
-                    <Text style={[styles.titleText, { color: currentTheme.colors.text }]}>Episodes</Text>
-                    <View style={styles.headerButtons}>
-                        <AudioTypeToggle />
-                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleSortToggle}>
-                            <FontAwesome5 name={isNewestFirst ? "sort-numeric-down" : "sort-numeric-up"} size={16} color={currentTheme.colors.text} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.notificationButton, notificationsEnabled && styles.notificationButtonEnabled]} onPress={handleNotificationToggle}>
-                            <FontAwesome5 name={notificationsEnabled ? "bell" : "bell-slash"} size={16} color={notificationsEnabled ? "#FFFFFF" : currentTheme.colors.text} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.headerButton, { backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)' }]} onPress={handleColumnToggle}>
-                            <FontAwesome5 name={columnCount === 1 ? "th-large" : "th-list"} size={16} color={currentTheme.colors.text} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-                {renderHeader()}
-                {isBackgroundRefreshing && (
-                    <View style={styles.backgroundRefreshIndicator}>
-                        <ActivityIndicator size="small" color="#02A9FF" />
-                        <Text style={styles.backgroundRefreshText}>Updating from {getProviderName(currentProvider)}...</Text>
-                    </View>
-                )}
-            </View>
 
+            {/* NEW: Unified Filter Card */}
+            {renderUnifiedFilterCard()}
+
+            {/* NEW: Simplified Continue Watching Banner */}
+            {renderContinueWatchingBanner()}
+
+            {/* NEW: Swipeable Episode Range Tabs */}
+            {renderEpisodeRangeTabs()}
+
+            {/* NEW: Episode Header with Controls */}
+            {renderEpisodeHeader()}
+
+            {/* Episode List */}
             <FlashList
                 ref={flashListRef}
                 data={activeRange}
@@ -1405,6 +1678,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 contentContainerStyle={styles.listContentContainer}
             />
 
+            {/* Modals */}
             <EpisodeSourcesModal
                 visible={modalVisible}
                 episodeId={selectedEpisode ? (
@@ -1444,30 +1718,322 @@ export default EpisodeList;
 const styles = StyleSheet.create({
     container: { flex: 1, width: '100%' },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-    emptyEpisodes: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40, paddingHorizontal: 20 },
-    emptyText: { marginTop: 16, fontSize: 16, textAlign: 'center' },
-    headerWrapper: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-    titleText: { fontSize: 20, fontWeight: '700' },
-    headerButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    headerButton: { padding: 8, borderRadius: 20, width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
-    notificationButton: { padding: 8, borderRadius: 20, backgroundColor: 'rgba(128, 128, 128, 0.2)', width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
-    notificationButtonEnabled: { backgroundColor: '#02A9FF' },
-    latestEpisodeBanner: { marginBottom: 12, borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
-    latestEpisodeContent: { flexDirection: 'row', alignItems: 'center', padding: 12 },
-    latestEpisodeIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(2, 169, 255, 0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    latestEpisodeInfo: { flex: 1 },
-    latestEpisodeText: { fontSize: 15, fontWeight: '600' },
-    nextEpisodeText: { fontSize: 13, marginTop: 2 },
-    rangeSelector: { paddingVertical: 4, paddingHorizontal: 4 },
-    rangeButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(128, 128, 128, 0.3)', marginHorizontal: 4, backgroundColor: 'transparent' },
-    activeRangeButton: { backgroundColor: '#02A9FF', borderColor: '#02A9FF' },
-    rangeButtonText: { fontWeight: '600', fontSize: 13, color: 'rgba(255, 255, 255, 0.7)' },
-    activeRangeButtonText: { color: '#FFFFFF' },
-    backgroundRefreshIndicator: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 4, gap: 6 },
-    backgroundRefreshText: { fontSize: 12, color: '#02A9FF', fontWeight: '500' },
+          emptyEpisodes: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40, paddingHorizontal: 20 },
+      emptyText: { marginTop: 16, fontSize: 16, textAlign: 'center' },
+      errorButtons: { alignItems: 'center', marginTop: 8 },
+    
+    // NEW: Unified Filter Card Styles
+    unifiedFilterCard: {
+        marginHorizontal: 16,
+        marginTop: 16,
+        marginBottom: 12,
+        borderRadius: 16,
+        padding: 20,
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+        zIndex: 1000,
+        position: 'relative',
+    },
+    filterRow: {
+        marginBottom: 16,
+    },
+    filterSection: {
+        gap: 8,
+    },
+    filterLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    filterDropdown: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderWidth: 1, 
+        borderRadius: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    filterDropdownText: {
+        fontSize: 16,
+        fontWeight: '600',
+        flex: 1,
+    },
+    filterTripleRow: {
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 16,
+    },
+    filterSectionSmall: {
+        flex: 1,
+        gap: 6,
+    },
+    filterLabelSmall: {
+        fontSize: 11, 
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
+    },
+    filterDropdownSmall: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        minHeight: 40,
+    },
+    filterDropdownTextSmall: {
+        fontSize: 13,
+        fontWeight: '600',
+        flex: 1,
+    },
+    filterDropdownDisabled: {
+        opacity: 0.5,
+    },
+    filterDropdownTextDisabled: {
+        opacity: 0.6,
+    },
+    filterActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    refreshButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 12,
+        gap: 8,
+    },
+    refreshButtonText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    notificationIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    notificationText: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    
+    // Inline Dropdown Styles
+    inlineDropdown: {
+        marginTop: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        maxHeight: 200,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+    },
+    inlineDropdownScroll: {
+        maxHeight: 200,
+    },
+    inlineDropdownItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        gap: 12,
+    },
+    inlineDropdownItemActive: {
+        backgroundColor: 'rgba(2, 169, 255, 0.1)',
+    },
+    inlineDropdownItemText: {
+        fontSize: 14,
+        fontWeight: '500',
+        flex: 1,
+    },
+    inlineDropdownItemTextActive: {
+        fontWeight: '600',
+        color: '#02A9FF',
+    },
+    inlineDropdownItemMeta: {
+        fontSize: 12,
+        fontWeight: '400',
+    },
+    inlineProviderDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
+    statusMessage: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 12,
+        gap: 8,
+    },
+    statusMessageText: {
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    
+    // NEW: Continue Watching Banner Styles
+    continueWatchingBanner: {
+        marginHorizontal: 16,
+        marginBottom: 12,
+        borderRadius: 12,
+        overflow: 'hidden',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    continueWatchingContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+    },
+    continueWatchingThumbnail: {
+        width: 60,
+        height: 40,
+        borderRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+        marginRight: 16,
+    },
+    continueWatchingImage: {
+        width: '100%',
+        height: '100%',
+    },
+    continueWatchingPlayIcon: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    continueWatchingText: {
+        flex: 1,
+    },
+    continueWatchingTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        marginBottom: 2,
+    },
+    continueWatchingSubtitle: {
+        fontSize: 12,
+        fontWeight: '400',
+    },
+    continueWatchingButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#02A9FF',
+        borderRadius: 8,
+    },
+    continueWatchingButtonText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    
+    // NEW: Episode Range Tabs Styles
+    episodeRangeTabsContainer: {
+        marginBottom: 12,
+    },
+    episodeRangeTabsList: {
+        paddingHorizontal: 16,
+        gap: 8,
+    },
+    episodeRangeTab: {
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 20,
+        borderWidth: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        marginRight: 8,
+    },
+    episodeRangeTabActive: {
+        borderColor: '#02A9FF',
+        shadowColor: '#02A9FF',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    episodeRangeTabText: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    episodeRangeTabTextActive: {
+        color: '#FFFFFF',
+    },
+    
+    // NEW: Episode Header Styles
+    episodeHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        marginBottom: 8,
+    },
+    episodeHeaderLeft: {
+        gap: 4,
+    },
+    episodeHeaderTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    episodeHeaderCount: {
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    episodeHeaderRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    episodeHeaderButton: {
+        padding: 10,
+        borderRadius: 20,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    episodeHeaderButtonActive: {
+        shadowColor: '#02A9FF',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    
+    // Existing styles with some cleanup
+    dropdownOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 999,
+    },
     listContentContainer: { paddingHorizontal: 10, paddingBottom: Platform.OS === 'ios' ? 100 : 90 },
     cardWrapper: { flex: 1, padding: 6 },
+    
+    // ... rest of existing styles remain the same ...
     // Modern Grid Card Styles
     gridEpisodeCard: { 
         backgroundColor: '#1c1c1e', 
@@ -1690,238 +2256,6 @@ const styles = StyleSheet.create({
     },
     listWatchButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
     watchedListCard: { backgroundColor: '#2c2c2e' },
-    
-    // Provider changer styles
-    providerChanger: {
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 12,
-        padding: 16,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        zIndex: 10000,
-        position: 'relative',
-    },
-    providerInfo: {
-        gap: 12,
-    },
-    providerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    providerBadge: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    providerBadgeText: {
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    changeProviderButton: {
-        padding: 8,
-        borderRadius: 20,
-        backgroundColor: 'rgba(128,128,128,0.2)',
-        width: 36,
-        height: 36,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    animeTitleContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 4,
-    },
-    animeTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        flex: 1,
-        marginRight: 8,
-    },
-    // Provider dropdown styles
-    providerDropdown: {
-        position: 'absolute',
-        top: 50,
-        left: 0,
-        right: 0,
-        borderRadius: 8,
-        borderWidth: 1,
-        elevation: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        zIndex: 9999,
-    },
-    providerDropdownItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-    },
-    providerDropdownItemActive: {
-        backgroundColor: 'rgba(128,128,128,0.1)',
-    },
-    providerDropdownBadge: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        marginRight: 12,
-    },
-    providerDropdownText: {
-        fontSize: 14,
-        fontWeight: '500',
-        flex: 1,
-    },
-    providerDropdownTextActive: {
-        fontWeight: '600',
-    },
-    dropdownOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 9998,
-    },
-    
-    // Continue Watching Button Styles
-    continueButton: {
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 12,
-        overflow: 'hidden',
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-    },
-    continueButtonContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-    },
-    continueThumbnailContainer: {
-        width: 80,
-        height: 60,
-        borderRadius: 8,
-        overflow: 'hidden',
-        position: 'relative',
-        marginRight: 16,
-    },
-    continueThumbnail: {
-        width: '100%',
-        height: '100%',
-    },
-    continueOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    continueTextContainer: {
-        flex: 1,
-        justifyContent: 'center',
-    },
-    continueButtonText: {
-        fontSize: 18,
-        fontWeight: '700',
-        marginBottom: 4,
-    },
-    continueProgressText: {
-        fontSize: 14,
-        marginBottom: 2,
-    },
-    continueEpisodeTitle: {
-        fontSize: 12,
-        fontStyle: 'italic',
-    },
-    continueArrow: {
-        marginLeft: 12,
-    },
-    
-    // Audio Type Toggle Styles
-    audioToggleContainer: {
-        marginRight: 8,
-    },
-    audioToggleButton: {
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: 8,
-        borderRadius: 20,
-        minWidth: 60,
-    },
-    audioToggleDisabled: {
-        opacity: 0.5,
-    },
-    audioToggleContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    audioToggleText: {
-        fontSize: 11,
-        fontWeight: '600',
-        textAlign: 'center',
-    },
-    audioToggleTextActive: {
-        fontWeight: '700',
-        color: '#02A9FF',
-    },
-    audioToggleTextDisabled: {
-        opacity: 0.4,
-    },
-    audioToggleSwitch: {
-        width: 24,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        position: 'relative',
-        marginHorizontal: 2,
-    },
-    audioToggleSwitchDub: {
-        backgroundColor: '#02A9FF',
-    },
-    audioToggleSwitchDisabled: {
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    audioToggleSwitchThumb: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: '#FFFFFF',
-        position: 'absolute',
-        top: 1,
-        left: 1,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.2,
-        shadowRadius: 2,
-        elevation: 2,
-    },
-    audioToggleSwitchThumbDub: {
-        left: 13,
-    },
-    audioToggleHint: {
-        fontSize: 9,
-        fontWeight: '500',
-        marginTop: 2,
-        textAlign: 'center',
-    },
 
     // Unavailable Episode Styles
     unavailableCard: {
@@ -2026,4 +2360,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
         fontWeight: '500',
     },
+    
+    // Legacy styles that are still needed
+    headerButton: { padding: 8, borderRadius: 20, width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
 });

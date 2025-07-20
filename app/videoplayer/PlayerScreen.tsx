@@ -414,14 +414,14 @@ const PlayerScreen: React.FC = () => {
   const videoSource = useMemo(() => {
     if (!videoData?.source) return '';
     
-    // Both providers use direct streaming - shih.kaoru.cat already handles Zoro proxying
+                  // Both providers use direct streaming - Megacloud decryption handles Zoro sources
     const finalUrl = videoData.source;
     
     console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
     console.log(`🔗 Provider: ${detectedProvider.toUpperCase()}`);
     
     if (detectedProvider === 'zoro') {
-      console.log(`🔒 [ZORO] Using M3U8 from shih.kaoru.cat (already proxied)`);
+                    console.log(`🔒 [ZORO] Using M3U8 from Megacloud decryption (already proxied)`);
     } else {
       console.log(`🔓 [ANIMEPAHE] Using direct stream`);
     }
@@ -466,7 +466,7 @@ const PlayerScreen: React.FC = () => {
         console.log(`[EXPO-VIDEO] 🎬 Player created and configured for ${detectedProvider.toUpperCase()}`);
         console.log(`[EXPO-VIDEO] 📡 Using ${videoHeaders && Object.keys(videoHeaders).length > 0 ? 'custom' : 'no'} headers`);
         if (detectedProvider === 'zoro') {
-          console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from shih.kaoru.cat (pre-processed)`);
+                        console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from Megacloud decryption (pre-processed)`);
         }
         
         // Monitor video status and errors via polling

@@ -30,9 +30,18 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
         const loadPrefs = async () => {
             try {
                 const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
-                setPreferences(prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' };
+                
+                // Migrate from Katana to MangaFire if needed
+                if (prefs.defaultProvider === 'katana') {
+                    prefs.defaultProvider = 'mangafire';
+                    await AsyncStorage.setItem('mangaProviderPreferences', JSON.stringify(prefs));
+                    console.log('Migrated default provider from katana to mangafire');
+                }
+                
+                setPreferences(prefs);
             } catch {
-                setPreferences({ defaultProvider: 'mangadex', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                setPreferences({ defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' });
             }
         };
         loadPrefs();
@@ -51,9 +60,63 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
         setLoading(true);
         try {
             console.log('Searching for manga:', searchQuery);
-            const { results: searchResults } = await MangaProviderService.searchManga(searchQuery, preferences);
-            console.log('Search results:', searchResults);
-            setResults(searchResults.map((item: any) => ({
+            
+            // Try multiple search variations to get better results
+            const searchVariations = [
+                searchQuery.trim(),
+                searchQuery.trim().replace(/[★☆]/g, ''), // Remove special characters
+                searchQuery.trim().replace(/Peace Peace/, 'PisuPisu'), // Common title variation
+                searchQuery.trim().replace(/Supi Supi/, 'SupiSupi'), // Common title variation
+                // Add specific variations for golshi-chan
+                'golshi-chan',
+                'golshi chan',
+                'PisuPisu SupiSupi',
+                'Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan',
+                'Uma Musume Pretty Derby golshi-chan'
+            ];
+            
+            let allResults: any[] = [];
+            
+            for (const variation of searchVariations) {
+                try {
+                    const { results: searchResults } = await MangaProviderService.searchManga(variation, preferences);
+                    allResults = [...allResults, ...searchResults];
+                } catch (error) {
+                    console.log(`Search variation "${variation}" failed:`, error);
+                }
+            }
+            
+            // Remove duplicates based on ID
+            const uniqueResults = allResults.filter((result, index, self) => 
+                index === self.findIndex(r => r.id === result.id)
+            );
+            
+            // Sort results to prioritize the correct manga
+            const sortedResults = uniqueResults.sort((a, b) => {
+                const aTitle = a.title.toLowerCase();
+                const bTitle = b.title.toLowerCase();
+                
+                // Prioritize golshi-chan manga
+                const aHasGolshi = aTitle.includes('golshi') || aTitle.includes('gol-shi');
+                const bHasGolshi = bTitle.includes('golshi') || bTitle.includes('gol-shi');
+                
+                if (aHasGolshi && !bHasGolshi) return -1;
+                if (!aHasGolshi && bHasGolshi) return 1;
+                
+                // Then prioritize "Uma Musume Pretty Derby" over "Uma Musume: Cinderella Gray"
+                const aHasPrettyDerby = aTitle.includes('pretty derby');
+                const bHasPrettyDerby = bTitle.includes('pretty derby');
+                const aHasCinderella = aTitle.includes('cinderella gray');
+                const bHasCinderella = bTitle.includes('cinderella gray');
+                
+                if (aHasPrettyDerby && !bHasPrettyDerby && bHasCinderella) return -1;
+                if (!aHasPrettyDerby && aHasCinderella && bHasPrettyDerby) return 1;
+                
+                return 0;
+            });
+            
+            console.log('Search results:', sortedResults);
+            setResults(sortedResults.map((item: any) => ({
                 id: item.id,
                 title: item.title,
                 image: item.coverImage || ''
@@ -119,6 +182,18 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
                         <Text style={styles.searchButtonText}>Search</Text>
                     </TouchableOpacity>
                 </View>
+                {searchQuery && (
+                    <View style={styles.searchInfo}>
+                        <Text style={styles.searchInfoText}>
+                            Searching for: "{searchQuery}"
+                        </Text>
+                        {results.length > 0 && (
+                            <Text style={styles.searchInfoText}>
+                                Found {results.length} results
+                            </Text>
+                        )}
+                    </View>
+                )}
                 {loading ? (
                     <ActivityIndicator style={styles.loader} />
                 ) : (
@@ -217,5 +292,12 @@ const styles = StyleSheet.create({
         color: '#fff',
         flex: 1,
         fontSize: 16,
+    },
+    searchInfo: {
+        marginBottom: 10,
+    },
+    searchInfoText: {
+        color: '#fff',
+        fontSize: 14,
     },
 }); 
