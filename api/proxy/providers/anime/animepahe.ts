@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { CONSUMET_API_URL } from '../../../../app/constants/api';
-import { AUTO_DETECT_TIMING } from '../../../../app/videoplayer/constants';
-import { Episode, Source, Subtitle, VideoTimings, WatchResponse } from './zorohianime';
+// import { AUTO_DETECT_TIMING } from '../../../../app/videoplayer/constants';
+import { Episode, Source, Subtitle, WatchResponse } from './zorohianime';
+import { getStreams as kjGetStreams, resolveAnimeId as kjResolve, getProvidersForEpisode as kjGetProviders, getEpisodes as kjGetEpisodes } from '../../../kuroji';
 
 export class AnimePaheProvider {
   private baseUrl = `${CONSUMET_API_URL}`;
@@ -124,33 +125,18 @@ export class AnimePaheProvider {
    * Get episodes from AnimePahe
    */
   async getEpisodes(animeId: string): Promise<Episode[]> {
-    console.log(`\n📺 [ANIMEPAHE EPISODES START] ===================`);
-    console.log(`[ANIMEPAHE] 📺 Getting episodes for anime ID: ${animeId}`);
-    
+    // Try TakiAPI first
     try {
+      console.log(`\n📺 [ANIMEPAHE EPISODES START] ===================`);
+      console.log(`[ANIMEPAHE] 📺 Getting episodes for anime ID: ${animeId}`);
       const episodesUrl = `${this.baseUrl}/anime/animepahe/info/${animeId}`;
       console.log(`[ANIMEPAHE] 📡 Episodes URL: ${episodesUrl}`);
-      
-      console.log(`[ANIMEPAHE] ⏱️ Making episodes request...`);
       const response = await axios.get(episodesUrl);
-      
-      console.log(`[ANIMEPAHE] ✅ Episodes response received`);
-      console.log(`[ANIMEPAHE] 📊 Response status: ${response.status}`);
-      console.log(`[ANIMEPAHE] 📊 Response data structure:`, {
-        hasData: !!response.data,
-        hasEpisodes: !!response.data?.episodes,
-        episodesCount: response.data?.episodes?.length || 0,
-        dataKeys: Object.keys(response.data || {})
-      });
-      
-      if (!response.data || !response.data.episodes) {
-        console.log('[ANIMEPAHE] ❌ No episodes found in response');
-        console.log(`📺 [ANIMEPAHE EPISODES END] ===================\n`);
-        return [];
+      console.log(`[ANIMEPAHE] ✅ Episodes response received (status ${response.status})`);
+      if (!response.data || !Array.isArray(response.data?.episodes)) {
+        throw new Error('No episodes in TakiAPI response');
       }
-
-      const episodes = response.data.episodes.map((ep: any, index: number) => {
-        const episode = {
+      const episodes: Episode[] = response.data.episodes.map((ep: any) => ({
           id: ep.id,
           number: ep.number,
           title: ep.title,
@@ -158,57 +144,36 @@ export class AnimePaheProvider {
           description: ep.description,
           duration: ep.duration,
           provider: 'AnimePahe',
-          isSubbed: true, // AnimePahe provides subbed content
-          isDubbed: false, // AnimePahe does NOT provide dubbed content
+        isSubbed: true,
+        isDubbed: false,
           isFiller: ep.isFiller,
           isRecap: ep.isRecap,
-          aired: ep.aired
-        };
-        
-        if (index < 3) { // Log first 3 episodes
-          console.log(`[ANIMEPAHE] 📝 Episode ${index + 1}:`, {
-            id: episode.id,
-            number: episode.number,
-            title: episode.title,
-            hasImage: !!episode.image,
-            hasDuration: !!episode.duration,
-            isSubbed: episode.isSubbed,
-            isDubbed: episode.isDubbed,
-            aired: episode.aired
-          });
-        }
-        
-        return episode;
-      });
-
-      console.log(`[ANIMEPAHE] ✅ Successfully processed ${episodes.length} episodes`);
-      console.log(`[ANIMEPAHE] 📊 Episodes summary:`, {
-        totalEpisodes: episodes.length,
-        firstEpisode: episodes[0]?.number,
-        lastEpisode: episodes[episodes.length - 1]?.number,
-        allSubbed: episodes.every((ep: Episode) => ep.isSubbed),
-        noneSubbed: episodes.every((ep: Episode) => !ep.isSubbed),
-        allDubbed: episodes.every((ep: Episode) => ep.isDubbed),
-        noneDubbed: episodes.every((ep: Episode) => !ep.isDubbed),
-        episodesWithImages: episodes.filter((ep: Episode) => ep.image).length,
-        episodesWithTitles: episodes.filter((ep: Episode) => ep.title).length
-      });
-      
-      console.log(`📺 [ANIMEPAHE EPISODES END] ===================\n`);
+        aired: ep.aired,
+      }));
+      console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from TakiAPI`);
       return episodes;
-    } catch (error: any) {
-      console.log(`📺 [ANIMEPAHE EPISODES ERROR] ===================`);
-      console.error('[ANIMEPAHE] ❌ Episodes error:', {
-        animeId,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        httpStatus: error?.response?.status,
-        httpStatusText: error?.response?.statusText,
-        responseData: error?.response?.data,
-        stack: error?.stack?.split('\n').slice(0, 3).join('\n')
+    } catch (err) {
+      console.log(`[ANIMEPAHE] ⚠️ TakiAPI episodes failed for ${animeId}, falling back to Kuroji`, {
+        error: (err as any)?.message,
       });
-      console.log(`📺 [ANIMEPAHE EPISODES ERROR END] ===================\n`);
-      return [];
+      // Fallback to Kuroji
+      const eps = await kjGetEpisodes(animeId);
+      const episodes: Episode[] = eps.map((ep: any) => ({
+        id: `animepahe-${ep.number}`,
+        number: ep.number,
+        title: ep.title,
+        image: ep.thumb,
+        description: undefined,
+        duration: ep.duration,
+        provider: 'AnimePahe',
+        isSubbed: true,
+        isDubbed: false,
+        isFiller: false,
+        isRecap: false,
+        aired: ep.airDate,
+      }));
+      console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from Kuroji fallback`);
+      return episodes;
     }
   }
 
@@ -216,39 +181,13 @@ export class AnimePaheProvider {
    * Get watch data for an episode by anime ID and episode number
    */
   async getWatchData(animeId: string, episodeNumber: number, isDub: boolean = false): Promise<WatchResponse> {
-    console.log(`\n🎬 [ANIMEPAHE WATCH START] ===================`);
-    console.log(`[ANIMEPAHE] 🎬 Getting watch data for anime: ${animeId}, episode: ${episodeNumber}, isDub: ${isDub}`);
-    
+    // Try TakiAPI first, then fallback to Kuroji
     try {
       const watchUrl = `${this.baseUrl}/anime/animepahe/watch/${animeId}/episode-${episodeNumber}`;
       console.log(`[ANIMEPAHE] 📡 Watch URL: ${watchUrl}`);
-      
-      console.log(`[ANIMEPAHE] ⏱️ Making watch request...`);
       const response = await axios.get(watchUrl);
-      
-      console.log(`[ANIMEPAHE] ✅ Watch response received`);
-      console.log(`[ANIMEPAHE] 📊 Response status: ${response.status}`);
-      console.log(`[ANIMEPAHE] 📊 Response data structure:`, {
-        hasData: !!response.data,
-        hasSources: !!response.data?.sources,
-        sourcesCount: response.data?.sources?.length || 0,
-        hasSubtitles: !!response.data?.subtitles,
-        subtitlesCount: response.data?.subtitles?.length || 0,
-        hasHeaders: !!response.data?.headers,
-        hasIntro: !!response.data?.intro,
-        hasOutro: !!response.data?.outro,
-        dataKeys: Object.keys(response.data || {})
-      });
-      
-      if (!response.data) {
-        console.log(`[ANIMEPAHE] ❌ No watch data available`);
-        throw new Error('No watch data available');
-      }
-
-      // Format sources
-      const sources: Source[] = (response.data.sources || [])
-        .map((source: any, index: number) => {
-          const formattedSource = {
+      if (!response.data) throw new Error('No watch data');
+      const sources: Source[] = (response.data.sources || []).map((source: any) => ({
             url: source.url,
             quality: source.quality || 'default',
             type: isDub ? 'dub' : 'sub',
@@ -256,75 +195,29 @@ export class AnimePaheProvider {
               ...response.data.headers,
               Referer: 'https://animepahe.com/',
               Origin: 'https://animepahe.com',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
-            },
-            isM3U8: source.url.includes('.m3u8') || source.isM3U8
-          };
-          
-          console.log(`[ANIMEPAHE] 📝 Source ${index + 1}:`, {
-            quality: formattedSource.quality,
-            type: formattedSource.type,
-            isM3U8: formattedSource.isM3U8,
-            hasUrl: !!formattedSource.url,
-            urlPreview: formattedSource.url?.substring(0, 50) + '...',
-            hasHeaders: !!formattedSource.headers
-          });
-          
-          return formattedSource;
-        });
-
-      // AnimePahe typically doesn't provide separate subtitle files as they're embedded
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
+        },
+        isM3U8: (source.url || '').includes('.m3u8') || source.isM3U8,
+      }));
       const subtitles: Subtitle[] = (response.data.subtitles || [])
         .filter((sub: any) => sub.url && sub.lang)
-        .map((sub: any, index: number) => {
-          const subtitle = {
-            url: sub.url,
-            lang: sub.lang
-          };
-          
-          console.log(`[ANIMEPAHE] 📝 Subtitle ${index + 1}:`, {
-            lang: subtitle.lang,
-            hasUrl: !!subtitle.url,
-            urlPreview: subtitle.url?.substring(0, 50) + '...'
-          });
-          
-          return subtitle;
-        });
-
-      console.log(`[ANIMEPAHE] ✅ Successfully processed watch data`);
-      console.log(`[ANIMEPAHE] 📊 Watch data summary:`, {
-        sourcesCount: sources.length,
-        subtitlesCount: subtitles.length,
-        hasIntro: !!response.data.intro,
-        hasOutro: !!response.data.outro,
-        intro: response.data.intro,
-        outro: response.data.outro,
-        hasHeaders: !!response.data.headers
+        .map((sub: any) => ({ url: sub.url, lang: sub.lang }));
+      if (!sources.length) throw new Error('No sources in TakiAPI watch');
+      return { sources, subtitles, headers: response.data.headers || {} };
+    } catch (err) {
+      console.log(`[ANIMEPAHE] ⚠️ TakiAPI watch failed for ${animeId} ep ${episodeNumber}, falling back to Kuroji`, {
+        error: (err as any)?.message,
       });
-
-      console.log(`🎬 [ANIMEPAHE WATCH END] ===================\n`);
-      return {
-        sources,
-        subtitles,
-        intro: response.data.intro,
-        outro: response.data.outro,
-        headers: response.data.headers
-      };
-    } catch (error: any) {
-      console.log(`🎬 [ANIMEPAHE WATCH ERROR] ===================`);
-      console.error('[ANIMEPAHE] ❌ Watch data error:', {
-        animeId,
-        episodeNumber,
-        isDub,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        httpStatus: error?.response?.status,
-        httpStatusText: error?.response?.statusText,
-        responseData: error?.response?.data,
-        stack: error?.stack?.split('\n').slice(0, 3).join('\n')
-      });
-      console.log(`🎬 [ANIMEPAHE WATCH ERROR END] ===================\n`);
-      throw new Error('Failed to get watch data');
+      const streams = await kjGetStreams(animeId, episodeNumber, 'animepahe', isDub);
+      const sources: Source[] = streams.map((s) => ({
+        url: s.url,
+        quality: s.quality || 'auto',
+        type: isDub ? 'dub' : 'sub',
+        headers: s.headers || {},
+        isM3U8: s.url.includes('.m3u8'),
+      }));
+      const subtitles: Subtitle[] = (streams[0]?.captions || []).map((c) => ({ url: c.url, lang: c.lang }));
+      return { sources, subtitles, headers: {} };
     }
   }
 
@@ -528,52 +421,18 @@ export class AnimePaheProvider {
    * Check if a specific episode is available
    * AnimePahe only provides SUB content, no DUB
    */
-  async checkEpisodeAvailability(animeTitle: string, episodeNumber: number): Promise<{ sub: boolean; dub: boolean }> {
-    console.log(`\n🔍✅ [ANIMEPAHE AVAILABILITY START] ===================`);
-    console.log(`[ANIMEPAHE] 🔍✅ Checking availability for "${animeTitle}" episode ${episodeNumber}`);
-    
-    try {
-      console.log(`[ANIMEPAHE] 🔍 Step 1: Searching for episodes...`);
-      const episodes = await this.searchAndGetEpisodes(animeTitle, episodeNumber);
-      const hasEpisode = episodes.length > 0;
-      
-      const availability = { 
-        sub: hasEpisode,  // AnimePahe provides SUB if episode exists
-        dub: false        // AnimePahe never provides DUB
-      };
-      
-      console.log(`[ANIMEPAHE] 📊 Availability result:`, {
-        animeTitle,
-        episodeNumber,
-        episodesFound: episodes.length,
-        sub: availability.sub,
-        dub: availability.dub,
-        hasEpisode
-      });
-      
-      if (hasEpisode) {
-        console.log(`[ANIMEPAHE] ✅ Episode ${episodeNumber} is available (SUB only)`);
-      } else {
-        console.log(`[ANIMEPAHE] ❌ Episode ${episodeNumber} is not available`);
-      }
-      
-      console.log(`🔍✅ [ANIMEPAHE AVAILABILITY END] ===================\n`);
-      return availability;
-    } catch (error: any) {
-      console.log(`🔍✅ [ANIMEPAHE AVAILABILITY ERROR] ===================`);
-      console.error('[ANIMEPAHE] ❌ Availability check error:', {
-        animeTitle,
-        episodeNumber,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        httpStatus: error?.response?.status,
-        httpStatusText: error?.response?.statusText,
-        responseData: error?.response?.data,
-        stack: error?.stack?.split('\n').slice(0, 3).join('\n')
-      });
-      console.log(`🔍✅ [ANIMEPAHE AVAILABILITY ERROR END] ===================\n`);
-      return { sub: false, dub: false };
+  async checkEpisodeAvailability(animeIdentifier: string, episodeNumber: number): Promise<{ sub: boolean; dub: boolean }> {
+    // Resolve ID, ask providers endpoint, then treat animepahe availability
+    let id = animeIdentifier;
+    if (!/^[0-9]+$/.test(animeIdentifier)) {
+      const resolved = await kjResolve({ title: animeIdentifier });
+      if (!resolved) return { sub: false, dub: false };
+      id = resolved;
     }
+    const providers = await kjGetProviders(id, episodeNumber);
+    const available = providers.available || [];
+    const hasPahe = available.includes('animepahe');
+    return { sub: hasPahe, dub: false };
   }
 
   /**
@@ -623,166 +482,20 @@ export class AnimePaheProvider {
    * Get AnimePahe anime ID by searching for the anime title
    */
   async getAnimeIdByTitle(animeTitle: string): Promise<string | null> {
-    console.log(`\n🔍🆔 [ANIMEPAHE GET ID START] ===================`);
-    console.log(`[ANIMEPAHE] 🔍🆔 Getting anime ID for: "${animeTitle}"`);
-    
+    // Prefer TakiAPI search, then fallback to Kuroji resolver
     try {
-      console.log(`[ANIMEPAHE] 🔍 Step 1: Searching for anime...`);
       const searchResults = await this.searchAnime(animeTitle);
-      
-      if (!searchResults.length) {
-        console.log('[ANIMEPAHE] ❌ No search results found');
-        console.log(`🔍🆔 [ANIMEPAHE GET ID END] ===================\n`);
-        return null;
+      if (searchResults && searchResults.length > 0) {
+        const exact = searchResults.find((a: any) => (a.title || '').toLowerCase().trim() === animeTitle.toLowerCase().trim());
+        return (exact?.id || searchResults[0].id)?.toString?.() || null;
       }
-
-      console.log(`[ANIMEPAHE] 🎯 Step 2: Finding best match from ${searchResults.length} results...`);
-      
-      // Helper function to clean titles for comparison
-      const cleanTitle = (title: string) => {
-        return title
-          .toLowerCase()
-          .replace(/[^\w\s]/g, ' ') // Replace special chars with spaces
-          .replace(/\s+/g, ' ') // Normalize spaces
-          .trim();
-      };
-      
-      // Helper function to extract base title (remove season/arc/part indicators)
-      const getBaseTitle = (title: string) => {
-        return title
-          .replace(/(season|arc|part|cour|series|movie|ova|special)\s*\d*/gi, '')
-          .replace(/\d+(st|nd|rd|th)\s*(season|arc|part|cour|series)/gi, '')
-          .replace(/(final|infinity|castle|entertainment|district|mugen|train|hashira|training)/gi, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      };
-      
-      const queryClean = cleanTitle(animeTitle);
-      const queryBase = cleanTitle(getBaseTitle(animeTitle));
-      
-      console.log(`[ANIMEPAHE] 🔍 Query analysis:`, {
-        original: animeTitle,
-        cleaned: queryClean,
-        baseTitle: queryBase
-      });
-      
-      // Find the best match using multiple strategies
-      let selectedAnime = null;
-      let matchType = '';
-      
-      // 1. Exact match
-      const exactMatch = searchResults.find((anime: any) => 
-        cleanTitle(anime.title) === queryClean
-      );
-      
-      if (exactMatch) {
-        selectedAnime = exactMatch;
-        matchType = 'exact';
-      } else {
-        // 2. Base title match (prefer TV series over movies)
-        const baseMatches = searchResults.filter((anime: any) => {
-          const animeBase = cleanTitle(getBaseTitle(anime.title));
-          return animeBase === queryBase || animeBase.includes(queryBase) || queryBase.includes(animeBase);
-        });
-        
-        if (baseMatches.length > 0) {
-          // Prefer TV series over movies, and older releases over newer ones
-          selectedAnime = baseMatches.sort((a: any, b: any) => {
-            // TV series gets priority over movies
-            if (a.type === 'TV' && b.type !== 'TV') return -1;
-            if (b.type === 'TV' && a.type !== 'TV') return 1;
-            
-            // Prefer older releases (more likely to be the main series)
-            const aYear = a.releaseDate ? parseInt(a.releaseDate) : 9999;
-            const bYear = b.releaseDate ? parseInt(b.releaseDate) : 9999;
-            return aYear - bYear;
-          })[0];
-          matchType = 'base-title';
-        } else {
-          // 3. Fuzzy match - find the one with most words in common
-          const scoredResults = searchResults.map((anime: any) => {
-            const animeWords = cleanTitle(anime.title).split(' ');
-            const queryWords = queryBase.split(' ');
-            
-            const commonWords = animeWords.filter(word => 
-              word.length > 2 && queryWords.includes(word)
-            );
-            
-            const score = commonWords.length / Math.max(animeWords.length, queryWords.length);
-            
-            return {
-              anime,
-              score,
-              commonWords: commonWords.length,
-              animeWords: animeWords.length,
-              queryWords: queryWords.length
-            };
-          });
-          
-          // Sort by score, then prefer TV series, then prefer older releases
-          const bestMatch = scoredResults.sort((a, b) => {
-            if (a.score !== b.score) return b.score - a.score;
-            if (a.anime.type === 'TV' && b.anime.type !== 'TV') return -1;
-            if (b.anime.type === 'TV' && a.anime.type !== 'TV') return 1;
-            
-            const aYear = a.anime.releaseDate ? parseInt(a.anime.releaseDate) : 9999;
-            const bYear = b.anime.releaseDate ? parseInt(b.anime.releaseDate) : 9999;
-            return aYear - bYear;
-          })[0];
-          
-          selectedAnime = bestMatch.anime;
-          matchType = `fuzzy (score: ${bestMatch.score.toFixed(2)})`;
-          
-          console.log(`[ANIMEPAHE] 🔍 Fuzzy match analysis:`, {
-            topMatches: scoredResults.slice(0, 3).map(r => ({
-              title: r.anime.title,
-              score: r.score.toFixed(2),
-              type: r.anime.type,
-              year: r.anime.releaseDate,
-              commonWords: r.commonWords
-            }))
-          });
-        }
-      }
-      
-      // Fallback to first result if nothing worked
-      if (!selectedAnime) {
-        // Try to find a TV series first
-        const tvSeries = searchResults.find((anime: any) => anime.type === 'TV');
-        if (tvSeries) {
-          selectedAnime = tvSeries;
-          matchType = 'fallback-tv';
-        } else {
-          selectedAnime = searchResults[0];
-          matchType = 'fallback-first';
-        }
-      }
-      
-      console.log(`[ANIMEPAHE] ✅ Selected anime: "${selectedAnime.title}" (ID: ${selectedAnime.id})`);
-      console.log(`[ANIMEPAHE] 📊 Match info:`, {
-        matchType,
-        selectedTitle: selectedAnime.title,
-        selectedId: selectedAnime.id,
-        selectedType: selectedAnime.type,
-        selectedYear: selectedAnime.releaseDate,
-        totalEpisodes: selectedAnime.totalEpisodes,
-        status: selectedAnime.status
-      });
-
-      console.log(`🔍🆔 [ANIMEPAHE GET ID END] ===================\n`);
-      return selectedAnime.id;
-    } catch (error: any) {
-      console.log(`🔍🆔 [ANIMEPAHE GET ID ERROR] ===================`);
-      console.error('[ANIMEPAHE] ❌ Get anime ID error:', {
-        animeTitle,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        httpStatus: error?.response?.status,
-        httpStatusText: error?.response?.statusText,
-        responseData: error?.response?.data,
-        stack: error?.stack?.split('\n').slice(0, 3).join('\n')
-      });
-      console.log(`🔍🆔 [ANIMEPAHE GET ID ERROR END] ===================\n`);
+    } catch {
+      console.log('[ANIMEPAHE] ⚠️ searchAnime failed, will try Kuroji resolver');
+    }
+    try {
+      const id = await kjResolve({ title: animeTitle });
+      return id || null;
+    } catch {
       return null;
     }
   }

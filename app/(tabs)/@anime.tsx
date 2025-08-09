@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform, ActivityIndicator, FlatList, useWindowDimensions, Animated, DeviceEventEmitter } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform, ActivityIndicator, FlatList, useWindowDimensions, Animated, DeviceEventEmitter, RefreshControl } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useRef } from 'react';
@@ -14,6 +14,7 @@ import { useSettings } from '../../hooks/useSettings';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../../constants/auth';
 import PersonalizedRecommendations from '../../components/PersonalizedRecommendations';
+
 
 // Use the correct AniList GraphQL endpoint
 const ANILIST_API = 'https://graphql.anilist.co';
@@ -145,6 +146,7 @@ export default function AnimeScreen() {
   const [birthdays, setBirthdays] = useState<(Character | Staff)[]>([]);
   const [anticipatedUpcoming, setAnticipatedUpcoming] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [heroAnime, setHeroAnime] = useState<Anime | null>(null);
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const { width: windowWidth } = useWindowDimensions();
@@ -159,10 +161,19 @@ export default function AnimeScreen() {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [showSearch, setShowSearch] = useState(false);
   const [userId, setUserId] = useState<number | undefined>(undefined);
+  
+  // Loading states
+  const [sectionsLoaded, setSectionsLoaded] = useState({
+    hero: false,
+    schedule: false,
+    birthdays: false,
+    sections: false,
+    top100: false
+  });
 
   useEffect(() => {
-    // Fetch data immediately without waiting for settings
-    fetchData();
+    // Fetch critical data immediately
+    fetchCriticalData();
     
     // Get user ID for personalized recommendations
     const getUserId = async () => {
@@ -195,66 +206,40 @@ export default function AnimeScreen() {
     };
   }, []);
 
+  // Load all data after hero is loaded
   useEffect(() => {
-    const startAnimations = () => {
-      progressAnim.setValue(0);
-      
-      Animated.timing(progressAnim, {
-        toValue: 1,
-        duration: 60000,
-        useNativeDriver: false,
-      }).start();
-    };
-
-    startAnimations();
-
-    const timer = setInterval(() => {
-      if (trendingAnime.length > 0) {
-        const nextIndex = (activeHeroIndex + 1) % Math.min(trendingAnime.length, 5);
-        flatListRef.current?.scrollToIndex({
-          index: nextIndex,
-          animated: true
-        });
-        setActiveHeroIndex(nextIndex);
-        startAnimations();
-      }
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, [activeHeroIndex, trendingAnime]);
-
-  useEffect(() => {
-    lockPortrait();
-  }, [lockPortrait]);
-
-  // Reset selected day to today (index 0) when airing schedule updates
-  useEffect(() => {
-    if (airingSchedule.length > 0) {
-      setSelectedDay(0);
+    if (sectionsLoaded.hero && !sectionsLoaded.schedule) {
+      setSectionsLoaded(prev => ({ ...prev, schedule: true }));
+      fetchAiringSchedule();
     }
-  }, [airingSchedule]);
+    
+    if (sectionsLoaded.hero && !sectionsLoaded.birthdays) {
+      setSectionsLoaded(prev => ({ ...prev, birthdays: true }));
+      fetchBirthdays();
+    }
+    
+    if (sectionsLoaded.hero && !sectionsLoaded.sections) {
+      setSectionsLoaded(prev => ({ ...prev, sections: true }));
+      fetchSectionData();
+    }
+    
+    if (sectionsLoaded.hero && !sectionsLoaded.top100) {
+      setSectionsLoaded(prev => ({ ...prev, top100: true }));
+      fetchTop100Data();
+    }
+  }, [sectionsLoaded.hero]);
 
-  const fetchData = async () => {
+  // Fetch critical data (hero + basic info)
+  const fetchCriticalData = async () => {
     try {
       setLoading(true);
-      // Use a default value for adult content if settings is not available
       const showAdultContent = settings?.displayAdultContent || false;
-      console.log('Fetching anime data with adult content:', showAdultContent);
-
-      const date = new Date();
-      const month = date.getMonth() + 1;
-      let season = 'WINTER';
-      if (month >= 4 && month <= 6) season = 'SPRING';
-      else if (month >= 7 && month <= 9) season = 'SUMMER';
-      else if (month >= 10 && month <= 12) season = 'FALL';
-      const year = date.getFullYear();
-
-      // Try to get token but don't require it
+      
       const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
-      console.log('Token available:', !!token);
-
-      const query = `
-        query ($season: MediaSeason, $seasonYear: Int, $lastYear: Int, $isAdult: Boolean) {
+      
+      // Only fetch trending anime initially for hero section
+      const criticalQuery = `
+        query ($isAdult: Boolean) {
           trending: Page(page: 1, perPage: 5) {
             media(sort: TRENDING_DESC, type: ANIME, isAdult: $isAdult) {
               id
@@ -282,8 +267,73 @@ export default function AnimeScreen() {
               }
             }
           }
-          airingSchedule: Page(page: 1, perPage: 100) {
-            airingSchedules(airingAt_greater: ${Math.floor(Date.now() / 1000) - (24 * 60 * 60)}, airingAt_lesser: ${Math.floor(Date.now() / 1000) + (8 * 24 * 60 * 60)}) {
+        }
+      `;
+
+      const response = await axios.post(
+        ANILIST_API,
+        {
+          query: criticalQuery,
+          variables: { isAdult: showAdultContent }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          timeout: 15000
+        }
+      );
+
+      if (response.data?.data?.trending?.media) {
+        const processedTrending = response.data.data.trending.media.map((anime: any) => ({
+          ...anime,
+          title: {
+            ...anime.title,
+            userPreferred: anime.title.userPreferred || anime.title.romaji || anime.title.english || 'Unknown Title'
+          },
+          averageScore: anime.averageScore ? anime.averageScore / 10 : 0,
+          description: anime.description || '',
+          bannerImage: anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large,
+          episodes: anime.episodes || null,
+          trending: anime.trending || null
+        }));
+
+        setTrendingAnime(processedTrending);
+        setHeroAnime(processedTrending[0]);
+        setSectionsLoaded(prev => ({ ...prev, hero: true }));
+      }
+    } catch (error) {
+      console.error('Error fetching critical data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch airing schedule separately
+  const fetchAiringSchedule = async () => {
+    console.log('[AiringSchedule] Starting fetch...');
+    try {
+      const showAdultContent = settings?.displayAdultContent || false;
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      console.log('[AiringSchedule] Settings:', { showAdultContent, hasToken: !!token });
+      
+      const airingStart = Math.floor(Date.now() / 1000) - 24 * 60 * 60; // yesterday
+      const airingEnd = Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60; // next 14 days
+      
+      console.log('[AiringSchedule] Time range:', { 
+        airingStart, 
+        airingEnd, 
+        airingStartDate: new Date(airingStart * 1000).toISOString(),
+        airingEndDate: new Date(airingEnd * 1000).toISOString()
+      });
+      
+      const scheduleQuery = `
+        query ($airingStart: Int, $airingEnd: Int) {
+          Page(page: 1, perPage: 100) {
+            airingSchedules(airingAt_greater: $airingStart, airingAt_lesser: $airingEnd) {
               id
               airingAt
               timeUntilAiring
@@ -309,6 +359,238 @@ export default function AnimeScreen() {
               }
             }
           }
+        }
+      `;
+      
+      console.log('[AiringSchedule] Query:', scheduleQuery);
+      console.log('[AiringSchedule] Variables:', { airingStart, airingEnd });
+
+      console.log('[AiringSchedule] Making API request to:', ANILIST_API);
+      
+      const requestBody = {
+        query: scheduleQuery,
+        variables: { 
+          airingStart,
+          airingEnd
+        }
+      };
+      
+      console.log('[AiringSchedule] Request body:', JSON.stringify(requestBody, null, 2));
+      
+      const response = await axios.post(
+        ANILIST_API,
+        requestBody,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          timeout: 15000
+        }
+      );
+      
+      console.log('[AiringSchedule] Response status:', response.status);
+      console.log('[AiringSchedule] Response data keys:', Object.keys(response.data || {}));
+
+      console.log('[AiringSchedule] Full response data:', JSON.stringify(response.data, null, 2));
+      
+      const airingSchedules = response.data?.data?.Page?.airingSchedules || [];
+      console.log(`[AiringSchedule] Fetched ${airingSchedules.length} schedules`);
+      console.log('[AiringSchedule] First schedule sample:', airingSchedules[0]);
+      
+      let filteredCount = 0;
+      const validSchedules = airingSchedules.filter((schedule: any, index: number) => {
+        console.log(`[AiringSchedule] Processing schedule ${index + 1}/${airingSchedules.length}:`, {
+          id: schedule.id,
+          mediaId: schedule.media?.id,
+          mediaType: schedule.media?.type,
+          mediaStatus: schedule.media?.status,
+          isAdult: schedule.media?.isAdult,
+          genres: schedule.media?.genres
+        });
+        
+        // Must have media data
+        if (!schedule.media) {
+          console.log(`[AiringSchedule] Schedule ${index + 1} filtered: No media data`);
+          return false;
+        }
+        
+        // Must be anime type
+        if (schedule.media.type !== 'ANIME') {
+          console.log(`[AiringSchedule] Schedule ${index + 1} filtered: Not anime type (${schedule.media.type})`);
+          return false;
+        }
+        
+        // Allow both releasing and not yet released (upcoming)
+        if (schedule.media.status !== 'RELEASING' && schedule.media.status !== 'NOT_YET_RELEASED') {
+          console.log(`[AiringSchedule] Schedule ${index + 1} filtered: Not releasing or upcoming (${schedule.media.status})`);
+          return false;
+        }
+        
+        // Filter out adult content unless explicitly allowed
+        if (schedule.media.isAdult && !showAdultContent) {
+          console.log(`[AiringSchedule] Schedule ${index + 1} filtered: Adult content not allowed`);
+          return false;
+        }
+        
+        // Filter out certain genres
+        if (schedule.media.genres && schedule.media.genres.some((genre: string) => 
+          ['Hentai', 'Ecchi'].includes(genre))) {
+          console.log(`[AiringSchedule] Schedule ${index + 1} filtered: Filtered genre`);
+          return false;
+        }
+        
+        filteredCount++;
+        console.log(`[AiringSchedule] Schedule ${index + 1} passed all filters`);
+        return true;
+      });
+      
+      console.log(`[AiringSchedule] Filtering complete: ${filteredCount}/${airingSchedules.length} schedules passed filters`);
+      
+      const scheduleDays = organizeSchedulesByDate(validSchedules);
+      console.log(`[AiringSchedule] Organized into ${scheduleDays.length} days with ${validSchedules.length} valid schedules`);
+      console.log('[AiringSchedule] Schedule days structure:', scheduleDays.map(day => ({
+        date: day.date,
+        dayName: day.dayName,
+        scheduleCount: day.schedules.length
+      })));
+      setAiringSchedule(scheduleDays);
+    } catch (error: any) {
+      console.error('[AiringSchedule] Error details:', {
+        message: error?.message,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        data: error?.response?.data,
+        errors: error?.response?.data?.errors,
+        config: {
+          url: error?.config?.url,
+          method: error?.config?.method,
+          headers: error?.config?.headers
+        }
+      });
+      
+      // Log the specific GraphQL errors
+      if (error?.response?.data?.errors) {
+        console.error('[AiringSchedule] GraphQL Errors:', JSON.stringify(error.response.data.errors, null, 2));
+      }
+      
+      // Set empty schedule days as fallback
+      const fallbackDays = [];
+      const today = new Date();
+      for (let i = 0; i < 7; i++) {
+        const dateKey = new Date(today.getTime() + i * 86400000).toISOString().split('T')[0];
+        const displayDate = new Date(today.getTime() + i * 86400000);
+        fallbackDays.push({
+          date: dateKey,
+          dayName: displayDate.toLocaleDateString('en-US', { weekday: 'short' }),
+          isToday: i === 0,
+          schedules: []
+        });
+      }
+      console.log('[AiringSchedule] Setting fallback schedule days');
+      setAiringSchedule(fallbackDays);
+    }
+  };
+
+  // Fetch birthdays separately
+  const fetchBirthdays = async () => {
+    try {
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      const birthdayQuery = `
+        query {
+          birthdayCharacters: Page(page: 1, perPage: 25) {
+            characters(sort: FAVOURITES_DESC, isBirthday: true) {
+              id
+              name {
+                userPreferred
+                first
+                middle
+                last
+                full
+                native
+              }
+              image {
+                medium
+              }
+              dateOfBirth {
+                month
+                day
+              }
+              favourites
+            }
+          }
+          birthdayStaff: Page(page: 1, perPage: 25) {
+            staff(sort: FAVOURITES_DESC, isBirthday: true) {
+              id
+              name {
+                userPreferred
+                first
+                middle
+                last
+                full
+                native
+              }
+              image {
+                medium
+              }
+              dateOfBirth {
+                month
+                day
+              }
+              favourites
+            }
+          }
+        }
+      `;
+
+      const response = await axios.post(
+        ANILIST_API,
+        { query: birthdayQuery },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          timeout: 15000
+        }
+      );
+
+      const characters = response.data?.data?.birthdayCharacters?.characters || [];
+      const staffMembers = response.data?.data?.birthdayStaff?.staff || [];
+      
+      const processedCharacters = characters.map((character: Character) => ({
+        ...character,
+        type: 'CHARACTER' as const
+      }));
+      
+      const processedStaff = staffMembers.map((staff: Staff) => ({
+        ...staff,
+        type: 'STAFF' as const
+      }));
+
+      const todayBirthdays = [
+        ...processedCharacters,
+        ...processedStaff
+      ].sort((a, b) => (b.favourites || 0) - (a.favourites || 0));
+
+      setBirthdays(todayBirthdays);
+    } catch (error) {
+      console.error('Error fetching birthdays:', error);
+      setBirthdays([]); // Set empty array as fallback
+    }
+  };
+
+  // Fetch section data separately
+  const fetchSectionData = async () => {
+    try {
+      const showAdultContent = settings?.displayAdultContent || false;
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      const sectionsQuery = `
+        query ($season: MediaSeason, $seasonYear: Int, $lastYear: Int, $isAdult: Boolean) {
           anticipated: Page(page: 1, perPage: 10) {
             media(sort: POPULARITY_DESC, type: ANIME, season: $season, seasonYear: $seasonYear, status_in: [NOT_YET_RELEASED, RELEASING], isAdult: $isAdult) {
               id
@@ -409,67 +691,6 @@ export default function AnimeScreen() {
               duration
             }
           }
-          birthdayCharacters: Page(page: 1, perPage: 25) {
-            characters(sort: FAVOURITES_DESC, isBirthday: true) {
-              id
-              name {
-                userPreferred
-                first
-                middle
-                last
-                full
-                native
-              }
-              image {
-                medium
-              }
-              dateOfBirth {
-                month
-                day
-              }
-              favourites
-            }
-          }
-          birthdayStaff: Page(page: 1, perPage: 25) {
-            staff(sort: FAVOURITES_DESC, isBirthday: true) {
-              id
-              name {
-                userPreferred
-                first
-                middle
-                last
-                full
-                native
-              }
-              image {
-                medium
-              }
-              dateOfBirth {
-                month
-                day
-              }
-              favourites
-            }
-          }
-          top100: Page(page: 1, perPage: 100) {
-            media(sort: SCORE_DESC, type: ANIME, isAdult: $isAdult) {
-              id
-              title {
-                userPreferred
-                english
-                romaji
-                native
-              }
-              coverImage {
-                large
-              }
-              averageScore
-              format
-              episodes
-              season
-              seasonYear
-            }
-          }
           anticipatedUpcoming: Page(page: 1, perPage: 15) {
             media(sort: POPULARITY_DESC, type: ANIME, status: NOT_YET_RELEASED, isAdult: $isAdult) {
               id
@@ -500,10 +721,18 @@ export default function AnimeScreen() {
         }
       `;
 
+      const date = new Date();
+      const month = date.getMonth() + 1;
+      let season = 'WINTER';
+      if (month >= 4 && month <= 6) season = 'SPRING';
+      else if (month >= 7 && month <= 9) season = 'SUMMER';
+      else if (month >= 10 && month <= 12) season = 'FALL';
+      const year = date.getFullYear();
+
       const response = await axios.post(
         ANILIST_API,
         {
-          query,
+          query: sectionsQuery,
           variables: {
             season,
             seasonYear: year,
@@ -517,250 +746,139 @@ export default function AnimeScreen() {
             'Accept': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {})
           },
-          timeout: 30000 // Increase timeout to 30 seconds
+          timeout: 20000
         }
       );
 
-      console.log('API Response Status:', response.status);
-      console.log('API Response Data:', JSON.stringify(response.data, null, 2));
-
-      if (response.data?.errors) {
-        console.error('GraphQL Errors:', response.data.errors);
-        throw new Error(response.data.errors[0]?.message || 'GraphQL Error');
-      }
-
-      if (!response.data?.data) {
-        console.error('Invalid API Response:', response.data);
-        throw new Error('Invalid response from AniList API');
-      }
-
       const data = response.data.data;
-
-      const userTitleLanguage = data.Viewer?.options?.titleLanguage?.toLowerCase() || 'romaji';
-      const userStaffNameLanguage = data.Viewer?.options?.staffNameLanguage?.toLowerCase() || 'romaji';
-      const userScoreFormat = data.Viewer?.mediaListOptions?.scoreFormat || 'POINT_10';
-
-      const formatTitle = (titles: any) => {
-        return titles[userTitleLanguage] || titles.romaji;
-      };
-
-      const formatName = (names: any) => {
-        if (userStaffNameLanguage === 'native' && names.native) {
-          return names.native;
-        }
-        return names.userPreferred || `${names.first || ''} ${names.last || ''}`.trim();
-      };
-
-      const formatScore = (score: number) => {
-        switch (userScoreFormat) {
-          case 'POINT_100':
-            return score;
-          case 'POINT_10_DECIMAL':
-            return score / 10;
-          case 'POINT_10':
-            return Math.round(score / 10);
-          case 'POINT_5':
-            return Math.round(score / 20);
-          case 'POINT_3':
-            return Math.round(score / 33.33);
-          default:
-            return score / 10;
-        }
-      };
-
-      // Process trending anime even if other data is missing
-      const processedTrending = (data.trending?.media || []).map((anime: any) => ({
+      
+      // Process all section data
+      const processedAnticipated = (data.anticipated?.media || []).map((anime: any) => ({
         ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: anime.title.userPreferred || anime.title.romaji || anime.title.english || 'Unknown Title'
-        },
-        averageScore: anime.averageScore ? anime.averageScore / 10 : 0,
-        description: anime.description || '',
-        bannerImage: anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large,
-        episodes: anime.episodes || null,
-        trending: anime.trending || null
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+      
+      const processedPopular = (data.popular?.media || []).map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+      
+      const processedLastYear = (data.lastYear?.media || []).map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+      
+      const processedMovies = (data.movies?.media || []).map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+      
+      const processedMusicVideos = (data.musicVideos?.media || []).map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+      
+      const processedAnticipatedUpcoming = (data.anticipatedUpcoming?.media || []).map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
       }));
 
-      if (processedTrending.length > 0) {
-        console.log('Successfully processed trending anime:', processedTrending.length);
-        setTrendingAnime(processedTrending);
-        setHeroAnime(processedTrending[0]);
-      } else {
-        console.warn('No trending anime data available');
-      }
-
-      // Process airing schedule
-      const airingSchedules = data.airingSchedule?.airingSchedules || [];
-      console.log('Airing schedules count:', airingSchedules.length);
-      
-      // Filter out null media, anime only, adult content, and organize by date
-      const validSchedules = airingSchedules.filter((schedule: any) => {
-        if (!schedule.media || 
-            schedule.media.type !== 'ANIME' || 
-            schedule.media.status !== 'RELEASING') {
-          return false;
-        }
-
-        // Filter out explicitly adult content
-        if (schedule.media.isAdult) {
-          return false;
-        }
-
-        // Filter out by NSFW genres (only Hentai, not Ecchi since many mainstream anime have this)
-        if (schedule.media.genres && schedule.media.genres.some((genre: string) => 
-          ['Hentai'].includes(genre))) {
-          return false;
-        }
-
-        // Filter out by explicit NSFW keywords in title
-        const title = (schedule.media.title.english || schedule.media.title.userPreferred || schedule.media.title.romaji || '').toLowerCase();
-        const nsfwKeywords = ['hentai'];
-        if (nsfwKeywords.some(keyword => title.includes(keyword))) {
-          return false;
-        }
-
-        return true;
-      });
-      console.log('Valid anime schedules count:', validSchedules.length);
-      
-      // Debug: Log schedules by day to see what we're getting
-      const scheduleDays = organizeSchedulesByDate(validSchedules);
-      scheduleDays.forEach((day, index) => {
-        console.log(`Day ${index} (${day.dayName} ${day.date}): ${day.schedules.length} episodes`);
-        if (day.schedules.length > 0) {
-          day.schedules.forEach(schedule => {
-            const airingDate = new Date(schedule.airingAt * 1000);
-            console.log(`  - ${schedule.media.title.userPreferred} at ${airingDate.toLocaleString()}`);
-          });
-        }
-      });
-      
-      setAiringSchedule(scheduleDays);
-
-      const anticipatedData = data.anticipatedUpcoming?.media || [];
-      console.log('Anticipated Upcoming anime count:', anticipatedData.length);
-      const processedAnticipated = anticipatedData.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      }));
-      setAnticipatedUpcoming(processedAnticipated);
-
-      const characters = data.birthdayCharacters?.characters || [];
-      const staffMembers = data.birthdayStaff?.staff || [];
-      console.log('Found birthday characters:', characters.length, 'birthday staff:', staffMembers.length);
-
-      // Add type property to distinguish between character and staff
-      const processedCharacters = characters.map((character: Character) => {
-        return {
-          ...character,
-          type: 'CHARACTER' as const
-        };
-      });
-      
-      const processedStaff = staffMembers.map((staff: Staff) => {
-        return {
-          ...staff,
-          type: 'STAFF' as const
-        };
-      });
-
-      const todayBirthdays = [
-        ...processedCharacters,
-        ...processedStaff
-      ].sort((a, b) => (b.favourites || 0) - (a.favourites || 0));
-
-      console.log('Today\'s birthdays:', todayBirthdays.length);
-      setBirthdays(todayBirthdays);
-
-      const processedMovies = data.movies?.media.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      })) || [];
-
-      const mvs = data.musicVideos?.media || [];
-      console.log('Music videos count:', mvs.length);
-      const processedMusicVideos = mvs.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      }));
-
-      const processedLastYear = data.lastYear?.media.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      })) || [];
-
-      const processedAnticipatedOld = data.anticipated?.media.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      })) || [];
-
-      const processedPopular = data.popular?.media.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      })) || [];
-
-      const top100 = data.top100?.media || [];
-      console.log('Top 100 anime count:', top100.length);
-      const processedTop100 = top100.map((anime: any) => ({
-        ...anime,
-        title: {
-          ...anime.title,
-          userPreferred: formatTitle(anime.title)
-        },
-        averageScore: formatScore(anime.averageScore)
-      }));
-
-      setBirthdays(todayBirthdays);
+      setAnticipatedAnime(processedAnticipated);
+      setPopularAnime(processedPopular);
+      setLastYearAnime(processedLastYear);
       setAnimeMovies(processedMovies);
       setMusicVideos(processedMusicVideos);
-      setLastYearAnime(processedLastYear);
-      setAnticipatedAnime(processedAnticipatedOld);
-      setPopularAnime(processedPopular);
-      setTop100Anime(processedTop100);
-      
-    } catch (error: any) {
-      console.error('Error fetching data:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      
-      // Set empty arrays but don't throw - let the UI handle the empty state
-      setTrendingAnime([]);
-      setAiringSchedule([]);
-      setBirthdays([]);
+      setAnticipatedUpcoming(processedAnticipatedUpcoming);
+    } catch (error) {
+      console.error('Error fetching section data:', error);
+      // Set empty arrays as fallback
+      setAnticipatedAnime([]);
+      setPopularAnime([]);
+      setLastYearAnime([]);
+      setAnimeMovies([]);
+      setMusicVideos([]);
       setAnticipatedUpcoming([]);
-      setHeroAnime(null);
-    } finally {
-      setLoading(false);
     }
   };
+
+  // Fetch top 100 separately
+  const fetchTop100Data = async () => {
+    try {
+      const showAdultContent = settings?.displayAdultContent || false;
+      const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+      
+      const top100Query = `
+        query ($isAdult: Boolean) {
+          top100: Page(page: 1, perPage: 100) {
+            media(sort: SCORE_DESC, type: ANIME, isAdult: $isAdult) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                large
+              }
+              averageScore
+              format
+              episodes
+              season
+              seasonYear
+            }
+          }
+        }
+      `;
+
+      const response = await axios.post(
+        ANILIST_API,
+        {
+          query: top100Query,
+          variables: { isAdult: showAdultContent }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          timeout: 15000
+        }
+      );
+
+      const top100 = response.data?.data?.top100?.media || [];
+      const processedTop100 = top100.map((anime: any) => ({
+        ...anime,
+        averageScore: anime.averageScore ? anime.averageScore / 10 : 0
+      }));
+
+      setTop100Anime(processedTop100);
+    } catch (error) {
+      console.error('Error fetching top 100:', error);
+      setTop100Anime([]); // Set empty array as fallback
+    }
+  };
+
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        fetchCriticalData(),
+        fetchAiringSchedule(),
+        fetchBirthdays(),
+        fetchSectionData(),
+        fetchTop100Data()
+      ]);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  
 
   const organizeSchedulesByDate = (schedules: any[]): ScheduleDay[] => {
     const today = new Date();
@@ -798,6 +916,7 @@ export default function AnimeScreen() {
     const timeDiff = airingDate.getTime() - now.getTime();
     const minutesDiff = Math.abs(timeDiff) / (1000 * 60);
     const hoursDiff = Math.abs(timeDiff) / (1000 * 60 * 60);
+    const daysDiff = Math.abs(timeDiff) / (1000 * 60 * 60 * 24);
     
     // Currently airing (±15 minutes window)
     if (minutesDiff <= 15) {
@@ -806,9 +925,7 @@ export default function AnimeScreen() {
     
     // Just aired (15-60 minutes ago)
     if (timeDiff < 0 && minutesDiff <= 60) {
-      if (minutesDiff < 60) {
-        return 'JUST AIRED';
-      }
+      return 'JUST AIRED';
     }
     
     // Aired recently (1-24 hours ago)
@@ -819,11 +936,23 @@ export default function AnimeScreen() {
     
     // Aired more than 24 hours ago
     if (timeDiff < -24 * 60 * 60 * 1000) {
-      const days = Math.floor(hoursDiff / 24);
+      const days = Math.floor(daysDiff);
       return `AIRED ${days}D AGO`;
     }
     
-    // Upcoming episodes - show the actual time
+    // Upcoming within 24 hours
+    if (timeDiff > 0 && daysDiff < 1) {
+      const hours = Math.floor(hoursDiff);
+      return `IN ${hours}H`;
+    }
+    
+    // Upcoming within a week
+    if (timeDiff > 0 && daysDiff < 7) {
+      const days = Math.floor(daysDiff);
+      return `IN ${days}D`;
+    }
+    
+    // Upcoming (more than a week) - show the actual time
     return airingDate.toLocaleTimeString([], { 
       hour: 'numeric', 
       minute: '2-digit'
@@ -835,6 +964,8 @@ export default function AnimeScreen() {
     const now = new Date();
     const timeDiff = airingDate.getTime() - now.getTime();
     const minutesDiff = Math.abs(timeDiff) / (1000 * 60);
+    const hoursDiff = Math.abs(timeDiff) / (1000 * 60 * 60);
+    const daysDiff = Math.abs(timeDiff) / (1000 * 60 * 60 * 24);
     
     // Currently airing (±15 minutes)
     if (minutesDiff <= 15) {
@@ -848,7 +979,15 @@ export default function AnimeScreen() {
     else if (timeDiff < -60 * 60 * 1000) {
       return 'aired';
     } 
-    // Upcoming
+    // Upcoming within 24 hours
+    else if (timeDiff > 0 && daysDiff < 1) {
+      return 'upcoming-soon';
+    }
+    // Upcoming within a week
+    else if (timeDiff > 0 && daysDiff < 7) {
+      return 'upcoming-week';
+    }
+    // Upcoming (more than a week)
     else {
       return 'upcoming';
     }
@@ -857,8 +996,6 @@ export default function AnimeScreen() {
   const isAiringNow = (airingAt: number) => {
     return getAiringStatus(airingAt) === 'airing';
   };
-
-
 
   const renderHeroItem = ({ item: anime }: { item: Anime }) => {
     // Safety checks for required data
@@ -971,12 +1108,6 @@ export default function AnimeScreen() {
       <View style={[styles.loadingContainer, { backgroundColor: currentTheme.colors.background }]}>
         <ActivityIndicator size="large" color="#02A9FF" />
         <Text style={[styles.loadingText, { color: currentTheme.colors.textSecondary }]}>Loading anime...</Text>
-        <TouchableOpacity 
-          style={[styles.retryButton, { backgroundColor: currentTheme.colors.primary }]}
-          onPress={fetchData}
-        >
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -990,7 +1121,7 @@ export default function AnimeScreen() {
         </Text>
         <TouchableOpacity 
           style={[styles.retryButton, { backgroundColor: currentTheme.colors.primary, marginTop: 16 }]}
-          onPress={fetchData}
+          onPress={fetchCriticalData}
         >
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
@@ -1000,8 +1131,18 @@ export default function AnimeScreen() {
 
   return (
     <>
-      <ScrollView style={[styles.container, { backgroundColor: currentTheme.colors.background }]} showsVerticalScrollIndicator={false}>
-
+      <ScrollView 
+        style={[styles.container, { backgroundColor: currentTheme.colors.background }]} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[currentTheme.colors.primary]}
+            tintColor={currentTheme.colors.primary}
+          />
+        }
+      >
         <View style={styles.heroWrapper}>
           <FlatList
             ref={flatListRef}
@@ -1084,19 +1225,20 @@ export default function AnimeScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
-            {airingSchedule[selectedDay]?.schedules.length > 0 ? (
+            {airingSchedule.length > 0 && airingSchedule[selectedDay]?.schedules.length > 0 ? (
               airingSchedule[selectedDay].schedules.map((schedule) => (
                 <TouchableOpacity 
                   key={schedule.id}
-                  style={[
-                    styles.horizontalScheduleCard, 
-                    { 
-                      backgroundColor: currentTheme.colors.surface,
-                      shadowColor: isDarkMode ? '#000' : '#666',
-                      opacity: getAiringStatus(schedule.airingAt) === 'aired' ? 0.7 : 
-                               getAiringStatus(schedule.airingAt) === 'just-aired' ? 0.9 : 1.0
-                    }
-                  ]}
+                                      style={[
+                      styles.horizontalScheduleCard, 
+                      { 
+                        backgroundColor: currentTheme.colors.surface,
+                        shadowColor: isDarkMode ? '#000' : '#666',
+                        opacity: getAiringStatus(schedule.airingAt) === 'aired' ? 0.7 : 
+                                 getAiringStatus(schedule.airingAt) === 'just-aired' ? 0.9 : 
+                                 getAiringStatus(schedule.airingAt) === 'upcoming' ? 0.95 : 1.0
+                      }
+                    ]}
                   onPress={() => router.push(`/anime/${schedule.media.id}`)}
                   activeOpacity={0.7}
                 >
@@ -1119,6 +1261,8 @@ export default function AnimeScreen() {
                           color: getAiringStatus(schedule.airingAt) === 'airing' ? '#4CAF50' : 
                                  getAiringStatus(schedule.airingAt) === 'just-aired' ? '#FF9800' : 
                                  getAiringStatus(schedule.airingAt) === 'aired' ? '#9E9E9E' : 
+                                 getAiringStatus(schedule.airingAt) === 'upcoming-soon' ? '#FF5722' : 
+                                 getAiringStatus(schedule.airingAt) === 'upcoming-week' ? '#2196F3' : 
                                  currentTheme.colors.primary 
                         }
                       ]}>
@@ -1163,13 +1307,17 @@ export default function AnimeScreen() {
               <View style={[styles.horizontalNoSchedule, { backgroundColor: currentTheme.colors.surface }]}>
                 <FontAwesome5 name="calendar-times" size={24} color={currentTheme.colors.textSecondary} />
                 <Text style={[styles.horizontalNoScheduleText, { color: currentTheme.colors.textSecondary }]}>
-                  No episodes airing this day
+                  No episodes scheduled
+                </Text>
+                <Text style={[styles.horizontalNoScheduleSubtext, { color: currentTheme.colors.textSecondary }]}>
+                  Check back later for updates
                 </Text>
               </View>
             )}
           </ScrollView>
         </View>
 
+        {/* Birthdays Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View>
@@ -1214,6 +1362,7 @@ export default function AnimeScreen() {
           </ScrollView>
         </View>
 
+        {/* Dynamic Sections */}
         {[
           { title: 'Anticipated Anime', subtitle: 'Upcoming releases to watch for', data: anticipatedUpcoming, category: 'anticipated' },
           { title: 'New and Popular', subtitle: 'Trending this week', data: popularAnime, category: 'popular' },
@@ -1297,6 +1446,7 @@ export default function AnimeScreen() {
           </View>
         ))}
 
+        {/* Top 100 Section */}
         <View style={[styles.section, styles.lastSection]}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Top 50</Text>
@@ -1917,6 +2067,12 @@ const styles = StyleSheet.create({
   horizontalNoScheduleText: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  horizontalNoScheduleSubtext: {
+    fontSize: 12,
+    fontWeight: '400',
+    opacity: 0.7,
+    marginTop: 4,
   },
   seeMoreButton: {
     flexDirection: 'row',

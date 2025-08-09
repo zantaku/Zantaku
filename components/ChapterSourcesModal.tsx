@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Dimensions, StatusBar, DeviceEventEmitter } from 'react-native';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
@@ -7,7 +7,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useIncognito } from '../hooks/useIncognito';
 import { Chapter } from '../api/proxy/providers/manga';
 import { MangaProviderService, PageWithHeaders } from '../api/proxy/providers/manga/MangaProviderService';
-import { ChapterManager, NormalizedChapter } from '../utils/ChapterManager';
+import { ChapterManager } from '../utils/ChapterManager';
 
 interface ChapterSourcesModalProps {
   visible: boolean;
@@ -26,7 +26,7 @@ interface ChapterSourcesModalProps {
 const logDebug = (message: string, data?: any) => console.log(`[ChapterModal DEBUG] ${message}`, data || '');
 const logError = (message: string, error?: any) => console.error(`[ChapterModal ERROR] ${message}`, error || '');
 
-const BASE_API_URL = 'https://takiapi.xyz';
+// const BASE_API_URL = 'https://takiapi.xyz';
 const KATANA_API_URL = 'https://magaapinovel.xyz';
 
 export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId, currentProvider, mangaSlugId, chapterManager, format, countryOfOrigin }: ChapterSourcesModalProps) {
@@ -300,16 +300,44 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
                 throw new Error(`${data.error}. ${data.message || ''}`);
             }
 
-            if (data?.pages && Array.isArray(data.pages)) {
-                imageUrls = data.pages.map((page: any, index: number) => {
-                    const imageUrl = page.url;
-                    const headers = page.headers || 
-                        (provider === 'mangafire' ? { 'Referer': 'https://mangafire.to' } : {});
-                    return { url: imageUrl, headers } as PageWithHeaders;
-                });
-                logDebug(`Successfully processed ${imageUrls.length} pages from ${provider} API.`);
+            if (provider === 'mangafire') {
+                if (data?.pages && Array.isArray(data.pages)) {
+                    imageUrls = data.pages.map((page: any, index: number) => {
+                        const imageUrl = page.url;
+                        const headers = page.headers || { 'Referer': 'https://mangafire.to' };
+                        return { url: imageUrl, headers } as PageWithHeaders;
+                    });
+                    logDebug(`Successfully processed ${imageUrls.length} pages from mangafire API.`);
+                } else {
+                    throw new Error('Invalid mangafire API response format.');
+                }
             } else {
-                throw new Error(`Invalid ${provider} API response format.`);
+                // MangaDex via TakiAPI can return an array of URLs or an object with images array
+                let urls: string[] = [];
+                if (Array.isArray(data)) {
+                    urls = data.map((item: any) => typeof item === 'string' ? item : (item?.img || item?.url || ''))
+                               .filter((u: string) => !!u);
+                } else if (Array.isArray(data?.images)) {
+                    urls = data.images.map((img: any) => typeof img === 'string' ? img : (img?.url || '')).filter(Boolean);
+                } else if (Array.isArray(data?.result?.images)) {
+                    urls = data.result.images.map((img: any) => typeof img === 'string' ? img : (img?.url || '')).filter(Boolean);
+                }
+
+                if (urls.length === 0 && data?.pages && Array.isArray(data.pages)) {
+                    // Some mirrors may still respond with pages[]
+                    urls = data.pages.map((p: any) => p?.url).filter(Boolean);
+                }
+
+                if (urls.length === 0) {
+                    throw new Error('Invalid mangadex API response format.');
+                }
+
+                const dexHeaders = { 
+                    Referer: 'https://takiapi.xyz/',
+                    'User-Agent': 'Mozilla/5.0'
+                };
+                imageUrls = urls.map((u: string) => ({ url: u, headers: dexHeaders }));
+                logDebug(`Successfully processed ${imageUrls.length} pages from mangadex API.`);
             }
             
         } else {
@@ -340,7 +368,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
         logDebug('=== FETCH COMPLETE ===');
         setLoading(false);
     }
-  }, [chapterManager]);
+  }, [chapterManager, fetchChapterPagesDirectly]);
 
   useEffect(() => {
     if (visible && chapter) {
@@ -367,7 +395,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       setError("No chapter data available");
       setLoading(false);
     }
-  }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId, format, countryOfOrigin]);
+  }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId, format, countryOfOrigin, anilistId, mangaId]);
 
   const navigateToReader = () => {
     if (pages.length === 0 || !chapter) return;

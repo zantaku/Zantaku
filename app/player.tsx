@@ -55,12 +55,11 @@ export default function Player() {
     loadAnilistUser();
   }, []);
 
-  // Initialize PiP support detection
+  // Initialize PiP support detection (deferred to next frame to avoid main-thread contention)
   useEffect(() => {
+    let raf: number | null = null;
     const checkPipSupport = async () => {
       try {
-        // For now, assume PiP is supported on modern devices
-        // The actual PiP functionality will be handled by expo-video in the PlayerScreen
         setIsPipSupported(true);
         console.log('[PLAYER] 📱 PiP support initialized');
       } catch (error) {
@@ -68,8 +67,15 @@ export default function Player() {
         setIsPipSupported(false);
       }
     };
-
-    checkPipSupport();
+    // Defer with requestAnimationFrame to allow initial mount to settle
+    // @ts-ignore
+    raf = global.requestAnimationFrame?.(() => { checkPipSupport(); }) as any;
+    return () => {
+      if (raf && global.cancelAnimationFrame) {
+        // @ts-ignore
+        global.cancelAnimationFrame(raf);
+      }
+    };
   }, []);
 
   // PiP Functions - These will be passed to PlayerScreen to handle via expo-video
@@ -181,13 +187,19 @@ export default function Player() {
           if (storedData) {
             const parsedData = JSON.parse(storedData);
             console.log('📊 STORED VIDEO DATA JSON:', JSON.stringify(parsedData, null, 2));
-            console.log('🎬 Video source URL:', parsedData.source ? parsedData.source.substring(0, 50) + '...' : 'none');
+            console.log('🎬 Video source URL:', parsedData.source || 'none');
             console.log('📝 Episode info:', {
               episodeId: parsedData.episodeId,
               episodeNumber: parsedData.episodeNumber,
               animeTitle: parsedData.animeTitle,
               anilistId: parsedData.anilistId
             });
+            if (parsedData.provider) {
+              console.log('🔗 Stored provider:', parsedData.provider);
+            }
+            if (parsedData.audioType) {
+              console.log('🎧 Stored audio type:', parsedData.audioType);
+            }
             console.log('📋 Headers:', JSON.stringify(parsedData.headers, null, 2));
             console.log('🎯 Subtitles count:', parsedData.subtitles?.length || 0);
             if (parsedData.subtitles?.length > 0) {
@@ -204,7 +216,13 @@ export default function Player() {
       
       // Log any direct URL parameters that might contain video data
       if (params.source) {
-        console.log('🎬 Direct video source from params:', typeof params.source === 'string' ? params.source.substring(0, 50) + '...' : params.source);
+        console.log('🎬 Direct video source from params:', typeof params.source === 'string' ? params.source : params.source);
+      }
+      if (params.provider) {
+        console.log('🔗 Provider from params:', params.provider);
+      }
+      if (params.audioType) {
+        console.log('🎧 Audio type from params:', params.audioType);
       }
       
       if (params.headers) {
@@ -266,8 +284,9 @@ export default function Player() {
         // Hide status bar for fullscreen experience
         StatusBar.setHidden(true, 'fade');
         
-        // For fullscreen video player, prefer landscape but don't force it aggressively
-        // This allows the system to handle PiP orientation changes naturally
+        // Prefer landscape, but avoid blocking UI thread during the first mount on emulators
+        // Yield one frame before locking orientation to reduce jank
+        await new Promise((r) => setTimeout(r, 0));
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
         
         if (isMounted) {
@@ -326,7 +345,7 @@ export default function Player() {
     };
 
     // Add listener after a short delay to ensure initial setup is complete
-    setTimeout(addListener, 200);
+    setTimeout(addListener, 300);
 
     // Cleanup: unlock and return to portrait when unmounting
     return () => {

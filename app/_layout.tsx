@@ -14,6 +14,7 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { PlayerProvider } from '../contexts/PlayerContext';
 import { PortalProvider } from '@gorhom/portal';
+import { SeasonProvider } from '../contexts/SeasonStore';
 import { Slot } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DiscordRPCProvider } from '../contexts/DiscordRPCContext';
@@ -625,7 +626,9 @@ export default function RootLayout() {
                           {showSplash ? (
                             <SplashScreen onAnimationComplete={() => setShowSplash(false)} />
                           ) : null}
-                          <ThemedLayout />
+                          <SeasonProvider>
+                            <ThemedLayout />
+                          </SeasonProvider>
                         </PortalProvider>
                       </DiscordRPCProvider>
                     </OrientationProvider>

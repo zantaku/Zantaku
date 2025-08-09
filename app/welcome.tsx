@@ -59,6 +59,9 @@ const FADE_DURATION = 1000; // 1 second
 const CACHE_KEY = 'trending_anime_cache';
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
 
+// Toggle to show/hide the trending preview card on the welcome screen
+const SHOW_TRENDING_PREVIEW = false;
+
 export default function WelcomeScreen() {
   const { signIn, handleToken, enableAnonymousMode } = useAuth();
   const { signInWithPin, authWithClipboardToken, isLoading: isDevAuthLoading } = useDevAuth();
@@ -397,10 +400,10 @@ export default function WelcomeScreen() {
           )}
           <LinearGradient
             colors={[
-              'rgba(0,0,0,0.3)',
-              'rgba(0,0,0,0.5)',
+              'rgba(0,0,0,0.6)',
               'rgba(0,0,0,0.7)',
-              'rgba(0,0,0,0.9)',
+              'rgba(0,0,0,0.82)',
+              'rgba(0,0,0,0.94)',
             ]}
             locations={[0, 0.3, 0.6, 1]}
             style={StyleSheet.absoluteFill}
@@ -426,7 +429,7 @@ export default function WelcomeScreen() {
             transition={{ type: 'timing', duration: 1000, delay: 600 }}
             style={styles.logoContainer}
           >
-            <Logo width={240} height={48} />
+            <Logo width={300} height={60} />
           </MotiView>
         </Animated.View>
 
@@ -439,16 +442,16 @@ export default function WelcomeScreen() {
             style={styles.textContainer}
           >
             <Text style={[styles.title, { color: '#fff' }]}>
-              ZanTaku
+              Zantaku
             </Text>
-            <Text style={[styles.subtitle, { color: 'rgba(255,255,255,0.8)' }]}>
+            <Text style={[styles.subtitle, { color: 'rgba(255,255,255,0.9)' }]}>
               Read, Watch, Discover, and Sync better.
             </Text>
           </MotiView>
         </Animated.View>
 
         {/* Anime Info Card */}
-        {!isLoading && trendingAnime.length > 0 && trendingAnime[currentIndex] && (
+        {SHOW_TRENDING_PREVIEW && !isLoading && trendingAnime.length > 0 && trendingAnime[currentIndex] && (
           <Animated.View style={styles.bottomContainer}>
             <TouchableOpacity 
               style={styles.animePreview}
@@ -617,7 +620,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     position: 'absolute',
-    top: '35%',
+    top: '40%',
     transform: [{ translateY: -60 }],
   },
   logoContainer: {
@@ -630,7 +633,7 @@ const styles = StyleSheet.create({
     marginTop: height * 0.02,
   },
   title: {
-    fontSize: 32,
+    fontSize: 40,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 12,
@@ -639,10 +642,11 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: 20,
+    fontWeight: '600',
     textAlign: 'center',
-    opacity: 0.8,
-    maxWidth: '80%',
+    opacity: 1,
+    maxWidth: '85%',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,

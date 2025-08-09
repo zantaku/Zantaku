@@ -14,6 +14,50 @@ export function getBaseUrl(url: string): string {
   return url.substring(0, url.lastIndexOf('/') + 1);
 }
 
+// Preferred remote proxy to keep all HLS requests behind a single endpoint.
+// Path-style is resilient for relative URLs inside playlists.
+const YESGOGOGO_PROXY_PATH = 'http://yesgogogototheapi.xyz/proxy/';
+const YESGOGOGO_PROXY_QUERY = 'http://yesgogogototheapi.xyz/proxy?url=';
+const KUROJI_PROXY_QUERY = 'https://kuroji.1ani.me/api/proxy?url=';
+
+function unwrapKnownProxy(url: string): string {
+  let current = url;
+  let guard = 0;
+  while (guard < 5) {
+    if (current.startsWith(KUROJI_PROXY_QUERY)) {
+      current = decodeURIComponent(current.slice(KUROJI_PROXY_QUERY.length));
+    } else if (current.startsWith(YESGOGOGO_PROXY_QUERY)) {
+      current = decodeURIComponent(current.slice(YESGOGOGO_PROXY_QUERY.length));
+    } else if (current.startsWith(YESGOGOGO_PROXY_PATH)) {
+      current = current.slice(YESGOGOGO_PROXY_PATH.length);
+    } else {
+      break;
+    }
+    guard++;
+  }
+  return current;
+}
+
+function wrapWithProxy(absoluteUrl: string): string {
+  const clean = unwrapKnownProxy(absoluteUrl);
+  // Prefer HTTPS Kuroji proxy to avoid Android cleartext HTTP blocks
+  return `${KUROJI_PROXY_QUERY}${encodeURIComponent(clean)}`;
+}
+
+function absolutize(baseUrl: string, maybeRelative: string): string {
+  if (!maybeRelative || maybeRelative.startsWith('#')) return maybeRelative;
+  if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
+  return `${baseUrl}${maybeRelative}`;
+}
+
+function rewriteAttributeUris(line: string, baseUrl: string): string {
+  // Rewrites URI="..." inside tags like EXT-X-KEY, EXT-X-MAP, EXT-X-MEDIA
+  return line.replace(/URI="([^"]+)"/g, (_m, p1) => {
+    const abs = absolutize(baseUrl, p1);
+    return `URI="${wrapWithProxy(abs)}"`;
+  });
+}
+
 /**
  * Headers for GogoAnime requests
  */
@@ -36,15 +80,26 @@ export const HIANIME_HEADERS = {
 /**
  * Makes an HTTP request with the appropriate headers for the given provider
  * 
- * @param url The URL to fetch
+ * @param url The URL to fetch (can be direct CDN URL or proxied URL)
  * @param provider The provider (zoro or gogoanime)
  * @returns The response data
  */
 export async function fetchWithHeaders(url: string, provider: 'zoro' | 'gogoanime'): Promise<string> {
   try {
+    // Check if this is a proxied URL
+    if (url.includes('kuroji.1ani.me/api/proxy')) {
+      console.log(`[Proxy] Fetching proxied URL: ${url}`);
+      const response = await axios.get(url, {
+        responseType: 'text',
+        timeout: 10000, // 10 second timeout
+      });
+      return response.data;
+    }
+    
+    // Direct CDN URL - use provider headers
     const headers = provider === 'zoro' ? HIANIME_HEADERS : GOGOANIME_HEADERS;
     
-    console.log(`[Proxy] Fetching ${url} with ${provider} headers`);
+    console.log(`[Proxy] Fetching direct CDN URL: ${url} with ${provider} headers`);
     const response = await axios.get(url, {
       headers,
       responseType: 'text',
@@ -67,51 +122,48 @@ export async function fetchWithHeaders(url: string, provider: 'zoro' | 'gogoanim
  * @param baseUrl The base URL to resolve relative URLs against
  * @returns The processed m3u8 content
  */
-export async function processM3u8Playlist(content: string, baseUrl: string, provider: 'zoro' | 'gogoanime'): Promise<string> {
-  // Check if this is a master playlist with different quality options
+export async function processM3u8Playlist(content: string, baseUrl: string, _provider: 'zoro' | 'gogoanime'): Promise<string> {
+  // If master playlist, rewrite all child playlist URIs to proxy
   if (content.includes('#EXT-X-STREAM-INF')) {
-    console.log('[M3u8 Processor] Master playlist detected, selecting quality');
-    const selectedUrl = selectAppropriateQuality(content, baseUrl);
-    
-    try {
-      // Fetch the selected variant playlist
-      console.log(`[M3u8 Processor] Fetching selected variant playlist: ${selectedUrl}`);
-      const variantContent = await fetchWithHeaders(selectedUrl, provider);
-      
-      // Process the variant playlist which contains the actual segments
-      return processSegmentPlaylist(variantContent, getBaseUrl(selectedUrl));
-    } catch (error) {
-      console.error(`[M3u8 Processor] Error fetching variant playlist: ${error}`);
-      // Return the original content as fallback
-      return content;
-    }
+    const lines = content.split('\n');
+    const rewritten = lines.map((line) => {
+      if (!line || line.startsWith('#')) {
+        // Rewrite any URI attributes inside tag lines
+        return rewriteAttributeUris(line, baseUrl);
+      }
+      const abs = absolutize(baseUrl, line.trim());
+      return wrapWithProxy(abs);
+    });
+    return rewritten.join('\n');
   }
-  
-  // Regular segment playlist
+  // Not a master: rewrite segment playlist
   return processSegmentPlaylist(content, baseUrl);
 }
 
 /**
  * Processes a segment playlist (not a master playlist)
+ * Rewrites all URLs to go through the Kuroji proxy to ensure proper headers
  */
 function processSegmentPlaylist(content: string, baseUrl: string): string {
   // Process each line in the m3u8 content
   return content
     .split('\n')
     .map((line: string) => {
-      // Skip comments and directives
-      if (line.startsWith('#') || line.trim().length === 0) {
-        return line;
+      if (!line) return line;
+      if (line.startsWith('#')) {
+        return rewriteAttributeUris(line, baseUrl);
       }
-      
-      // If it's a relative URL, convert to absolute
-      return line.startsWith('http') ? line : `${baseUrl}${line}`;
+      const abs = absolutize(baseUrl, line.trim());
+      const proxied = wrapWithProxy(abs);
+      console.log(`[M3u8 Processor] Rewriting URL: ${abs} -> ${proxied}`);
+      return proxied;
     })
     .join('\n');
 }
 
 /**
  * Selects an appropriate quality stream from a master playlist
+ * Rewrites variant URLs to go through the Kuroji proxy
  */
 function selectAppropriateQuality(content: string, baseUrl: string): string {
   const lines = content.split('\n');
@@ -177,7 +229,9 @@ function selectAppropriateQuality(content: string, baseUrl: string): string {
   if (streams.length === 1) {
     selectedStream = streams[0];
     console.log(`[Quality Selector] Only one quality available: ${selectedStream.resolution || 'unknown'} (${selectedStream.bandwidth} bps)`);
-    return selectedStream.url;
+    const proxyUrl = `https://kuroji.1ani.me/api/proxy?url=${encodeURIComponent(selectedStream.url)}`;
+    console.log(`[Quality Selector] Proxying variant URL: ${selectedStream.url} -> ${proxyUrl}`);
+    return proxyUrl;
   }
   
   // Try to detect mobile network limitations
@@ -204,14 +258,18 @@ function selectAppropriateQuality(content: string, baseUrl: string): string {
     // If we have 1080p or higher, use it
     if (highestQuality.height >= 1080) {
       console.log(`[Quality Selector] Selected highest quality: ${highestQuality.resolution} (${highestQuality.bandwidth} bps)`);
-      return highestQuality.url;
+      const proxyUrl = `https://kuroji.1ani.me/api/proxy?url=${encodeURIComponent(highestQuality.url)}`;
+      console.log(`[Quality Selector] Proxying variant URL: ${highestQuality.url} -> ${proxyUrl}`);
+      return proxyUrl;
     }
     
     // If no 1080p+, try to find 720p
     const optimalResolution = streamsWithHeight.find(s => s.height === 720) || highestQuality;
     
     console.log(`[Quality Selector] Selected optimal resolution: ${optimalResolution.resolution} (${optimalResolution.bandwidth} bps)`);
-    return optimalResolution.url;
+    const proxyUrl = `https://kuroji.1ani.me/api/proxy?url=${encodeURIComponent(optimalResolution.url)}`;
+    console.log(`[Quality Selector] Proxying variant URL: ${optimalResolution.url} -> ${proxyUrl}`);
+    return proxyUrl;
   }
   
   // If we can't choose based on resolution, pick the highest quality option
@@ -221,7 +279,9 @@ function selectAppropriateQuality(content: string, baseUrl: string): string {
   
   console.log(`[Quality Selector] Selected highest bandwidth option: ${selectedStream.resolution || 'unknown'} (${selectedStream.bandwidth} bps)`);
   
-  return selectedStream.url;
+  const proxyUrl = `https://kuroji.1ani.me/api/proxy?url=${encodeURIComponent(selectedStream.url)}`;
+  console.log(`[Quality Selector] Proxying variant URL: ${selectedStream.url} -> ${proxyUrl}`);
+  return proxyUrl;
 }
 
 /**

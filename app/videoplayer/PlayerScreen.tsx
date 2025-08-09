@@ -90,6 +90,9 @@ const PlayerScreen: React.FC = () => {
   const params = useLocalSearchParams();
   const { preferences, setPreferences, anilistUser, onSaveToAniList, onEnterPiP, isPipSupported, isInPipMode } = usePlayerContext();
   
+  // Add a simple delay to prevent viewState errors
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  
   // Enhanced System PiP functionality for true system-wide PiP
   const handleSystemPiP = async () => {
     try {
@@ -393,22 +396,15 @@ const PlayerScreen: React.FC = () => {
   // Detect provider from episode ID or source URL
   const detectedProvider = useMemo(() => {
     if (!videoData) return 'unknown';
-    
-    // Check episode ID format for Zoro
-    if (videoData.episodeId?.includes('$episode$')) {
-      return 'zoro';
-    }
-    
-    // Check source URL patterns
-    if (videoData.source?.includes('sunshinerays') || 
-        videoData.source?.includes('thunderwave') ||
-        videoData.source?.includes('megacloud')) {
-      return 'zoro';
-    }
-    
-    // Default to animepahe for other sources
+    // Prefer explicit provider if passed via params/storage
+    const paramProvider = (params.provider as string) || (videoData as any).provider;
+    if (paramProvider) return String(paramProvider).toLowerCase();
+
+    // Fallback heuristics
+    if (videoData.episodeId?.includes('/episode-')) return 'zoro';
+    if (videoData.source?.includes('megacloud') || videoData.source?.includes('dotstream')) return 'zoro';
     return 'animepahe';
-  }, [videoData?.episodeId, videoData?.source]);
+  }, [params.provider, videoData?.episodeId, videoData?.source]);
 
   // Provider-specific URL handling
   const videoSource = useMemo(() => {
@@ -438,35 +434,120 @@ const PlayerScreen: React.FC = () => {
   const videoHeaders = useMemo(() => {
     if (!videoData?.headers) return {};
     
-    // TEST: Try without headers for Zoro to see if that's the issue
-    if (detectedProvider === 'zoro') {
-      console.log(`🧪 [ZORO] Testing without headers (React Native limitation)`);
-      return {}; // No headers for testing
+    // Use headers as provided by the source (Aniwatch requires Referer)
+    const headers = { ...videoData.headers } as Record<string, string>;
+    
+    // For some players, having Origin alongside Referer helps; derive if missing
+    if (headers.Referer && !headers.Origin) {
+      try {
+        const u = new URL(headers.Referer);
+        headers.Origin = `${u.protocol}//${u.host}`;
+      } catch {}
     }
     
-    // AnimePahe: uses direct streaming with original headers
-    console.log(`📋 [${detectedProvider.toUpperCase()}] Using headers:`, videoData.headers);
-    return videoData.headers;
+    console.log(`📋 [${detectedProvider.toUpperCase()}] Using headers:`, headers);
+    return headers;
   }, [videoData?.headers, detectedProvider]);
 
   // Create expo-video player for system PiP
-  const videoPlayer = useVideoPlayer(
-    videoData && videoSource ? {
-      uri: videoSource,
-      headers: videoHeaders
-    } : null,
+      const videoPlayer = useVideoPlayer(
+    videoData && videoSource ? (() => {
+      const isKurojiProxied = typeof videoSource === 'string' && videoSource.includes('kuroji.1ani.me/api/proxy?url=');
+      let finalUri = videoSource;
+      const sourceObj: any = {
+        uri: finalUri,
+        headers: isKurojiProxied ? undefined : videoHeaders,
+      };
+      
+      // Force HLS detection on Android/ExoPlayer when using proxied URLs
+      // This is the exact fix from the image - tell the player explicitly it's HLS
+      // 
+      // Why this matters:
+      // - Some players detect HLS purely from MIME type (application/vnd.apple.mpegurl)
+      // - But many mobile/TV video players (especially Android's ExoPlayer) fall back to 
+      //   guessing from the file extension
+      // - If the URL doesn't end with .m3u8 (like our proxy URLs), players might fail
+      //   to treat it as HLS, leading to "file can't be played" errors
+      //
+      // Fix: Tell the player explicitly it's HLS
+          const isLocalM3u8 = typeof finalUri === 'string' && finalUri.startsWith('file://') && finalUri.toLowerCase().endsWith('.m3u8');
+          const isExplicitM3u8 = typeof finalUri === 'string' && finalUri.toLowerCase().endsWith('.m3u8');
+          if (isKurojiProxied || isLocalM3u8 || isExplicitM3u8) {
+        // Option 1: For expo-av (what we're using)
+        sourceObj.overrideFileExtensionAndroid = '.m3u8';
+        sourceObj.contentType = 'application/x-mpegURL';
+        
+        // Option 2: For react-native-video (alternative)
+        // sourceObj.type = 'm3u8';
+        
+        // Don't append ext=.m3u8 - the overrideFileExtensionAndroid is enough
+        // finalUri = `${finalUri}${finalUri.includes('?') ? '&' : '?'}ext=.m3u8`;
+        // sourceObj.uri = finalUri;
+      }
+      
+      console.log('[EXPO-VIDEO] 🔧 Player source object:', {
+        uri: sourceObj.uri,
+        hasHeaders: !!sourceObj.headers && Object.keys(sourceObj.headers).length > 0,
+        overrideFileExtensionAndroid: sourceObj.overrideFileExtensionAndroid,
+        contentType: sourceObj.contentType,
+        type: sourceObj.type, // For react-native-video alternative
+      });
+      
+      // Add error handling for the player
+      console.log('[EXPO-VIDEO] 🚀 Creating player with source:', {
+        originalUrl: videoSource,
+        finalUrl: sourceObj.uri,
+        isKurojiProxied,
+        hasHeaders: !!sourceObj.headers,
+        hlsForced: !!sourceObj.overrideFileExtensionAndroid || !!sourceObj.type
+      });
+      
+      return sourceObj;
+    })() : null,
     (player) => {
       if (player && videoData) {
         player.loop = false;
         player.muted = false;
         player.volume = preferences.volume;
         player.playbackRate = playbackSpeed;
-        player.timeUpdateEventInterval = 100; // Update every 100ms for smooth subtitles
+        // Reduce JS churn on lower-end devices/emulators
+        // 100ms is very chatty; 250ms keeps subtitles in sync while cutting updates by ~2.5x
+        player.timeUpdateEventInterval = 250;
         
         console.log(`[EXPO-VIDEO] 🎬 Player created and configured for ${detectedProvider.toUpperCase()}`);
         console.log(`[EXPO-VIDEO] 📡 Using ${videoHeaders && Object.keys(videoHeaders).length > 0 ? 'custom' : 'no'} headers`);
         if (detectedProvider === 'zoro') {
-                        console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from Megacloud decryption (pre-processed)`);
+          console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from Megacloud decryption (pre-processed)`);
+        }
+        
+        // Test the URL directly to see if it's accessible
+        if (videoSource && videoSource.includes('kuroji.1ani.me/api/proxy?url=')) {
+          fetch(videoSource)
+            .then(res => {
+              console.log('[EXPO-VIDEO] 🔍 URL test result:', {
+                status: res.status,
+                contentType: res.headers.get('content-type'),
+                ok: res.ok
+              });
+            })
+            .catch(err => {
+              console.error('[EXPO-VIDEO] ❌ URL test failed:', err.message);
+            });
+        }
+        
+        // Test the URL directly to see if it's accessible
+        if (videoSource && videoSource.includes('kuroji.1ani.me/api/proxy?url=')) {
+          fetch(videoSource)
+            .then(res => {
+              console.log('[EXPO-VIDEO] 🔍 URL test result:', {
+                status: res.status,
+                contentType: res.headers.get('content-type'),
+                ok: res.ok
+              });
+            })
+            .catch(err => {
+              console.error('[EXPO-VIDEO] ❌ URL test failed:', err.message);
+            });
         }
         
         // Monitor video status and errors via polling
@@ -475,6 +556,8 @@ const PlayerScreen: React.FC = () => {
             const status = player.status;
             const currentTime = player.currentTime || 0;
             const duration = player.duration || 0;
+            // Try to access error info if exposed
+            const err: any = (player as any).error || undefined;
             
             console.log(`[EXPO-VIDEO] 📊 Status check:`, {
               status: status,
@@ -482,6 +565,7 @@ const PlayerScreen: React.FC = () => {
               currentTime: currentTime.toFixed(2),
               duration: duration.toFixed(2),
               playing: player.playing,
+              error: err ? { message: String(err?.message || err), code: err?.code } : undefined,
               timestamp: new Date().toISOString()
             });
             
@@ -494,6 +578,7 @@ const PlayerScreen: React.FC = () => {
                 status: status,
                 headers: videoHeaders,
                 episodeId: videoData?.episodeId,
+                playerError: err ? { message: String(err?.message || err), code: err?.code } : undefined,
                 timestamp: new Date().toISOString()
               });
               console.error(`🔥 [VIDEO ERROR END] ===================`);
@@ -530,6 +615,59 @@ const PlayerScreen: React.FC = () => {
       }
     }
   );
+
+  // Add a simple delay to prevent viewState errors
+  useEffect(() => {
+    if (videoData && videoSource) {
+      const timer = setTimeout(() => {
+        setIsVideoReady(true);
+      }, 100); // Small delay to ensure native view is ready
+      
+      return () => clearTimeout(timer);
+    } else {
+      setIsVideoReady(false);
+    }
+  }, [videoData, videoSource]);
+
+  // Remove the problematic media probe that causes double-proxying
+  // useEffect(() => {
+  //   const runProbe = async () => {
+  //     // ... removed entire probe logic that was double-proxying URLs
+  //   };
+  //   runProbe();
+  // }, [videoSource]);
+
+  // Monitor video status for debugging (without re-proxying)
+  useEffect(() => {
+    if (!videoPlayer) return;
+
+    const monitorVideoStatus = () => {
+      try {
+        const status = videoPlayer.status;
+        const currentTime = videoPlayer.currentTime || 0;
+        const duration = videoPlayer.duration || 0;
+        
+        // Only log status, don't manipulate URLs
+        console.log(`[EXPO-VIDEO] 📊 Status check:`, {
+          status: status,
+          provider: detectedProvider,
+          currentTime: currentTime.toFixed(2),
+          duration: duration.toFixed(2),
+          hasError: status === 'error'
+        });
+        
+        // Log any errors without URL manipulation
+        if (status === 'error') {
+          console.log(`[EXPO-VIDEO] ❌ Player error detected`);
+        }
+      } catch (error) {
+        console.log(`[EXPO-VIDEO] ⚠️ Error monitoring status:`, error);
+      }
+    };
+
+    const interval = setInterval(monitorVideoStatus, 2000);
+    return () => clearInterval(interval);
+  }, [videoPlayer, detectedProvider]);
 
   // Simplified time update using refs to prevent infinite loops
   const lastTimeRef = useRef(0);
@@ -964,7 +1102,23 @@ const PlayerScreen: React.FC = () => {
     try {
       console.log('🎯 [SUBTITLE LOADER] Loading subtitles from:', subtitleUrl.substring(0, 100) + '...');
       
-      const response = await fetch(subtitleUrl);
+      // Try with the same headers required for video (Referer/Origin)
+      const subtitleHeaders: Record<string, string> = { ...(videoHeaders || {}) };
+      if (subtitleHeaders.Referer && !subtitleHeaders.Origin) {
+        try {
+          const u = new URL(subtitleHeaders.Referer);
+          subtitleHeaders.Origin = `${u.protocol}//${u.host}`;
+        } catch {}
+      }
+      subtitleHeaders.Accept = 'text/vtt, text/plain;q=0.9, */*;q=0.8';
+      
+      let response = await fetch(subtitleUrl, { headers: subtitleHeaders });
+      
+      // Fallback: retry without headers if we get a 403/401
+      if (!response.ok && (response.status === 401 || response.status === 403)) {
+        console.warn('⚠️ [SUBTITLE LOADER] Auth error loading VTT with headers. Retrying without headers...');
+        try { response = await fetch(subtitleUrl); } catch {}
+      }
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1313,13 +1467,14 @@ const PlayerScreen: React.FC = () => {
   }, [router]);
 
   // Handle fullscreen toggle (cycle through resize modes)
-  const [contentFitMode, setContentFitMode] = useState<"contain" | "cover" | "fill">("contain");
+  const [contentFitMode, setContentFitMode] = useState<"contain" | "cover" | "fill">("cover");
   
   const handleToggleFullscreen = useCallback(() => {
     // For expo-video, we use contentFit property
-    type ContentFitMode = "contain" | "cover";
-    const contentFitModes: ContentFitMode[] = ["contain", "cover"]; // Removed 'fill' to prevent stretching
-    const modeNames = ['Fit', 'Fill'];
+    type ContentFitMode = "contain" | "cover" | "fill";
+    // Include 'fill' so users can force edge-to-edge if they want
+    const contentFitModes: ContentFitMode[] = ["cover", "contain", "fill"]; 
+    const modeNames = ['Fill', 'Fit', 'Stretch'];
     
     const currentIndex = contentFitModes.indexOf(contentFitMode as ContentFitMode);
     const nextIndex = (currentIndex + 1) % contentFitModes.length;
@@ -1329,7 +1484,7 @@ const PlayerScreen: React.FC = () => {
     setContentFitMode(nextMode);
     
     // Also update the old scaling mode for compatibility
-    const oldResizeModes = [ResizeMode.CONTAIN, ResizeMode.COVER];
+    const oldResizeModes = [ResizeMode.COVER, ResizeMode.CONTAIN, ResizeMode.STRETCH];
     setScalingMode(oldResizeModes[nextIndex]);
     
     console.log(`📺 Video resize mode: ${modeNames[nextIndex]}`);
@@ -1515,23 +1670,12 @@ const PlayerScreen: React.FC = () => {
 
   // Calculate video dimensions maintaining 16:9 aspect ratio
   const videoStyle = useMemo(() => {
-    const aspectRatio = 16 / 9;
-    let width = dimensions.width;
-    let height = width / aspectRatio;
-
-    // If calculated height is greater than screen height, scale down
-    if (height > dimensions.height) {
-      height = dimensions.height;
-      width = height * aspectRatio;
-    }
-
+    // Fill the entire container; scaling handled by contentFit
     return {
-      width,
-      height,
-      alignSelf: 'center' as const,
+      ...StyleSheet.absoluteFillObject,
       backgroundColor: '#000000',
-    };
-  }, [dimensions]);
+    } as const;
+  }, []);
 
   if (isLoading || !videoData) {
     return (
@@ -1547,19 +1691,25 @@ const PlayerScreen: React.FC = () => {
       
       {/* Video container with proper centering */}
       <View style={styles.videoContainer}>
-        <VideoView
-          key={`video-view-${videoKey}`}
-          ref={videoRef}
-          style={videoStyle}
-          player={videoPlayer}
-          allowsFullscreen={true}
-          allowsPictureInPicture={true}
-          startsPictureInPictureAutomatically={false}
-          nativeControls={false}
-          contentFit="contain"
-          onPictureInPictureStart={handlePiPStart}
-          onPictureInPictureStop={handlePiPStop}
-        />
+        {isVideoReady ? (
+          <VideoView
+            key={`video-view-${videoKey}`}
+            ref={videoRef}
+            style={videoStyle}
+            player={videoPlayer}
+            allowsFullscreen={true}
+            allowsPictureInPicture={true}
+            startsPictureInPictureAutomatically={false}
+            nativeControls={false}
+            contentFit={contentFitMode}
+            onPictureInPictureStart={handlePiPStart}
+            onPictureInPictureStop={handlePiPStop}
+          />
+        ) : (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading video...</Text>
+          </View>
+        )}
       </View>
 
       {/* Double Tap Overlay for Seeking */}
@@ -1815,9 +1965,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   videoContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000000',
   },
   loadingContainer: {

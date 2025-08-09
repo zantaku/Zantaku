@@ -1,4 +1,5 @@
 import { Chapter } from '../api/proxy/providers/manga';
+import { TAKIAPI_URL } from '../app/constants/api';
 
 export interface NormalizedChapter {
   id: string;
@@ -162,8 +163,9 @@ export class ChapterManager {
         return `${baseApiUrl}/api/manga/page?id=${chapter.id}`;
         
       case 'mangadex':
-        // MangaDex uses /api/manga/page?id={chapterId}
-        return `${baseApiUrl}/api/manga/page?id=${chapter.id}`;
+        // Use TakiAPI (Consumet) endpoint for MangaDex
+        // This endpoint is stable and returns the page list directly
+        return `${TAKIAPI_URL}/manga/mangadex/read/${chapter.id}`;
         
       case 'katana':
         // Katana uses /katana/series/{mangaId}/{chapterId}

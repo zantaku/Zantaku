@@ -29,6 +29,8 @@ import {
 } from '../utils/performanceOptimization';
 import OptimizedImage from './OptimizedImage';
 import { fetchRelatedSeasons } from '../api/anilist/queries';
+import useSeasons from '../hooks/useSeasons';
+import { useSeasonSelection } from '../contexts/SeasonStore';
 
 // Device capabilities for performance optimization
 const deviceCapabilities = detectDeviceCapabilities();
@@ -159,6 +161,12 @@ interface Season {
 
 // #region Production-Safe Helper Functions
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const normalizeTitleForMatch = (title?: string) =>
+    (title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
 const fetchWithRetry = async (url: string, options: any = {}, maxRetries = 3) => {
   for (let i = 0; i < maxRetries; i++) {
@@ -569,9 +577,11 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [activeTab, setActiveTab] = useState('1-12');
     const [episodeProgressMap, setEpisodeProgressMap] = useState<Record<string, EpisodeProgress>>({});
     
-    // NEW: State for season switching
-    const [availableSeasons, setAvailableSeasons] = useState<Season[]>([]);
-    const [currentSeason, setCurrentSeason] = useState<Season | null>(null);
+    // NEW: Season selection (AniList-driven)
+    const { seasons: aniSeasons } = useSeasons(anilistId);
+    const { selected: selectedSeason, setSelected: setSelectedSeason } = useSeasonSelection();
+    const [availableSeasons, setAvailableSeasons] = useState<Season[]>([]); // legacy UI support
+    const [currentSeason, setCurrentSeason] = useState<Season | null>(null); // legacy UI support
     const [showSeasonDropdown, setShowSeasonDropdown] = useState(false);
     const [seasonsLoading, setSeasonsLoading] = useState(false);
     const [seasonsCache, setSeasonsCache] = useState<Record<string, Season[]>>({});
@@ -629,9 +639,14 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 [cacheKey]: seasons
             }));
             
-            // Set current season if not already set
+            // Set current season with smarter title matching
             if (!currentSeason) {
-                const currentSeasonData = seasons.find(s => s.id === anilistId) || seasons[0];
+                const normQuery = normalizeTitleForMatch(animeTitle);
+                const bestByTitle = seasons.find(s => normalizeTitleForMatch(s.title.userPreferred || s.title.romaji || s.title.english) === normQuery)
+                  || seasons.find(s => normalizeTitleForMatch(s.title.userPreferred || s.title.romaji || s.title.english).includes(normQuery))
+                  || seasons.find(s => normQuery.includes(normalizeTitleForMatch(s.title.userPreferred || s.title.romaji || s.title.english)))
+                  || null;
+                const currentSeasonData = bestByTitle || seasons.find(s => s.id === anilistId) || seasons[0];
                 setCurrentSeason(currentSeasonData);
                 console.log(`[EPISODE_LIST] 🎯 Set current season:`, currentSeasonData?.title.userPreferred);
             }
@@ -648,15 +663,39 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         }
     }, [anilistId, seasonsCache, currentSeason]);
 
+    // Sync AniList seasons into legacy UI containers
+    useEffect(() => {
+        if (!aniSeasons || aniSeasons.length === 0) return;
+        const mapped: Season[] = aniSeasons.map((s: any) => ({
+            id: s.id,
+            title: { userPreferred: s.title?.userPreferred, english: s.title?.english, romaji: s.title?.romaji, native: s.title?.native },
+            format: s.format,
+            status: '',
+            startDate: { year: s.seasonYear },
+            episodes: s.episodes ?? undefined,
+            coverImage: undefined,
+            averageScore: undefined,
+            season: s.season,
+            seasonYear: s.seasonYear,
+        }));
+        setAvailableSeasons(mapped);
+        if (!currentSeason && mapped.length > 0) setCurrentSeason(mapped[0]);
+    }, [aniSeasons]);
+
     // NEW: Function to fetch episodes from selected provider
     const fetchEpisodesFromProvider = useCallback(async (provider: 'animepahe' | 'zoro') => {
         console.log(`\n🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH START ===================`);
         console.log(`[EPISODE_LIST] 🔄 Fetching episodes from provider: ${provider}`);
         
-        // Use current season's title if available, otherwise use the current anime title (which may have been updated by CorrectAnimeSearchModal)
-        // This ensures that the season switcher and correct anime search work independently
-        const titleToUse = currentSeason?.title.userPreferred || currentSeason?.title.romaji || currentAnimeTitle || animeTitle;
-        const anilistIdToUse = currentSeason?.id || anilistId;
+        // Prefer an exact season-title match to avoid picking base series when the title includes season info
+        const aniSelectedTitle = selectedSeason !== 'ALL' ? (selectedSeason as any).title?.userPreferred || (selectedSeason as any).title?.romaji || (selectedSeason as any).title?.english : undefined;
+        const seasonTitleCandidate = aniSelectedTitle || currentSeason?.title.userPreferred || currentSeason?.title.romaji || currentSeason?.title.english;
+        const normQuery = normalizeTitleForMatch(currentAnimeTitle || animeTitle);
+        const normSeason = normalizeTitleForMatch(seasonTitleCandidate);
+        const titleToUse = normSeason && (normSeason === normQuery || normQuery.includes(normSeason) || normSeason.includes(normQuery))
+          ? (seasonTitleCandidate || currentAnimeTitle || animeTitle)
+          : (currentAnimeTitle || seasonTitleCandidate || animeTitle);
+        const anilistIdToUse = (selectedSeason !== 'ALL' ? (selectedSeason as any).id : undefined) || currentSeason?.id || anilistId;
         
         console.log(`[EPISODE_LIST] 📊 Context:`, {
             originalTitle: animeTitle,
@@ -719,16 +758,25 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 }
                 
             } else if (provider === 'zoro') {
-                if (!titleToUse) {
-                    throw new Error('Anime title is required for Zoro provider');
+                // Prefer AniList ID via Kuroji for a canonical full list
+                if (!anilistIdToUse) {
+                    throw new Error('AniList ID is required for Zoro when using Kuroji');
                 }
-                
-                const isDub = preferredAudioType === 'dub';
-                console.log(`[EPISODE_LIST] 🔍 [ZORO] Getting episodes for anime title: "${titleToUse}", audio type: ${preferredAudioType.toUpperCase()}`);
-                console.log(`[EPISODE_LIST] 🔄 [ZORO] Using new reliable search+info method (instead of AniList meta)`);
-                fetchedEpisodes = await zoroProvider.getEpisodes(titleToUse, isDub);
-                
-                console.log(`[EPISODE_LIST] ✅ [ZORO] Fetched ${fetchedEpisodes.length} episodes using search+info method`);
+
+                console.log(`[EPISODE_LIST] 🔍 [ZORO] Getting episodes by AniList ID: ${anilistIdToUse}`);
+                fetchedEpisodes = await zoroProvider.getEpisodesById(anilistIdToUse);
+
+                // If result looks suspiciously small, fallback to title-based search once
+                if (fetchedEpisodes.length < 8 && titleToUse) {
+                    console.log(`[EPISODE_LIST] ⚠️ [ZORO] Few episodes returned (${fetchedEpisodes.length}). Retrying with title: "${titleToUse}"`);
+                    const isDub = preferredAudioType === 'dub';
+                    const retry = await zoroProvider.getEpisodes(titleToUse, isDub);
+                    if (retry.length > fetchedEpisodes.length) {
+                        fetchedEpisodes = retry;
+                    }
+                }
+
+                console.log(`[EPISODE_LIST] ✅ [ZORO] Fetched ${fetchedEpisodes.length} episodes (ID-first with title fallback)`);
                 if (fetchedEpisodes.length > 0) {
                     console.log(`[EPISODE_LIST] 📝 [ZORO] First few episodes:`, 
                         fetchedEpisodes.slice(0, 3).map(ep => ({
@@ -1047,14 +1095,18 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         }
         
         console.log(`[EPISODE_LIST] 📡 Episode ID for modal: "${episodeId}"`);
-        console.log(`[EPISODE_LIST] 🎯 This will be used for: https://takiapi.xyz/anime/animepahe/watch/${episodeId}`);
+        // Log the exact unified watch route that will be hit based on provider/audio selection
+        const willRequestUrl = currentProvider === 'zoro'
+          ? `https://kuroji.1ani.me/api/anime/watch/${anilistId}/episodes/${episode.number}?provider=zoro${preferredAudioType === 'dub' ? '&dub=true' : ''}`
+          : `https://takiapi.xyz/anime/animepahe/watch/${episodeId}`;
+        console.log(`[EPISODE_LIST] 🎯 Will request: ${willRequestUrl}`);
         console.log(`🎬 [EPISODE_LIST] EPISODE PRESS END ===================\n`);
         
         setSelectedEpisode(episode);
         setModalVisible(true);
     }, [currentProvider, anilistId]);
 
-    const handleSourceSelect = useCallback((url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string) => {
+    const handleSourceSelect = useCallback((url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string, provider?: string, audioType?: 'sub' | 'dub') => {
         if (!selectedEpisode) return;
         
         console.log(`\n🎬 [EPISODE_LIST] SOURCE SELECT ===================`);
@@ -1078,6 +1130,8 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 anilistId: anilistIdParam || anilistId,
                 malId: malId,
                 dataKey: dataKey, // Pass the dataKey for stored data
+                provider: provider || currentProvider,
+                audioType: audioType || preferredAudioType
             },
         });
         
@@ -1293,8 +1347,14 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                             onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
                             disabled={seasonsLoading}
                         >
-                                <Text style={[styles.filterDropdownTextSmall, { color: currentTheme.colors.text }]} numberOfLines={1}>
-                                    {currentSeason?.startDate?.year ? `S${currentSeason.startDate.year}` : 'S1'}
+                                <Text
+                                  style={[styles.filterDropdownTextSmall, { color: currentTheme.colors.text }]}
+                                  numberOfLines={2}
+                                  ellipsizeMode="tail"
+                                >
+                                  {currentSeason
+                                    ? `${currentSeason.title.userPreferred || currentSeason.title.romaji || currentSeason.title.english || 'Season'}${currentSeason.startDate?.year ? ` (${currentSeason.startDate.year}${(currentSeason as any).season ? ` • ${(currentSeason as any).season}` : ''}${currentSeason.format ? ` • ${currentSeason.format}` : ''})` : ''}`
+                                    : 'Select season'}
                                 </Text>
                             {seasonsLoading ? (
                                     <ActivityIndicator size="small" color={currentTheme.colors.textSecondary} />
@@ -1365,8 +1425,20 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
 
                 {/* Dropdowns */}
                 {showSeasonDropdown && availableSeasons.length > 1 && (
-                    <View style={[styles.inlineDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
-                        <ScrollView style={styles.inlineDropdownScroll} showsVerticalScrollIndicator={false}>
+                    <View
+                      style={[
+                        styles.inlineDropdown,
+                        { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border },
+                      ]}
+                    >
+                        <ScrollView
+                          style={styles.inlineDropdownScroll}
+                          contentContainerStyle={{ paddingVertical: 4 }}
+                          showsVerticalScrollIndicator={true}
+                          nestedScrollEnabled={true}
+                          keyboardShouldPersistTaps="handled"
+                          scrollEventThrottle={16}
+                        >
                             {availableSeasons.map((season) => (
                                 <TouchableOpacity
                                     key={season.id}
@@ -1377,12 +1449,16 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                                     ]}
                                     onPress={() => handleSeasonChange(season)}
                                 >
-                                        <Text style={[
-                                        styles.inlineDropdownItemText,
+                                        <Text
+                                          style={[
+                                            styles.inlineDropdownItemText,
                                             { color: currentTheme.colors.text },
-                                        currentSeason?.id === season.id && styles.inlineDropdownItemTextActive
-                                        ]} numberOfLines={1}>
-                                            {season.title.userPreferred || season.title.romaji}
+                                            currentSeason?.id === season.id && styles.inlineDropdownItemTextActive,
+                                          ]}
+                                          numberOfLines={3}
+                                          ellipsizeMode="tail"
+                                        >
+                                          {season.title.userPreferred || season.title.romaji || season.title.english || 'Season'}
                                         </Text>
                                     <Text style={[styles.inlineDropdownItemMeta, { color: currentTheme.colors.textSecondary }]}>
                                         {season.startDate?.year || 'Unknown'} • {season.episodes || '?'} eps

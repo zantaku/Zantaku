@@ -448,7 +448,18 @@ export default function EpisodeSourcesModal({
   visible: boolean;
   episodeId: string;
   onClose: () => void;
-  onSelectSource: (url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: Subtitle[], timings?: VideoTimings, anilistId?: string, dataKey?: string) => void;
+  onSelectSource: (
+    url: string,
+    headers: any,
+    episodeId: string,
+    episodeNumber: string,
+    subtitles?: Subtitle[],
+    timings?: VideoTimings,
+    anilistId?: string,
+    dataKey?: string,
+    provider?: string,
+    audioType?: 'sub' | 'dub'
+  ) => void;
   preferredType?: 'sub' | 'dub';
   animeTitle?: string;
   malId?: string;
@@ -572,7 +583,8 @@ export default function EpisodeSourcesModal({
       // Always fetch sources for the preferred type when modal opens
       setLoading(true);
       // Use source settings to determine initial type and auto-select behavior
-      let initialType = sourceSettings.preferredType || preferredType || 'sub';
+      // Important: honor the caller's preferredType first, then fall back to saved settings
+      let initialType = preferredType || sourceSettings.preferredType || 'sub';
       const shouldAutoSelect = sourceSettings.autoSelectSource;
       
       // For AnimePahe, force SUB type since it doesn't support DUB
@@ -610,9 +622,15 @@ export default function EpisodeSourcesModal({
       originalHeaders: source.headers
     });
     
-    let headers = {};
+    let headers: Record<string, string> = {};
+    const urlStr: string = source.url || '';
+    const isKurojiProxied = typeof urlStr === 'string' && urlStr.includes('kuroji.1ani.me/api/proxy?url=');
     
-    if (provider === 'animepahe') {
+    if (isKurojiProxied) {
+      // When using Kuroji proxy, don't attach third-party referers; proxy handles upstream
+      headers = {};
+      console.log(`[FORMAT_SOURCE] ✅ [KUROJI] Using empty headers for proxied stream`);
+    } else if (provider === 'animepahe') {
       // AnimePahe: Use AnimePahe-specific headers, NO PROXY
       headers = {
         ...apiHeaders,
@@ -622,14 +640,11 @@ export default function EpisodeSourcesModal({
       };
       console.log(`[FORMAT_SOURCE] ✅ [ANIMEPAHE] Using direct AnimePahe headers (no proxy)`);
     } else {
-      // Zoro/HiAnime: Use HiAnime headers (with proxy handling in provider)
-      headers = {
-        ...apiHeaders,
-        Referer: 'https://hianime.to/',
-        Origin: 'https://hianime.to',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
-      };
-      console.log(`[FORMAT_SOURCE] ✅ [ZORO] Using HiAnime headers (proxy handled by provider)`);
+      // Zoro via Kuroji: trust payload; only apply headers when not already proxied
+      headers = isKurojiProxied ? {} : (apiHeaders || {});
+      if (isKurojiProxied) {
+        console.log(`[FORMAT_SOURCE] ✅ [ZORO] Kuroji-proxied; not adding headers`);
+      }
     }
     
     const formattedSource = {
@@ -849,12 +864,7 @@ export default function EpisodeSourcesModal({
             
             // Call getWatchData with detailed logging
             console.log(`📡 [ZORO] URL Debug - Will call zoroProvider.getWatchData("${episodeId}", ${type === 'dub'})`);
-            console.log(`📡 [ZORO] This will trigger the following chain:`);
-            console.log(`📡 [ZORO] 1. Extract episode ID from: "${episodeId}"`);
-            console.log(`📡 [ZORO] 2. Get servers from: https://hianime.to/ajax/v2/episode/servers?episodeId={extracted_id}`);
-            console.log(`📡 [ZORO] 3. Get source link from: https://hianime.to/ajax/v2/episode/sources?id={server_id}`);
-            console.log(`📡 [ZORO] 4. Parse stream data from Megacloud getSources with AES decryption`);
-            console.log(`📡 [ZORO] 5. All URLs will be proxied through: http://yesgogogototheapi.xyz/proxy?url={encoded_url}`);
+            // Kuroji unified watch handles servers/streams internally
             
             try {
               const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub');
@@ -870,7 +880,7 @@ export default function EpisodeSourcesModal({
                   formatSourceWithHeaders(source, zoroWatchData.headers || {}, type, 'zoro')
                 );
                 
-                console.log(`📡 [ZORO] Formatted source URLs:`, formattedSources.map((s: any, i: number) => `${i + 1}: ${s.url?.substring(0, 80)}...`));
+                console.log(`📡 [ZORO] Formatted source URLs:`, formattedSources.map((s: any, i: number) => `${i + 1}: ${s.url}`));
                 
                 setSources(formattedSources);
                 setSubtitles(zoroWatchData.subtitles || []);
@@ -1009,6 +1019,8 @@ export default function EpisodeSourcesModal({
       timings: directTimings || null,
       anilistId: anilistId || '',
       animeTitle: animeTitle || '',
+      provider: currentProvider || 'zoro',
+      audioType: source.type,
       timestamp: Date.now()
     })).then(() => {
       console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey);
@@ -1028,7 +1040,18 @@ export default function EpisodeSourcesModal({
     
     // Close current modal and pass data back to caller
     // IMPORTANT: Use direct data references instead of state
-    onSelectSource(source.url, source.headers, episodeId, episodeNumberStr, directSubtitles, directTimings, anilistId, dataKey);
+    onSelectSource(
+      source.url,
+      source.headers,
+      episodeId,
+      episodeNumberStr,
+      directSubtitles,
+      directTimings,
+      anilistId,
+      dataKey,
+      currentProvider || 'zoro',
+      source.type
+    );
   };
 
   // Similarly update the handleSourceSelect function
@@ -1082,6 +1105,8 @@ export default function EpisodeSourcesModal({
       timings: videoTimings || null,
       anilistId: anilistId || '',
       animeTitle: animeTitle || '',
+      provider: currentProvider || 'zoro',
+      audioType: source.type,
       timestamp: Date.now()
     })).then(() => {
       console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey);
@@ -1096,7 +1121,18 @@ export default function EpisodeSourcesModal({
     
     // Close current modal and pass data back to caller
     // Use the captured subtitles to avoid race conditions
-    onSelectSource(source.url, source.headers, episodeId, episodeNumberStr, currentSubtitles, videoTimings, anilistId, dataKey);
+    onSelectSource(
+      source.url,
+      source.headers,
+      episodeId,
+      episodeNumberStr,
+      currentSubtitles,
+      videoTimings,
+      anilistId,
+      dataKey,
+      currentProvider || 'zoro',
+      source.type
+    );
   };
 
   const handleTypeSelect = (selectedType: 'sub' | 'dub') => {

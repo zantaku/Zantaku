@@ -19,6 +19,14 @@ const REQUIRED_HEADERS = {
   'Cache-Control': 'no-cache, no-store, must-revalidate',
 }
 
+// Headers for different content types
+const CONTENT_TYPE_HEADERS = {
+  'm3u8': 'application/vnd.apple.mpegurl',
+  'ts': 'video/mp2t',
+  'm4s': 'video/mp4',
+  'mp4': 'video/mp4',
+}
+
 // Re-export all the utility functions
 export {
   // Native proxy functions

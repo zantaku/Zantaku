@@ -153,20 +153,42 @@ export class MangaFireProvider {
     const paginatedChapters = data.chapters.slice(offset, offset + limit);
     console.log(`[MangaFire] Returning ${paginatedChapters.length} chapters (${offset} to ${offset + paginatedChapters.length - 1})`);
     
+    // Helpers to normalize chapter number and title
+    const extractChapterNumber = (name: string | undefined, fallbackIndex: number): string => {
+      if (!name) return `${fallbackIndex + 1}`;
+      const match = name.match(/(\d+(?:\.\d+)?)/);
+      if (match) return match[1];
+      return `${fallbackIndex + 1}`;
+    };
+
+    const cleanTitle = (name: string | undefined, numberText: string): string => {
+      if (!name) return `Chapter ${numberText}`;
+      const stripped = name
+        .replace(/^\s*(chap(ter)?\s*)/i, '')
+        .replace(/^[:\-\s]+/, '')
+        .replace(/[:\-\s]+$/, '')
+        .trim();
+      if (stripped === '' || stripped === numberText || /^\d+(?:\.\d+)?$/.test(stripped)) {
+        return `Chapter ${numberText}`;
+      }
+      return stripped;
+    };
+
     // Map to the expected format
     return paginatedChapters.map((chapter: any, index: number) => {
-      const chapterNumber = chapter.name?.replace('Chap ', '')?.trim() || `${index + 1}`;
-      
+      const chapterNumber = extractChapterNumber(chapter.name, index);
+      const title = cleanTitle(chapter.name, chapterNumber);
+
       return {
         id: chapter.id || '',
         number: chapterNumber,
-        title: chapter.name || `Chapter ${chapterNumber}`,
+        title,
         url: chapter.id || '',
         updatedAt: chapter.dateUpload || '',
         scanlationGroup: chapter.scanlator || 'Unknown',
         scanlator: chapter.scanlator || '',
         pages: 0, // Will be filled later if needed
-        volume: chapter.scanlator?.match(/Vol\s*(\d+)/i) ? 
+        volume: chapter.scanlator?.match(/Vol\s*(\d+)/i) ?
           chapter.scanlator.match(/Vol\s*(\d+)/i)[1] : '',
         translatedLanguage: 'en',
         source: 'mangafire',

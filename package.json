@@ -49,6 +49,7 @@
     "@types/jszip": "^3.4.0",
     "@types/lodash": "^4.17.17",
     "@types/webvtt-parser": "^2.2.0",
+    "aniwatch": "^2.24.0",
     "axios": "^1.6.2",
     "cheerio": "^1.0.0",
     "crypto-js": "^4.2.0",
