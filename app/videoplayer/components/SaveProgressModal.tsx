@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
+// import { Ionicons } from '@expo/vector-icons';
 import { PLAYER_COLORS, MODAL_STYLES } from '../constants';
 
 interface SaveProgressModalProps {
@@ -40,8 +40,7 @@ export default function SaveProgressModal({
   anilistUser,
   onSaveTimestampOnly
 }: SaveProgressModalProps) {
-  const [rememberChoice, setRememberChoice] = useState(false);
-  const [showSaveOptions, setShowSaveOptions] = useState(false);
+  const [rememberChoice] = useState(false);
   
   // Add debug logging to help diagnose why the AniList button isn't showing
   useEffect(() => {
@@ -61,7 +60,7 @@ export default function SaveProgressModal({
         duration: duration ? `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}` : 'Not provided'
       });
     }
-  }, [isVisible, anilistId, onSaveToAniList, anilistUser, currentTime, duration]);
+  }, [isVisible, anilistId, onSaveToAniList, anilistUser, currentTime, duration, animeName, episodeNumber, isSavingProgress]);
   
   if (!isVisible) return null;
   
@@ -75,8 +74,10 @@ export default function SaveProgressModal({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   
-  const progressText = currentTime && duration 
-    ? `at ${formatTime(currentTime)} / ${formatTime(duration)}`
+  const hasTime = typeof currentTime === 'number' && typeof duration === 'number' && duration > 0;
+  const progressPercent = hasTime ? Math.min(100, Math.max(0, Math.round((currentTime! / duration!) * 100))) : 0;
+  const progressText = hasTime
+    ? `at ${formatTime(currentTime!)} / ${formatTime(duration!)}`
     : '';
 
   // NEW: Main modal UI - simplified to show the primary choice
@@ -96,6 +97,15 @@ export default function SaveProgressModal({
           {episodeNumber ? `Episode ${episodeNumber}` : ''}
           {progressText && <Text style={styles.progressText}>{'\n'}{progressText}</Text>}
         </Text>
+
+        {hasTime && (
+          <View style={styles.progressBlock}>
+            <View style={styles.progressBarTrack}>
+              <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+            </View>
+            <Text style={styles.progressPercentText}>{progressPercent}% watched</Text>
+          </View>
+        )}
 
         {hasAniList ? (
           // NEW: AniList save flow
@@ -118,7 +128,7 @@ export default function SaveProgressModal({
             <TouchableOpacity 
               style={[styles.yesBtn, isSavingProgress && styles.buttonDisabled]}
               onPress={() => {
-                console.log('[SAVE_MODAL] ✅ User chose "Yes, Save & Exit" - saving to AniList');
+                console.log('[SAVE_MODAL] ✅ User chose "Yes, Save & Exit" - saving to AniList', { anilistId, episodeNumber, progressPercent });
                 if (onSaveToAniList) {
                   onSaveToAniList(rememberChoice);
                 }
@@ -135,19 +145,19 @@ export default function SaveProgressModal({
         ) : (
           // Original flow for non-AniList users
           <View style={styles.threeButtonRow}>
-            <TouchableOpacity onPress={onCancel} style={styles.cancelBtnSmall}>
+            <TouchableOpacity onPress={() => { console.log('[SAVE_MODAL] ❌ Cancel pressed'); onCancel(); }} style={styles.cancelBtnSmall}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
-              onPress={onExitWithoutSaving || onCancel} 
+              onPress={() => { console.log('[SAVE_MODAL] 🚪 Exit without saving pressed'); if (onExitWithoutSaving) onExitWithoutSaving(); else onCancel(); }} 
               style={styles.noBtn}
             >
               <Text style={styles.noBtnText}>No</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
-              onPress={() => onSave(rememberChoice)} 
+              onPress={() => { console.log('[SAVE_MODAL] 💾 Save pressed (local)'); onSave(rememberChoice); }} 
               style={styles.yesBtn}
             >
               <Text style={styles.yesBtnText}>Yes</Text>
@@ -200,6 +210,27 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
     opacity: 0.9,
+  },
+  progressBlock: {
+    width: '100%',
+    marginBottom: 14,
+    alignItems: 'center',
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: PLAYER_COLORS.PRIMARY,
+  },
+  progressPercentText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
   },
   progressText: {
     fontSize: 14,

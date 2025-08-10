@@ -40,6 +40,8 @@ import { VideoView, useVideoPlayer, VideoSource } from 'expo-video';
 import { useEvent } from 'expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { STORAGE_KEY, ANILIST_GRAPHQL_ENDPOINT } from '../../constants/auth';
 import { BlurView } from 'expo-blur';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
@@ -1206,18 +1208,25 @@ const PlayerScreen: React.FC = () => {
     }
   }, [currentTime, subtitleCues.length, preferences.subtitlesEnabled, currentSubtitle, findSubtitleAtTime]);
 
-  // Check for intro/outro timing - optimized
+  // Check for intro/outro timing - optimized (with logging and validation)
   useEffect(() => {
     if (videoData?.timings) {
-      const { intro, outro } = videoData.timings;
-      
+      console.log('[PLAYER_SCREEN] ⏱️ Provided timings:', JSON.stringify(videoData.timings));
+      const rawIntro = videoData.timings.intro;
+      const rawOutro = videoData.timings.outro;
+      const intro = rawIntro && rawIntro.start >= 0 && rawIntro.end > rawIntro.start ? rawIntro : undefined;
+      const outro = rawOutro && rawOutro.start >= 0 && rawOutro.end > rawOutro.start ? rawOutro : undefined;
+      if ((rawIntro && !intro) || (rawOutro && !outro)) {
+        console.warn('[PLAYER_SCREEN] ⏱️ Invalid timing range ignored:', videoData.timings);
+      }
+
       const shouldShowIntro = !!(intro && currentTime >= intro.start && currentTime <= intro.end);
       const shouldShowOutro = !!(outro && currentTime >= outro.start && currentTime <= outro.end);
-      
+
       if (shouldShowIntro !== showSkipIntro) {
         setShowSkipIntro(shouldShowIntro);
       }
-      
+
       if (shouldShowOutro !== showSkipOutro) {
         setShowSkipOutro(shouldShowOutro);
       }
@@ -1272,8 +1281,16 @@ const PlayerScreen: React.FC = () => {
 
   // Check for intro/outro timing using both provided and auto-detected data
   useEffect(() => {
-    // Use provided timing data if available, otherwise use auto-detected
-    const timingData = videoData?.timings || autoDetectedTiming;
+    // Merge provided timing with auto-detected: fill missing or invalid parts with detected ones
+    const provided = videoData?.timings;
+    const detected = autoDetectedTiming;
+    const isValid = (t?: { start: number; end: number }) => !!(t && t.start >= 0 && t.end > t.start);
+    const merged = (provided || detected) ? {
+      intro: isValid(provided?.intro) ? provided?.intro : (isValid(detected?.intro) ? detected?.intro : undefined),
+      outro: isValid(provided?.outro) ? provided?.outro : (isValid(detected?.outro) ? detected?.outro : undefined),
+    } : undefined;
+
+    const timingData = merged;
     
     console.log('[SKIP] 🔍 Checking skip buttons:', {
       currentTime,
@@ -1284,6 +1301,9 @@ const PlayerScreen: React.FC = () => {
     
     if (timingData) {
       const { intro, outro } = timingData;
+      if (provided && (!isValid(provided.intro) || !isValid(provided.outro))) {
+        console.log('[SKIP] ⏱️ Using merged timings with auto-detect fallback:', timingData);
+      }
       
       const shouldShowIntro = !!(intro && currentTime >= intro.start && currentTime <= intro.end);
       const shouldShowOutro = !!(outro && currentTime >= outro.start && currentTime <= outro.end);
@@ -1525,7 +1545,7 @@ const PlayerScreen: React.FC = () => {
 
   // Handle AniList save
   const handleSaveToAniListProgress = async (rememberChoice: boolean, shouldExit: boolean = true) => {
-    if (!videoData || !onSaveToAniList || !videoData.anilistId) {
+    if (!videoData || !videoData.anilistId) {
       console.log('[PLAYER_SCREEN] ⚠️ Cannot save to AniList: missing data');
       return;
     }
@@ -1548,12 +1568,59 @@ const PlayerScreen: React.FC = () => {
       }
       
       // Then save to AniList
-      const success = await onSaveToAniList({
-        anilistId: videoData.anilistId,
-        episodeNumber: videoData.episodeNumber || 1,
-        currentTime,
-        duration
-      });
+      let success = false;
+      try {
+        if (onSaveToAniList) {
+          success = await onSaveToAniList({
+            anilistId: videoData.anilistId,
+            episodeNumber: videoData.episodeNumber || 1,
+            currentTime,
+            duration
+          });
+        } else {
+          // Fallback: save directly using token from SecureStore (in case context user not loaded yet)
+          console.log('[PLAYER_SCREEN] 🔄 Fallback AniList save (context unavailable)');
+          const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+          if (!token) {
+            console.warn('[PLAYER_SCREEN] ⚠️ No AniList token found; cannot save to AniList');
+            success = false;
+          } else {
+            const mutation = `
+              mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
+                SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) {
+                  id progress status
+                }
+              }
+            `;
+            const res = await fetch(ANILIST_GRAPHQL_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              },
+              body: JSON.stringify({
+                query: mutation,
+                variables: {
+                  mediaId: parseInt(String(videoData.anilistId), 10),
+                  progress: videoData.episodeNumber || 1,
+                  status: 'CURRENT'
+                }
+              })
+            });
+            const json = await res.json();
+            if (json.errors) {
+              console.error('[PLAYER_SCREEN] ❌ AniList API errors (fallback):', json.errors);
+              success = false;
+            } else {
+              success = Boolean(json.data?.SaveMediaListEntry);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[PLAYER_SCREEN] ❌ AniList save error:', err);
+        success = false;
+      }
 
       if (success) {
         console.log('[PLAYER_SCREEN] ✅ Successfully saved to AniList');
@@ -1913,7 +1980,7 @@ const PlayerScreen: React.FC = () => {
             handleExit();
           }}
           onSave={(rememberChoice) => handleSaveLocalProgress(rememberChoice, true)}
-          onSaveToAniList={anilistUser && videoData?.anilistId ? (rememberChoice) => handleSaveToAniListProgress(rememberChoice, true) : undefined}
+          onSaveToAniList={videoData?.anilistId ? (rememberChoice) => handleSaveToAniListProgress(rememberChoice, true) : undefined}
           onSaveTimestampOnly={handleSaveTimestampOnly}
           animeName={videoData.animeTitle}
           episodeNumber={videoData.episodeNumber}

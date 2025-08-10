@@ -813,10 +813,12 @@ export default function EpisodeSourcesModal({
               
               setSources(formattedSources);
               setSubtitles(paheWatchData.subtitles || []);
-              setTimings(paheWatchData.intro || paheWatchData.outro ? {
+              const paheTimings = paheWatchData.intro || paheWatchData.outro ? {
                 intro: paheWatchData.intro,
                 outro: paheWatchData.outro
-              } : null);
+              } : null;
+              setTimings(paheTimings);
+              console.log('[SOURCES_MODAL] ⏱️ AnimePahe timings:', paheTimings ? JSON.stringify(paheTimings) : 'none');
               
               if (shouldAutoSelect && formattedSources.length > 0) {
                 console.log(`📡 [ANIMEPAHE] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
@@ -863,11 +865,11 @@ export default function EpisodeSourcesModal({
             console.log(`📡 [ZORO] - Audio Type: ${type} (isDub: ${type === 'dub'})`);
             
             // Call getWatchData with detailed logging
-            console.log(`📡 [ZORO] URL Debug - Will call zoroProvider.getWatchData("${episodeId}", ${type === 'dub'})`);
+            console.log(`📡 [ZORO] URL Debug - Will call zoroProvider.getWatchData("${episodeId}", ${type === 'dub'}, ${episodeNumber})`);
             // Kuroji unified watch handles servers/streams internally
             
             try {
-              const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub');
+              const zoroWatchData = await zoroProvider.getWatchData(episodeId, type === 'dub', episodeNumber);
               
               if (zoroWatchData && zoroWatchData.sources && zoroWatchData.sources.length > 0) {
                 console.log(`✅ [ZORO] Found ${zoroWatchData.sources.length} sources from getWatchData`);
@@ -884,10 +886,12 @@ export default function EpisodeSourcesModal({
                 
                 setSources(formattedSources);
                 setSubtitles(zoroWatchData.subtitles || []);
-                setTimings(zoroWatchData.intro || zoroWatchData.outro ? {
+                const zoroTimings = zoroWatchData.intro || zoroWatchData.outro ? {
                   intro: zoroWatchData.intro,
                   outro: zoroWatchData.outro
-                } : null);
+                } : null;
+                setTimings(zoroTimings);
+                console.log('[SOURCES_MODAL] ⏱️ Zoro timings:', zoroTimings ? JSON.stringify(zoroTimings) : 'none');
                 
                 if (shouldAutoSelect && formattedSources.length > 0) {
                   console.log(`📡 [ZORO] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
@@ -1010,7 +1014,7 @@ export default function EpisodeSourcesModal({
     console.log('[SOURCE SELECT DEBUG] Sending subtitles:', directSubtitles.length);
     
     // Store data that will be needed by the player
-    AsyncStorage.setItem(dataKey, JSON.stringify({
+    const payload = {
       source: source.url,
       headers: source.headers,
       episodeId: episodeId,
@@ -1022,11 +1026,19 @@ export default function EpisodeSourcesModal({
       provider: currentProvider || 'zoro',
       audioType: source.type,
       timestamp: Date.now()
-    })).then(() => {
-      console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey);
-    }).catch(err => {
-      console.error('[SOURCE SELECT DEBUG] Error storing video data:', err);
-    });
+    };
+    AsyncStorage.setItem(dataKey, JSON.stringify(payload))
+      .then(() => {
+        console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey, {
+          hasTimings: Boolean(payload.timings),
+          intro: payload.timings?.intro,
+          outro: payload.timings?.outro,
+          subtitles: payload.subtitles?.length || 0
+        });
+      })
+      .catch(err => {
+        console.error('[SOURCE SELECT DEBUG] Error storing video data:', err);
+      });
     
     // Update pill message before navigating
     if (autoSelectSource) {
@@ -1156,7 +1168,7 @@ export default function EpisodeSourcesModal({
       console.log(`[ZoroServerSelect] 🔄 Processing stream data for ${server.name}...`);
       
       // Get watch data for this specific server type
-      const watchData = await zoroProvider.getWatchData(episodeId, serverType === 'dub');
+      const watchData = await zoroProvider.getWatchData(episodeId, serverType === 'dub', episodeNumber);
       
       if (watchData && watchData.sources && watchData.sources.length > 0) {
         console.log(`[ZoroServerSelect] ✅ Stream processing complete for ${server.name}`);

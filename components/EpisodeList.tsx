@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions, ScrollView, DeviceEventEmitter } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -577,6 +577,34 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [activeTab, setActiveTab] = useState('1-12');
     const [episodeProgressMap, setEpisodeProgressMap] = useState<Record<string, EpisodeProgress>>({});
     
+    // NEW: Fetch AniList progress (watched episode number) and keep in sync
+    const fetchAniListProgress = useCallback(async () => {
+        if (!anilistId) return;
+        try {
+            console.log('[EPISODE_LIST] 🔄 Fetching AniList progress...', { anilistId });
+            const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
+            if (!token) {
+                console.log('[EPISODE_LIST] ⚠️ No AniList token found; skipping remote progress fetch');
+                return;
+            }
+            const query = `query ($mediaId: Int) { Media(id: $mediaId) { mediaListEntry { progress } } }`;
+            const response = await axios.post(
+                ANILIST_GRAPHQL_ENDPOINT,
+                { query, variables: { mediaId: parseInt(String(anilistId), 10) } },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            const progressVal: number | undefined = response?.data?.data?.Media?.mediaListEntry?.progress;
+            if (typeof progressVal === 'number') {
+                console.log('[EPISODE_LIST] ✅ AniList progress fetched:', progressVal);
+                setCurrentProgress(progressVal);
+            } else {
+                console.log('[EPISODE_LIST] ℹ️ No AniList progress found');
+            }
+        } catch (error) {
+            console.error('[EPISODE_LIST] ❌ Failed to fetch AniList progress:', (error as any)?.message || error);
+        }
+    }, [anilistId]);
+    
     // NEW: Season selection (AniList-driven)
     const { seasons: aniSeasons } = useSeasons(anilistId);
     const { selected: selectedSeason, setSelected: setSelectedSeason } = useSeasonSelection();
@@ -1028,6 +1056,26 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             setActiveTab(rangeKeys[0]);
         }
     }, [processedEpisodes, createEpisodeRanges, activeTab]);
+
+    // Fetch AniList progress on mount/anime change and when Player signals refresh
+    useEffect(() => {
+        fetchAniListProgress();
+    }, [fetchAniListProgress]);
+
+    useEffect(() => {
+        const sub1 = DeviceEventEmitter.addListener('refreshMediaLists', () => {
+            console.log('[EPISODE_LIST] 🔔 Received refreshMediaLists event; refetching AniList progress');
+            fetchAniListProgress();
+        });
+        const sub2 = DeviceEventEmitter.addListener('refreshWatchlist', () => {
+            console.log('[EPISODE_LIST] 🔔 Received refreshWatchlist event; refetching AniList progress');
+            fetchAniListProgress();
+        });
+        return () => {
+            sub1.remove();
+            sub2.remove();
+        };
+    }, [fetchAniListProgress]);
 
     // Load episode progress - use correct episodes
     useEffect(() => {

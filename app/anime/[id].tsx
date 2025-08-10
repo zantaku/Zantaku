@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { ANILIST_GRAPHQL_ENDPOINT, STORAGE_KEY } from '../../constants/auth';
-import { JIKAN_API_ENDPOINT, YOUTUBE_API_KEY } from '../../constants/api';
+import { JIKAN_API_ENDPOINT } from '../../constants/api';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -21,9 +21,8 @@ import SuccessToast from '../../components/SuccessToast';
 import ErrorToast from '../../components/ErrorToast';
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { getRatingColor, getStatusColor } from '../../utils/colors';
-import { WebView } from 'react-native-webview';
 import { useOrientation } from '../../hooks/useOrientation';
-import { Innertube } from 'youtubei.js';
+
 
 interface AnimeDetails {
   id: number;
@@ -50,11 +49,6 @@ interface AnimeDetails {
       id: number;
       name: string;
     }[];
-  };
-  trailer?: {
-    id: string;
-    site: string;
-    thumbnail: string;
   };
   startDate: {
     year: number;
@@ -241,35 +235,7 @@ interface JikanEpisodeVideo {
   };
 }
 
-interface YouTubeSearchResponse {
-  items: {
-    id: {
-      videoId: string;
-    };
-  }[];
-}
 
-interface WatchOrderItem {
-  anilistId: string;
-  malId: string;
-  title: string;
-  details: {
-    airDates: {
-      start: string;
-      end: string | null;
-    };
-    format: string;
-    episodes: number | null;
-    duration: number;
-    score: number;
-    viewers: number;
-  };
-  related: Record<string, string>;
-  order: number;
-  image?: string; // Add the image field from the API
-  imageUrl?: string; // Image URL field from the response
-  mediaListStatus?: string; // User's progress status (WATCHING, PLANNING, etc.)
-}
 
 export default function AnimeDetailsScreen() {
   const { id, fromActivities, tab } = useLocalSearchParams();
@@ -306,18 +272,9 @@ export default function AnimeDetailsScreen() {
     };
   } | null>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
   const [isVideoLoading, setIsVideoLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const webviewRef = useRef<WebView>(null);
-  const [isVideoEnded, setIsVideoEnded] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const [watchOrder, setWatchOrder] = useState<WatchOrderItem[]>([]);
-  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [showTrendingModal, setShowTrendingModal] = useState(false);
-  const [isNavigating, setIsNavigating] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showErrorToast, setShowErrorToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -347,75 +304,7 @@ export default function AnimeDetailsScreen() {
     return status.charAt(0) + status.slice(1).toLowerCase();
   };
 
-  // Helper function to get status color for the watch order items
-  const getWatchOrderStatusColor = (status: string | undefined, isDarkMode: boolean) => {
-    if (!status) return undefined;
-    
-    switch (status) {
-      case 'CURRENT':
-      case 'WATCHING':
-        return isDarkMode ? 'rgba(46, 204, 113, 0.7)' : 'rgba(46, 204, 113, 0.3)';
-      case 'COMPLETED':
-      case 'FINISHED':
-        return isDarkMode ? 'rgba(74, 144, 226, 0.7)' : 'rgba(74, 144, 226, 0.3)';
-      case 'PLANNING':
-      case 'PLAN_TO_WATCH':
-        return isDarkMode ? 'rgba(155, 89, 182, 0.7)' : 'rgba(155, 89, 182, 0.3)';
-      case 'DROPPED':
-        return isDarkMode ? 'rgba(231, 76, 60, 0.7)' : 'rgba(231, 76, 60, 0.3)';
-      case 'PAUSED':
-      case 'ON_HOLD':
-        return isDarkMode ? 'rgba(243, 156, 18, 0.7)' : 'rgba(243, 156, 18, 0.3)';
-      default:
-        return undefined;
-    }
-  };
 
-  // Helper function to get appropriate border for status
-  const getWatchOrderStatusBorder = (status: string | undefined) => {
-    if (!status) return undefined;
-    
-    switch (status) {
-      case 'CURRENT':
-      case 'WATCHING':
-        return '#2ECC71'; // Green
-      case 'COMPLETED':
-      case 'FINISHED':
-        return '#4A90E2'; // Blue
-      case 'PLANNING':
-      case 'PLAN_TO_WATCH':
-        return '#9B59B6'; // Purple
-      case 'DROPPED':
-        return '#E74C3C'; // Red
-      case 'PAUSED':
-      case 'ON_HOLD':
-        return '#F39C12'; // Orange
-      default:
-        return undefined;
-    }
-  };
-
-  // Helper function to format status label
-  const formatWatchOrderStatus = (status: string | undefined) => {
-    if (!status) return '';
-    
-    switch (status) {
-      case 'CURRENT':
-        return 'Watching';
-      case 'COMPLETED':
-        return 'Completed';
-      case 'PLANNING':
-      case 'PLAN_TO_WATCH':
-        return 'Planning';
-      case 'DROPPED':
-        return 'Dropped';
-      case 'PAUSED':
-      case 'ON_HOLD':
-        return 'On Hold';
-      default:
-        return status.charAt(0) + status.slice(1).toLowerCase();
-    }
-  };
 
   // AniList validation helpers
   const validateAnilistId = async (anilistId: string): Promise<boolean> => {
@@ -483,35 +372,7 @@ export default function AnimeDetailsScreen() {
   };
 
   // Function to safely navigate to anime
-  const navigateToAnime = async (item: WatchOrderItem) => {
-    try {
-      setIsNavigating(true);
-      
-      // First try using the anilistId directly
-      const isValid = await validateAnilistId(item.anilistId);
-      
-      if (isValid) {
-        router.push(`/anime/${item.anilistId}`);
-        return;
-      }
-      
-      // If direct ID doesn't work, try searching by title
-      const searchId = await searchAnilistTitle(item.title);
-      
-      if (searchId) {
-        router.push(`/anime/${searchId}`);
-        return;
-      }
-      
-      // If all else fails, show an alert
-      alert(`Could not find anime "${item.title}" in AniList database`);
-    } catch (error) {
-      console.error('Error navigating to anime:', error);
-      alert('An error occurred while trying to navigate. Please try again.');
-    } finally {
-      setIsNavigating(false);
-    }
-  };
+
 
   // Handle review click
   const handleReviewPress = useCallback(async (review: {
@@ -554,16 +415,7 @@ export default function AnimeDetailsScreen() {
     }
   }, [details]);
 
-  // Add useEffect to debug watch order data
-  useEffect(() => {
-    if (details && watchOrder.length > 0) {
-      console.log('Current watch order state (first 3 items):', JSON.stringify(watchOrder.slice(0, 3)));
-      console.log('Image URLs sample:');
-      watchOrder.slice(0, 3).forEach(item => {
-        console.log(`Anime: ${item.title}, image: ${item.image || 'N/A'}, imageUrl: ${item.imageUrl || 'N/A'}`);
-      });
-    }
-  }, [watchOrder, details]);
+
 
   const fetchEpisodes = async () => {
     if (!details) return;
@@ -937,160 +789,8 @@ export default function AnimeDetailsScreen() {
     }
   };
 
-  const fetchWatchOrder = async (animeId: string) => {
-    try {
-      console.log(`Fetching watch order for anime ID: ${animeId}`);
-      const response = await axios.get(`http://magaapinovel.xyz/anilist/info/${animeId}`);
-      
-      // Log the essential response properties
-      console.log('Response data properties:', Object.keys(response.data || {}));
-      console.log('Success property:', response.data?.success);
-      
-      if (response.data?.data) {
-        console.log('Data property keys:', Object.keys(response.data.data));
-      }
-      
-      // The field is named "WatchOrder" in the API response
-      const watchOrderData = response.data?.data?.WatchOrder;
-      
-      if (watchOrderData && Array.isArray(watchOrderData)) {
-        // Process the watch order data with date validation
-        const currentDate = new Date();
-        const processedWatchOrder = watchOrderData
-          .filter(item => {
-            // Parse the start date
-            const startDate = item.details?.airDates?.start ? new Date(item.details.airDates.start) : null;
-            
-            // If no start date or invalid date, exclude the item
-            if (!startDate || isNaN(startDate.getTime())) {
-              console.log(`Excluding item with invalid start date: ${item.title}`);
-              return false;
-            }
-            
-            // If start date is more than 6 months in the future, exclude it
-            // This helps prevent showing incorrect future dates while still allowing for upcoming seasons
-            const sixMonthsFromNow = new Date();
-            sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6);
-            
-            if (startDate > sixMonthsFromNow) {
-              console.log(`Excluding item with far future date: ${item.title}, date: ${startDate}`);
-              return false;
-            }
-            
-            return true;
-          })
-          .map(item => {
-            // If the API provides the full URL in the imageUrl field, use that
-            if (item.imageUrl) {
-              return item;
-            }
-            
-            // If there's only the imageUrl present in the response
-            if (response.data?.data?.imageUrl && typeof response.data.data.imageUrl === 'object') {
-              // Check if there's an image URL for this specific anime ID
-              const imageUrlMap = response.data.data.imageUrl;
-              if (imageUrlMap && imageUrlMap[item.anilistId]) {
-                return { 
-                  ...item, 
-                  imageUrl: imageUrlMap[item.anilistId] 
-                };
-              }
-            }
-            
-            return item;
-          });
-        
-        // After we have the watch order, fetch user's list statuses for these anime if logged in
-        if (user) {
-          try {
-            const token = await SecureStore.getItemAsync(STORAGE_KEY.AUTH_TOKEN);
-            if (token) {
-              // Get list of IDs to query
-              const animeIds = processedWatchOrder.map(item => parseInt(item.anilistId)).filter(id => !isNaN(id));
-              
-              // If we have valid IDs, fetch user's media list entries
-              if (animeIds.length > 0) {
-                console.log(`Fetching media list status for ${animeIds.length} anime IDs`);
-                
-                const query = `
-                  query ($userId: Int, $ids: [Int]) {
-                    MediaListCollection(userId: $userId, type: ANIME, mediaId_in: $ids) {
-                      lists {
-                        entries {
-                          mediaId
-                          status
-                          progress
-                        }
-                      }
-                    }
-                  }
-                `;
-                
-                const response = await axios.post(
-                  ANILIST_GRAPHQL_ENDPOINT,
-                  {
-                    query,
-                    variables: {
-                      userId: user.id,
-                      ids: animeIds
-                    }
-                  },
-                  {
-                    headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'Content-Type': 'application/json',
-                      'Accept': 'application/json',
-                    }
-                  }
-                );
-                
-                // Create a map of mediaId -> status
-                const statusMap: Record<string, string> = {};
-                
-                // Process response to extract status for each anime
-                if (response.data?.data?.MediaListCollection?.lists) {
-                  response.data.data.MediaListCollection.lists.forEach((list: any) => {
-                    if (list.entries) {
-                      list.entries.forEach((entry: any) => {
-                        if (entry.mediaId) {
-                          statusMap[entry.mediaId.toString()] = entry.status;
-                        }
-                      });
-                    }
-                  });
-                  
-                  console.log('Media status map:', statusMap);
-                  
-                  // Update watch order with status info
-                  processedWatchOrder.forEach(item => {
-                    if (statusMap[item.anilistId]) {
-                      item.mediaListStatus = statusMap[item.anilistId];
-                    }
-                  });
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Error fetching media list statuses:', error);
-            // Non-critical, so we continue without status info
-          }
-        }
-        
-        setWatchOrder(processedWatchOrder);
-        console.log(`Watch order found with ${processedWatchOrder.length} items`);
-        
-        // Log the first item for debugging
-        if (processedWatchOrder.length > 0) {
-          console.log('First watch order item after processing:', JSON.stringify(processedWatchOrder[0]));
-        }
-      } else {
-        console.log('No watch order data available or invalid format');
-      }
-    } catch (error) {
-      console.error('Error fetching watch order:', error);
-      // Not setting error state as this is a non-critical feature
-    }
-  };
+
+
 
   const fetchAnimeDetails = async () => {
     try {
@@ -1123,11 +823,6 @@ export default function AnimeDetailsScreen() {
                 id
                 name
               }
-            }
-            trailer {
-              id
-              site
-              thumbnail
             }
             startDate {
               year
@@ -1301,8 +996,7 @@ export default function AnimeDetailsScreen() {
       setIsLiked(initialLikeStatus);
       DeviceEventEmitter.emit('updateLikeStatus', initialLikeStatus);
       
-      // Fetch watch order after details are loaded
-      fetchWatchOrder(id as string);
+
     } catch (error) {
       console.error('Error fetching anime details:', error);
       setError(true);
@@ -1532,97 +1226,10 @@ export default function AnimeDetailsScreen() {
   }, [details]);
 
   // Modify the getYoutubeVideoId function to handle errors better
-  const getYoutubeVideoId = async (animeTitle: string) => {
-    try {
-      // First try to use the trailer from AniList
-      if (details?.trailer?.site === 'youtube' && details.trailer.id) {
-        console.log('Using AniList trailer:', details.trailer.id);
-        // Validate the video ID format
-        if (!/^[a-zA-Z0-9_-]{11}$/.test(details.trailer.id)) {
-          console.log('Invalid YouTube video ID format:', details.trailer.id);
-          return null;
-        }
-        return details.trailer.id;
-      }
 
-      // If no trailer is available, search using YouTube Data API
-      console.log('No AniList trailer found, searching YouTube...');
-      const searchQuery = `${animeTitle} anime official trailer`;
-      console.log('Search query:', searchQuery);
-      
-      // Check if YouTube API key is available
-      if (!YOUTUBE_API_KEY) {
-        console.log('No YouTube API key available, using fallback image');
-        return null;
-      }
-      
-      const response = await axios.get(
-        `https://www.googleapis.com/youtube/v3/search`, {
-          params: {
-            part: 'snippet',
-            q: searchQuery,
-            type: 'video',
-            maxResults: 1,
-            key: YOUTUBE_API_KEY,
-            videoDuration: 'short',
-            order: 'relevance',
-            regionCode: 'US',
-            safeSearch: 'none'
-          }
-        }
-      );
 
-      if (response.data?.items?.length > 0) {
-        const videoId = response.data.items[0].id.videoId;
-        // Validate the video ID format
-        if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
-          console.log('Invalid YouTube video ID format from search:', videoId);
-          return null;
-        }
-        console.log('Found video ID:', videoId);
-        console.log('Video title:', response.data.items[0].snippet.title);
-        return videoId;
-      }
 
-      console.log('No videos found in search results, using fallback image');
-      return null;
-    } catch (error: any) {
-      console.error('Error getting video:', error);
-      if (error.response) {
-        console.error('Error details:', error.response.data);
-        console.error('Error status:', error.response.status);
-      } else {
-        console.error('Error message:', error.message);
-      }
-      console.log('Error occurred, using fallback image');
-      return null;
-    }
-  };
 
-  // Add effect to load YouTube video with error handling
-  useEffect(() => {
-    if (details?.title?.userPreferred) {
-      getYoutubeVideoId(details.title.userPreferred).then(videoId => {
-        if (videoId) {
-          setYoutubeVideoId(videoId);
-          // Reset video state
-          setIsVideoEnded(false);
-          setIsPlaying(true);
-          setIsMuted(true);
-          setIsVideoLoading(true);
-          // Start with full opacity for the cover image
-          fadeAnim.setValue(0);
-        } else {
-          setYoutubeVideoId(null);
-          setIsVideoLoading(false);
-        }
-      }).catch(error => {
-        console.error('Error setting up video:', error);
-        setYoutubeVideoId(null);
-        setIsVideoLoading(false);
-      });
-    }
-  }, [details]);
 
   // Add useEffect to lock portrait orientation
   useEffect(() => {
@@ -1759,197 +1366,14 @@ export default function AnimeDetailsScreen() {
         {(activeTab === 'info' || details?.format === 'MUSIC' || details?.format === 'MUSIC_VIDEO') ? (
           <>
             <View style={styles.heroSection}>
-              {youtubeVideoId ? (
-                <View style={styles.videoContainer}>
-                  <Animated.View style={[styles.videoWrapper, { opacity: fadeAnim }]}>
-                    <WebView
-                      ref={webviewRef}
-                      style={styles.video}
-                      source={{
-                        html: `
-                          <!DOCTYPE html>
-                          <html>
-                            <head>
-                              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                              <style>
-                                body { margin: 0; width: 100vw; height: 100vh; background: #000; }
-                                #player { width: 100%; height: 100%; }
-                              </style>
-                            </head>
-                            <body>
-                              <div id="player"></div>
-                              <script src="https://www.youtube.com/iframe_api"></script>
-                              <script>
-                                let player;
-                                function onYouTubeIframeAPIReady() {
-                                  player = new YT.Player('player', {
-                                    width: '100%',
-                                    height: '100%',
-                                    videoId: '${youtubeVideoId}',
-                                    playerVars: {
-                                      autoplay: 1,
-                                      controls: 0,
-                                      showinfo: 0,
-                                      modestbranding: 1,
-                                      loop: 0,
-                                      playsinline: 1,
-                                      rel: 0,
-                                      mute: ${isMuted ? 1 : 0}
-                                    },
-                                    events: {
-                                      'onReady': function(event) {
-                                        event.target.playVideo();
-                                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'playerReady' }));
-                                      },
-                                      'onStateChange': function(event) {
-                                        window.ReactNativeWebView.postMessage(JSON.stringify({ 
-                                          type: 'playerStateChange',
-                                          state: event.data
-                                        }));
-                                      },
-                                      'onError': function(event) {
-                                        window.ReactNativeWebView.postMessage(JSON.stringify({
-                                          type: 'playerError',
-                                          error: event.data
-                                        }));
-                                      }
-                                    }
-                                  });
-                                }
-                              </script>
-                            </body>
-                          </html>
-                        `
-                      }}
-                      javaScriptEnabled={true}
-                      scrollEnabled={false}
-                      allowsFullscreenVideo={false}
-                      mediaPlaybackRequiresUserAction={false}
-                      onLoadStart={() => setIsVideoLoading(true)}
-                      onLoadEnd={() => setIsVideoLoading(false)}
-                      onMessage={(event) => {
-                        const data = JSON.parse(event.nativeEvent.data);
-                        if (data.type === 'playerError') {
-                          console.log('YouTube player error:', data.error);
-                          // Hide video player and show cover image instead
-                          Animated.timing(fadeAnim, {
-                            toValue: 0,
-                            duration: 300,
-                            useNativeDriver: true,
-                          }).start(() => {
-                            setYoutubeVideoId(null);
-                          });
-                        } else if (data.type === 'playerStateChange') {
-                          if (data.state === -1) { // unstarted
-                            console.log('Video unstarted');
-                          } else if (data.state === 0) { // ended
-                            setIsVideoEnded(true);
-                            Animated.timing(fadeAnim, {
-                              toValue: 0,
-                              duration: 300,
-                              useNativeDriver: true,
-                            }).start();
-                          } else if (data.state === 1) { // playing
-                            setIsPlaying(true);
-                            setIsVideoEnded(false);
-                          } else if (data.state === 2) { // paused
-                            setIsPlaying(false);
-                          } else if (data.state === 3) { // buffering
-                            console.log('Video buffering');
-                          } else if (data.state === 5) { // video cued
-                            console.log('Video cued');
-                          }
-                        }
-                      }}
-                    />
-                  </Animated.View>
-
-                  <Animated.View 
-                    style={[
-                      styles.coverImageContainer,
-                      { 
-                        opacity: fadeAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [1, 0],
-                        })
-                      }
-                    ]}
-                  >
-                    <ExpoImage
-                      source={{ uri: details.coverImage.extraLarge }}
-                      style={styles.coverImage}
-                      contentFit="cover"
-                      transition={200}
-                    />
-                  </Animated.View>
-
-                  <BlurView intensity={30} tint="dark" style={[styles.overlay, { backgroundColor: 'rgba(0, 0, 0, 0.3)' }]} />
-                  
-                  {youtubeVideoId && (
-                    <View style={styles.playerControls}>
-                      <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
-                      <View style={styles.controlsContent}>
-                        <TouchableOpacity
-                          style={styles.controlButton}
-                          onPress={() => {
-                            if (isVideoEnded) {
-                              setIsVideoEnded(false);
-                              webviewRef.current?.injectJavaScript(`
-                                player.seekTo(0);
-                                player.playVideo();
-                                true;
-                              `);
-                              Animated.timing(fadeAnim, {
-                                toValue: 1,
-                                duration: 500,
-                                useNativeDriver: true,
-                              }).start();
-                            } else {
-                              setIsPlaying(!isPlaying);
-                              webviewRef.current?.injectJavaScript(`
-                                player.${isPlaying ? 'pauseVideo' : 'playVideo'}();
-                                true;
-                              `);
-                            }
-                          }}
-                        >
-                          <FontAwesome5 
-                            name={isVideoEnded ? 'redo' : (isPlaying ? 'pause' : 'play')} 
-                            size={16} 
-                            color="#fff" 
-                          />
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity
-                          style={styles.controlButton}
-                          onPress={() => {
-                            setIsMuted(!isMuted);
-                            webviewRef.current?.injectJavaScript(`
-                              player.${isMuted ? 'unMute' : 'mute'}();
-                              true;
-                            `);
-                          }}
-                        >
-                          <FontAwesome5 
-                            name={isMuted ? 'volume-mute' : 'volume-up'} 
-                            size={16} 
-                            color="#fff" 
-                          />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              ) : (
-                <View style={styles.videoContainer}>
-                  <ExpoImage
-                    source={{ uri: details.coverImage.extraLarge || details.bannerImage }}
-                    style={styles.coverImage}
-                    contentFit="cover"
-                  />
-                  <BlurView intensity={30} tint="dark" style={[styles.overlay, { backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.3)' }]} />
-                </View>
-              )}
+              <View style={styles.videoContainer}>
+                <ExpoImage
+                  source={{ uri: details.coverImage.extraLarge || details.bannerImage }}
+                  style={styles.coverImage}
+                  contentFit="cover"
+                />
+                <BlurView intensity={30} tint="dark" style={[styles.overlay, { backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.3)' }]} />
+              </View>
             </View>
 
             <View style={[styles.content, { backgroundColor: currentTheme.colors.background }]}>
@@ -2153,230 +1577,7 @@ export default function AnimeDetailsScreen() {
                   </ScrollView>
                 </View>
 
-                {watchOrder.length > 0 && (
-                  <View style={{
-                    marginBottom: 32,
-                    backgroundColor: isDarkMode ? 'rgba(2, 169, 255, 0.15)' : 'rgba(2, 169, 255, 0.05)',
-                    borderRadius: 16,
-                    padding: 16,
-                    borderWidth: 1,
-                    borderColor: isDarkMode ? 'rgba(2, 169, 255, 0.3)' : 'rgba(2, 169, 255, 0.2)',
-                  }}>
-                    <View style={{ marginBottom: 16 }}>
-                      <Text style={[{ fontSize: 18, fontWeight: '700', marginBottom: 4 }, { color: currentTheme.colors.text }]}>
-                        How to Watch in Order
-                      </Text>
-                      <Text style={[{ fontSize: 14, marginBottom: 12 }, { color: currentTheme.colors.textSecondary }]}>
-                        The recommended sequence for the best experience
-                      </Text>
-                    </View>
-                    <ScrollView 
-                      horizontal 
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ paddingRight: 32, paddingBottom: 8, paddingLeft: 8 }}
-                    >
-                      {watchOrder.map((item, index) => (
-                        <TouchableOpacity 
-                          key={`watch-order-${item.anilistId}-${index}`}
-                          style={[{
-                            width: 140,
-                            marginRight: 28,
-                            borderRadius: 12,
-                            backgroundColor: getWatchOrderStatusColor(item.mediaListStatus, isDarkMode) || 
-                              (isDarkMode ? currentTheme.colors.surface : 'white'),
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: isDarkMode ? 0.3 : 0.1,
-                            shadowRadius: 4,
-                            elevation: 3,
-                            padding: 8,
-                            position: 'relative',
-                            marginBottom: 5,
-                            marginTop: 10,
-                            borderWidth: parseInt(item.anilistId) === details.id ? 2 : (item.mediaListStatus ? 1 : 0),
-                            borderColor: parseInt(item.anilistId) === details.id ? 
-                              '#FF5722' : getWatchOrderStatusBorder(item.mediaListStatus),
-                          }]}
-                          onPress={() => navigateToAnime(item)}
-                          activeOpacity={0.7}
-                        >
-                          <View style={{
-                            position: 'absolute',
-                            top: -10,
-                            left: -10,
-                            width: 28,
-                            height: 28,
-                            borderRadius: 14,
-                            backgroundColor: '#02A9FF',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            zIndex: 10,
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.2,
-                            shadowRadius: 3,
-                            elevation: 5,
-                          }}>
-                            <Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>
-                              {index + 1}
-                            </Text>
-                          </View>
-                          <ExpoImage
-                            source={{ 
-                              uri: item.imageUrl 
-                                ? item.imageUrl 
-                                : (item.image 
-                                  ? item.image 
-                                  : (parseInt(item.anilistId) === details.id 
-                                    ? details.coverImage.medium 
-                                    : (failedImages[item.anilistId] 
-                                      ? details.coverImage.medium 
-                                      : `https://s4.anilist.co/file/anilistcdn/media/anime/cover/${item.anilistId}-medium.jpg`)))
-                            }}
-                            style={{ width: '100%', height: 180, borderRadius: 8 }}
-                            contentFit="cover"
-                            transition={200}
-                            cachePolicy="memory-disk"
-                            recyclingKey={`watch-order-${item.anilistId}`}
-                            onLoad={() => {
-                              console.log(`Successfully loaded image for item: ${item.title}`);
-                            }}
-                            onError={() => {
-                              console.log(`Failed to load image for ${item.anilistId}`, 
-                                item.imageUrl 
-                                  ? `URL: ${item.imageUrl}` 
-                                  : (item.image ? `URL: ${item.image}` : 'No image URL'));
-                              setFailedImages(prev => ({
-                                ...prev,
-                                [item.anilistId]: true
-                              }));
-                            }}
-                          />
-                          {/* Format badge */}
-                          <View style={{
-                            position: 'absolute',
-                            top: 16,
-                            left: 16,
-                            paddingHorizontal: 8,
-                            paddingVertical: 4,
-                            borderRadius: 4,
-                            backgroundColor: item.details.format === "TV" ? '#3498db' : currentTheme.colors.primary,
-                            shadowColor: '#000',
-                            shadowOffset: { width: 1, height: 1 },
-                            shadowOpacity: 0.3,
-                            shadowRadius: 2,
-                            elevation: 3,
-                          }}>
-                            <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>
-                              {item.details.format || "Anime"}
-                            </Text>
-                          </View>
-                          {/* Status badge (only show if there's a status and it's not the current anime) */}
-                          {item.mediaListStatus && parseInt(item.anilistId) !== details.id && (
-                            <View style={{
-                              position: 'absolute',
-                              top: 16,
-                              right: 16,
-                              paddingHorizontal: 8,
-                              paddingVertical: 4,
-                              borderRadius: 4,
-                              backgroundColor: getWatchOrderStatusBorder(item.mediaListStatus),
-                              shadowColor: '#000',
-                              shadowOffset: { width: 1, height: 1 },
-                              shadowOpacity: 0.3,
-                              shadowRadius: 2,
-                              elevation: 3,
-                            }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>
-                                {formatWatchOrderStatus(item.mediaListStatus)}
-                              </Text>
-                            </View>
-                          )}
-                          {/* "Current" badge for the current anime */}
-                          {parseInt(item.anilistId) === details.id && (
-                            <View style={{
-                              position: 'absolute',
-                              top: 16,
-                              right: 16,
-                              paddingHorizontal: 8,
-                              paddingVertical: 4,
-                              borderRadius: 4,
-                              backgroundColor: '#FF5722',
-                              shadowColor: '#000',
-                              shadowOffset: { width: 1, height: 1 },
-                              shadowOpacity: 0.3,
-                              shadowRadius: 2,
-                              elevation: 3,
-                            }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>
-                                CURRENT
-                              </Text>
-                            </View>
-                          )}
-                          <Text style={[{ fontSize: 14, fontWeight: '700', marginTop: 8 }, { color: currentTheme.colors.text }]} numberOfLines={2}>
-                            {item.title}
-                          </Text>
-                          
-                          <View style={{ 
-                            flexDirection: 'row', 
-                            justifyContent: 'space-between', 
-                            alignItems: 'center', 
-                            marginTop: 6,
-                            marginBottom: 2
-                          }}>
-                            {item.details.airDates.start && (
-                              <Text style={{ 
-                                fontSize: 11, 
-                                fontWeight: '500',
-                                opacity: isDarkMode ? 0.8 : 0.7,
-                                color: currentTheme.colors.textSecondary,
-                                flex: 1,
-                                marginRight: 6
-                              }} numberOfLines={1}>
-                                {formatReleaseDate(item.details.airDates.start)}
-                              </Text>
-                            )}
-                            {item.details.episodes && (
-                              <View style={{
-                                backgroundColor: isDarkMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
-                                paddingHorizontal: 6,
-                                paddingVertical: 2,
-                                borderRadius: 4,
-                                minWidth: 36,
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}>
-                                <Text style={{ 
-                                  fontSize: 11, 
-                                  fontWeight: '600',
-                                  color: currentTheme.colors.textSecondary
-                                }}>
-                                  {item.details.episodes}ep
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                          {index < watchOrder.length - 1 && (
-                            <View style={{
-                              position: 'absolute',
-                              right: -22,
-                              top: '50%',
-                              marginTop: -8,
-                              width: 16, 
-                              height: 16,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              backgroundColor: isDarkMode ? 'rgba(2, 169, 255, 0.2)' : 'rgba(2, 169, 255, 0.1)',
-                              borderRadius: 8,
-                            }}>
-                              <FontAwesome5 name="arrow-right" size={10} color="#02A9FF" />
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
+
 
                 <View style={styles.relatedSection}>
                   <Text style={[styles.sectionLabel, { color: currentTheme.colors.textSecondary }]}>Extra Content & Spin-offs</Text>
@@ -2590,15 +1791,7 @@ export default function AnimeDetailsScreen() {
         </TouchableOpacity>
       </Modal>
       
-      {isNavigating && (
-        <View style={styles.navigatingOverlay}>
-          <BlurView intensity={50} tint={isDarkMode ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-          <ActivityIndicator size="large" color="#02A9FF" />
-          <Text style={[styles.navigatingText, { color: currentTheme.colors.text }]}>
-            Finding anime...
-          </Text>
-        </View>
-      )}
+      
     </View>
   );
 }

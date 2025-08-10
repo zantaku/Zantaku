@@ -206,6 +206,13 @@ export default function Player() {
               console.log('🎯 Subtitle languages:', parsedData.subtitles.map((s: any) => s.lang).join(', '));
             }
             console.log('⏱️ Video timings:', parsedData.timings ? JSON.stringify(parsedData.timings, null, 2) : 'none');
+            if (!parsedData.timings) {
+              console.warn('[PLAYER] ⏱️ No timings found in payload - skip buttons will rely on auto-detect.');
+            } else {
+              const { intro, outro } = parsedData.timings || {};
+              console.log('[PLAYER] ⏱️ Intro window:', intro ? `${intro.start}s → ${intro.end}s` : 'none');
+              console.log('[PLAYER] ⏱️ Outro window:', outro ? `${outro.start}s → ${outro.end}s` : 'none');
+            }
           } else {
             console.log('⚠️ No stored data found for dataKey:', params.dataKey);
           }

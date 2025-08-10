@@ -192,7 +192,7 @@ export class AnimeProviderManager {
       let watchData: WatchResponse;
 
       if (provider === 'zoro') {
-        watchData = await zoroProvider.getWatchData(episodeId, isDub);
+        watchData = await zoroProvider.getWatchData(episodeId, isDub, episodeNumber);
       } else if (provider === 'animepahe') {
         // AnimePahe requires anime title and episode number
         if (!animeTitle || !episodeNumber) {

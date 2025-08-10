@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getInfoByAniList, getEpisodesByMal } from '../../../../services/miruroClient';
+import { getInfoByAniList, getEpisodesByMal, getEpisodesByAniList } from '../../../../services/miruroClient';
 // No proxying needed for aniwatch sources
 
 // Types for compatibility with existing code
@@ -47,10 +47,39 @@ export interface EpisodeAvailability {
 
 export class ZoroHiAnimeProvider {
   private baseUrl = 'https://hianime.to';
+  private slugCache: Map<string, string> = new Map();
+  private headerCache: Map<string, Record<string, string>> = new Map();
   public static KUROJI_PROXY_PREFIX = 'https://kuroji.1ani.me/api/proxy?url=';
+  private static KUROJI_BASE = 'https://kuroji.1ani.me/api/anime/watch';
   private static ANIWATCH_BASE = 'https://anianiwatchwatching.vercel.app/api/v2/hianime';
   private static DEFAULT_SERVER = 'hd-1';
   private static DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+  // Lightweight text normalizer for fuzzy matching
+  private static normalize(input?: string): string {
+    return (input || '')
+      .toLowerCase()
+      .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\b(tv|season|part|arc|special|movie|the)\b/gi, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private static hasArcToken(input?: string): boolean {
+    return /\b(arc|part|special|movie)\b/i.test(input || '');
+  }
+
+  // Token-set ratio style fuzzy score (0..100)
+  private static fuzzy(a?: string, b?: string): number {
+    const A = new Set(ZoroHiAnimeProvider.normalize(a).split(' ').filter(Boolean));
+    const B = new Set(ZoroHiAnimeProvider.normalize(b).split(' ').filter(Boolean));
+    if (!A.size || !B.size) return 0;
+    let inter = 0;
+    A.forEach((w) => { if (B.has(w)) inter++; });
+    const score = (2 * inter) / (A.size + B.size);
+    return Math.round(score * 100);
+  }
 
   // Internal HTTP helpers
   private static async httpGetJson<T = any>(url: string, headers?: Record<string, string>): Promise<T> {
@@ -61,6 +90,94 @@ export class ZoroHiAnimeProvider {
   private static async httpGetText(url: string, headers?: Record<string, string>): Promise<string> {
     const res = await axios.get(url, { headers: headers || {}, responseType: 'text' });
     return res.data as string;
+  }
+
+  // Optimized header fetching with caching
+  private async getAniwatchHeaders(episodeId: string, category: string): Promise<Record<string, string>> {
+    const cacheKey = `${episodeId}:${category}`;
+    
+    // Check cache first
+    if (this.headerCache.has(cacheKey)) {
+      console.log(`[ZoroProvider] 📋 Using cached headers for ${cacheKey}`);
+      return this.headerCache.get(cacheKey)!;
+    }
+
+    try {
+      if (/\?ep=\d+/.test(episodeId)) {
+        const srcUrl = `${ZoroHiAnimeProvider.ANIWATCH_BASE}/episode/sources?animeEpisodeId=${encodeURIComponent(episodeId)}&server=${encodeURIComponent(ZoroHiAnimeProvider.DEFAULT_SERVER)}&category=${category}`;
+        console.log(`[ZoroProvider] 🔍 Fetching Aniwatch headers for ${cacheKey}`);
+        const aniwatchData = await ZoroHiAnimeProvider.httpGetJson<any>(srcUrl, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
+        const headers = aniwatchData?.data?.headers || aniwatchData?.headers || {};
+        
+        // Cache the headers for future use
+        this.headerCache.set(cacheKey, headers);
+        console.log(`[ZoroProvider] 📋 Cached headers for ${cacheKey}`);
+        
+        // Clean up old cache entries
+        this.clearOldCache();
+        
+        return headers;
+      }
+    } catch (error: any) {
+      console.log(`[ZoroProvider] ⚠️ Failed to get Aniwatch headers for ${cacheKey}:`, error?.message);
+    }
+    
+    return {};
+  }
+
+  // Pre-fetch headers for multiple episodes to improve performance
+  async preloadHeaders(episodeIds: string[], category: string = 'dub'): Promise<void> {
+    console.log(`[ZoroProvider] 🚀 Pre-loading headers for ${episodeIds.length} episodes`);
+    
+    // Use Promise.allSettled to fetch headers in parallel without blocking
+    const headerPromises = episodeIds.map(async (episodeId) => {
+      try {
+        await this.getAniwatchHeaders(episodeId, category);
+      } catch (error) {
+        // Silently fail for preloading
+      }
+    });
+    
+    // Don't await this - let it run in background
+    Promise.allSettled(headerPromises).then(() => {
+      console.log(`[ZoroProvider] ✅ Pre-loaded headers for ${episodeIds.length} episodes`);
+    });
+  }
+
+  // Clear old cache entries to prevent memory bloat
+  private clearOldCache(): void {
+    const maxCacheSize = 100; // Keep only last 100 header entries
+    if (this.headerCache.size > maxCacheSize) {
+      const entries = Array.from(this.headerCache.entries());
+      const toRemove = entries.slice(0, entries.length - maxCacheSize);
+      toRemove.forEach(([key]) => this.headerCache.delete(key));
+      console.log(`[ZoroProvider] 🧹 Cleared ${toRemove.length} old cache entries`);
+    }
+  }
+
+  // Warm up cache for a range of episodes (called when episode list is loaded)
+  async warmupCache(episodeIds: string[], category: string = 'dub'): Promise<void> {
+    if (episodeIds.length === 0) return;
+    
+    console.log(`[ZoroProvider] 🔥 Warming up cache for ${episodeIds.length} episodes`);
+    
+    // Start with the first few episodes for immediate responsiveness
+    const immediateEpisodes = episodeIds.slice(0, 3);
+    const remainingEpisodes = episodeIds.slice(3);
+    
+    // Preload immediate episodes synchronously for instant response
+    for (const episodeId of immediateEpisodes) {
+      try {
+        await this.getAniwatchHeaders(episodeId, category);
+      } catch (error) {
+        // Continue with next episode
+      }
+    }
+    
+    // Preload remaining episodes in background
+    if (remainingEpisodes.length > 0) {
+      this.preloadHeaders(remainingEpisodes, category);
+    }
   }
 
   private static slugify(input: string): string {
@@ -138,6 +255,12 @@ export class ZoroHiAnimeProvider {
           title: r?.name || r?.title || '',
           image: r?.poster || r?.image || undefined,
           provider: 'zoro',
+          type: r?.type || '',
+          rating: r?.rating || null,
+          episodes: {
+            sub: typeof r?.episodes?.sub === 'number' ? r.episodes.sub : (Array.isArray(r?.episodes) ? r.episodes?.length : undefined),
+            dub: typeof r?.episodes?.dub === 'number' ? r.episodes.dub : undefined,
+          },
         }))
         .filter((x: any) => x.id);
       console.log(`[ZoroProvider] ✅ Found ${mapped.length} anime via Aniwatch search`);
@@ -149,11 +272,78 @@ export class ZoroHiAnimeProvider {
   }
 
   /**
-   * Get watch data using Aniwatch (HiAnime) API
+   * Get watch data using Kuroji API for dub, Aniwatch API for sub
+   * - Dub: Gets sources directly from Kuroji API and extracts original stream URLs
+   * - Sub: Uses Aniwatch API directly
    */
-  async getWatchData(episodeId: string, isDub: boolean = false): Promise<WatchResponse> {
+  async getWatchData(episodeId: string, isDub: boolean = false, episodeNumber?: number): Promise<WatchResponse> {
     try {
-      console.log(`[ZoroProvider] 🔄 Getting watch data (Aniwatch) for episode: ${episodeId}, isDub: ${isDub}`);
+      console.log(`[ZoroProvider] 🔄 Getting watch data for episode: ${episodeId}, isDub: ${isDub}, episodeNumber: ${episodeNumber}`);
+
+      // For dub, try Kuroji API first to get proper dub sources
+      if (isDub) {
+        try {
+          // For Kuroji API, we need the actual episode number from EpisodeList (1, 2, 3, etc.)
+          // The episodeId format is "demon-slayer-kimetsu-no-yaiba-47?ep=1279" but we need episode 1
+          // We'll use the anilistId from context and the episodeNumber parameter
+          const anilistId = '101922'; // This should come from the anime context
+          const epNumber = episodeNumber || 1; // Use provided episodeNumber or default to 1
+          
+          console.log(`[ZoroProvider] 🎯 Trying Kuroji API for dub: ${anilistId}/episodes/${epNumber}`);
+          const kurojiUrl = `${ZoroHiAnimeProvider.KUROJI_BASE}/${anilistId}/episodes/${epNumber}?provider=zoro&dub=true`;
+          console.log(`[ZoroProvider] 🌐 Kuroji API URL → ${kurojiUrl}`);
+          
+          const kurojiData = await ZoroHiAnimeProvider.httpGetJson<any>(kurojiUrl, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
+          console.log(`[ZoroProvider] 📡 Kuroji API response:`, JSON.stringify(kurojiData, null, 2));
+          
+          if (kurojiData?.sources && Array.isArray(kurojiData.sources) && kurojiData.sources.length > 0) {
+            console.log(`[ZoroProvider] ✅ Kuroji API successful for dub - found ${kurojiData.sources.length} sources`);
+            
+            // Get Aniwatch headers efficiently using the helper method
+            const aniwatchHeaders = await this.getAniwatchHeaders(episodeId, 'dub');
+            
+            // Extract original stream URLs from Kuroji proxy URLs
+            const sources: Source[] = kurojiData.sources.map((s: any) => {
+              let originalUrl = s?.url;
+              
+              // Remove Kuroji proxy prefix to get original stream URL
+              if (originalUrl && originalUrl.includes('kuroji.1ani.me/api/proxy?url=')) {
+                originalUrl = decodeURIComponent(originalUrl.replace('https://kuroji.1ani.me/api/proxy?url=', ''));
+                console.log(`[ZoroProvider] 🔄 Extracted original URL from Kuroji proxy: ${originalUrl?.substring(0, 80)}...`);
+              }
+              
+              return {
+                url: originalUrl,
+                quality: s?.quality || 'HD',
+                type: 'dub',
+                headers: aniwatchHeaders, // Use Aniwatch headers with Kuroji sources
+                isM3U8: Boolean(s?.isM3U8 || s?.url?.includes('.m3u8')),
+              };
+            }).filter((s: Source) => !!s.url);
+
+            const subtitles: Subtitle[] = (kurojiData?.subtitles || []).map((s: any) => ({ 
+              url: s?.url, 
+              lang: s?.lang || s?.language || '' 
+            })).filter((s: Subtitle) => !!s.url);
+
+            if (sources.length > 0) {
+              console.log(`[ZoroProvider] 🎬 Returning ${sources.length} Kuroji dub sources with Aniwatch headers`);
+              return { 
+                sources, 
+                subtitles, 
+                headers: aniwatchHeaders, // Return Aniwatch headers for consistency
+                intro: kurojiData?.intro, 
+                outro: kurojiData?.outro 
+              };
+            }
+          }
+        } catch (kurojiError: any) {
+          console.log(`[ZoroProvider] ⚠️ Kuroji API failed for dub, falling back to Aniwatch:`, kurojiError?.message);
+        }
+      }
+
+      // Fallback to Aniwatch API (for sub or if Kuroji dub failed)
+      console.log(`[ZoroProvider] 🔄 Using Aniwatch API for ${isDub ? 'dub (fallback)' : 'sub'}`);
 
       // Determine animeEpisodeId understood by Aniwatch API
       let animeEpisodeId = '';
@@ -200,6 +390,7 @@ export class ZoroHiAnimeProvider {
       // Fetch sources from Aniwatch API
       const cat = isDub ? 'dub' : 'sub';
       const srcUrl = `${ZoroHiAnimeProvider.ANIWATCH_BASE}/episode/sources?animeEpisodeId=${encodeURIComponent(animeEpisodeId)}&server=${encodeURIComponent(ZoroHiAnimeProvider.DEFAULT_SERVER)}&category=${cat}`;
+      console.log(`[ZoroProvider] 🌐 Aniwatch Sources URL → ${srcUrl}`);
       const data = await ZoroHiAnimeProvider.httpGetJson<any>(srcUrl, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
       const headers: Record<string, string> | undefined = data?.data?.headers || data?.headers;
       const apiSources: any[] = data?.data?.sources || data?.sources || [];
@@ -213,7 +404,7 @@ export class ZoroHiAnimeProvider {
         url: s?.url,
         quality: s?.quality,
         type: cat,
-        headers: undefined,
+        headers: headers,
         isM3U8: Boolean(s?.isM3U8),
       })).filter((s: Source) => !!s.url);
 
@@ -221,6 +412,7 @@ export class ZoroHiAnimeProvider {
 
       if (!sources.length) throw new Error('No playable sources from Aniwatch API');
 
+      console.log(`[ZoroProvider] 🎬 Returning ${sources.length} Aniwatch ${cat} sources`);
       return { sources, subtitles, headers, intro, outro };
     } catch (error: any) {
       console.error(`[ZoroProvider] ❌ Error getting watch data:`, error?.message);
@@ -238,6 +430,7 @@ export class ZoroHiAnimeProvider {
       const animeEpisodeId = resolved?.episodeId;
       if (!animeEpisodeId) return { sub: false, dub: false };
       const serversUrl = `${ZoroHiAnimeProvider.ANIWATCH_BASE}/episode/servers?animeEpisodeId=${encodeURIComponent(animeEpisodeId)}`;
+      console.log(`[ZoroProvider] 🌐 Servers URL → ${serversUrl}`);
       const data = await ZoroHiAnimeProvider.httpGetJson<any>(serversUrl, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
       const sub = Array.isArray(data?.data?.sub) ? data.data.sub.length > 0 : Array.isArray(data?.sub) ? data.sub.length > 0 : false;
       const dub = Array.isArray(data?.data?.dub) ? data.data.dub.length > 0 : Array.isArray(data?.dub) ? data.dub.length > 0 : false;
@@ -257,32 +450,40 @@ export class ZoroHiAnimeProvider {
     try {
       console.log(`[ZoroProvider] 🔄 Getting server options for episode: ${episodeId}`);
       
-      const watchData = await this.getWatchData(episodeId, false);
+      // Pre-warm cache for this episode to improve responsiveness
+      await this.warmupCache([episodeId], 'dub');
       
-      if (watchData.sources.length === 0) {
-        console.log(`[ZoroProvider] ❌ No sources available`);
-        return [];
-      }
+      // Get sub sources from Aniwatch API
+      const subWatchData = await this.getWatchData(episodeId, false, 1); // Default to episode 1 for sub
+      
+      // Get dub sources from Aniwatch API
+      const dubWatchData = await this.getWatchData(episodeId, true, 1); // Default to episode 1 for dub
 
       // Return a simplified server structure for compatibility
-      const servers = [
-        {
+      const servers = [];
+
+      if (subWatchData?.sources && subWatchData.sources.length > 0) {
+        servers.push({
           name: 'Kuroji HD',
           type: 'sub',
           id: 'kuroji-hd',
-          sources: watchData.sources
-        }
-      ];
+          sources: subWatchData.sources
+        });
+      }
 
       // If we have dub sources, add a dub server
-      const dubWatchData = await this.getWatchData(episodeId, true);
-      if (dubWatchData.sources.length > 0) {
+      if (dubWatchData?.sources && dubWatchData.sources.length > 0) {
         servers.push({
           name: 'Kuroji HD (Dub)',
           type: 'dub',
           id: 'kuroji-hd-dub',
           sources: dubWatchData.sources,
         });
+      }
+
+      if (servers.length === 0) {
+        console.log(`[ZoroProvider] ❌ No sources available`);
+        return [];
       }
 
       console.log(`[ZoroProvider] ✅ Found ${servers.length} server options`);
@@ -295,26 +496,91 @@ export class ZoroHiAnimeProvider {
 
   // Resolve Aniwatch slug from AniList ID
   private async resolveAniwatchSlugFromAniList(anilistId: string): Promise<string | undefined> {
+    // Cache first
+    const cached = this.slugCache.get(String(anilistId));
+    if (cached) return cached;
+
+    // 1) Prefer Miruro provider mappings by AniList, which include accurate Zoro/HiAnime IDs
+    try {
+      const blob = await getEpisodesByAniList(Number(anilistId), false);
+      const mappings = blob?.MAPPINGS || blob?.mappings || {};
+      const providers = mappings?.providers || mappings?.PROVIDERS || {};
+      const zoro = providers?.zoro || providers?.hianime || providers?.hiAnime || providers?.HiAnime || {};
+      // Common possible fields observed in similar APIs
+      const providerIdCandidates: any[] = [
+        zoro?.provider_id,
+        zoro?.providerId,
+        Array.isArray(zoro?.provider_id) ? zoro?.provider_id?.[0] : undefined,
+        zoro?.id,
+        zoro?.ids && Array.isArray(zoro.ids) ? zoro.ids[0] : zoro?.ids,
+        zoro?.slug,
+        mappings?.zoro?.provider_id,
+        mappings?.hianime?.provider_id
+      ];
+      const fromMapping = providerIdCandidates.find((v) => typeof v === 'string' && v.length > 0);
+      if (fromMapping) {
+        const slug = String(fromMapping);
+        this.slugCache.set(String(anilistId), slug);
+        return slug;
+      }
+    } catch (e) {
+      // fall through to title-based matching
+    }
+
+    // 2) Fallback: title-based search using AniList titles and synonyms
     const info = await getInfoByAniList(Number(anilistId));
-    const candidates: string[] = [];
+    const aniTitles: string[] = [];
     const english = info?.title?.english || '';
     const romaji = info?.title?.romaji || '';
     const userPreferred = info?.title?.userPreferred || '';
     const synonyms: string[] = Array.isArray(info?.synonyms) ? info.synonyms : [];
     ;[english, romaji, userPreferred, ...synonyms].forEach((t) => {
-      if (t && !candidates.includes(t)) candidates.push(t);
+      if (t && !aniTitles.includes(t)) aniTitles.push(t);
     });
-    for (const term of candidates) {
+
+    // Determine expected episode count from Miruro AniList episodes blob
+    let expectedEpisodes: number | undefined;
+    try {
+      const blob = await getEpisodesByAniList(Number(anilistId), false);
+      const list: any[] = blob?.TMDB?.episodes || blob?.episodes || blob?.TMDB?.selectedSeason?.episodes || [];
+      if (Array.isArray(list) && list.length > 0) expectedEpisodes = list.length;
+    } catch {}
+
+    // Aggregate candidates from provider search across all titles
+    const seen = new Map<string, any>();
+    for (const term of aniTitles) {
       try {
-        const url = `${ZoroHiAnimeProvider.ANIWATCH_BASE}/search?q=${encodeURIComponent(term)}&page=1`;
-        const data = await ZoroHiAnimeProvider.httpGetJson<any>(url, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
-        const list: any[] = data?.data?.animes || [];
-        if (list.length > 0) {
-          return String(list[0]?.id || '');
+        const results = await this.searchAnime(term);
+        for (const r of results) {
+          if (!seen.has(r.id)) seen.set(r.id, r);
         }
       } catch {}
     }
-    return undefined;
+
+    const candidates = Array.from(seen.values());
+    if (!candidates.length) return undefined;
+
+    // Score candidates
+    const scored = candidates.map((c: any) => {
+      const titleScore = Math.max(...aniTitles.map((t) => ZoroHiAnimeProvider.fuzzy(t, c.title)));
+      // Episode-based score
+      const provEps = Math.max(Number(c?.episodes?.sub || 0), Number(c?.episodes?.dub || 0));
+      let epsScore = 0;
+      if (expectedEpisodes && provEps) {
+        if (provEps === expectedEpisodes) epsScore = 20;
+        else if (Math.abs(provEps - expectedEpisodes) <= 2) epsScore = 12;
+        else if (Math.abs(provEps - expectedEpisodes) / expectedEpisodes <= 0.2) epsScore = 8;
+      }
+      const arcPenalty = (ZoroHiAnimeProvider.hasArcToken(c.title) && !ZoroHiAnimeProvider.hasArcToken(aniTitles[0])) ? 20 : 0;
+      const base = titleScore + epsScore - arcPenalty;
+      return { c, score: base };
+    }).sort((a: any, b: any) => b.score - a.score);
+
+    const best = scored[0];
+    if (!best) return undefined;
+    const bestSlug = String(best.c.id);
+    this.slugCache.set(String(anilistId), bestSlug);
+    return bestSlug;
   }
 
   // Resolve Aniwatch episodeId from AniList ID + episode number
