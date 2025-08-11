@@ -29,7 +29,7 @@ import axios from 'axios';
 import { ANILIST_GRAPHQL_ENDPOINT } from '../constants/auth';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
-import { supabase } from '../lib/supabase';
+import { supabase, getAnilistUser } from '../lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 
 interface MediaEntry {
@@ -116,17 +116,9 @@ const AppSettingsModal: React.FC<AppSettingsModalProps> = ({ visible, onClose }:
     }
     
     try {
-      const { data, error } = await supabase
-        .from('anilist_users')
-        .select('is_verified')
-        .eq('anilist_id', user.id)
-        .single();
-      
-      if (!error && data) {
-        setIsVerified(data.is_verified || false);
-      } else {
-        setIsVerified(false);
-      }
+      // Use direct REST helper to avoid RLS requiring a Supabase auth session
+      const anilistUser = await getAnilistUser(user.id);
+      setIsVerified(Boolean(anilistUser?.is_verified));
     } catch (error) {
       console.error('Error checking verification status:', error);
       setIsVerified(false);

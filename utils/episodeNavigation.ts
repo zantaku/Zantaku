@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadEpisodesFromCache } from './episodeOptimization';
 
 // Episode interface matching the existing structure
 interface Episode {
@@ -70,7 +71,30 @@ export class EpisodeNavigationUtils {
       
       if (!episodeList || episodeList.length === 0) {
         console.log('[EPISODE_NAV] ❌ No episode list found in cache');
-        return { hasNext: false };
+        // Fallback: synthesize next episode using current context so UX features still work
+        const currentEpisodeNumber = currentVideoData.episodeNumber;
+        const nextEpisodeNumber = currentEpisodeNumber + 1;
+        const provider = await this.getCurrentProvider();
+        const episodeId = this.generateEpisodeId({
+          id: '',
+          number: nextEpisodeNumber,
+          title: undefined,
+          providerIds: {}
+        } as any, provider, currentVideoData.anilistId);
+
+        console.log('[EPISODE_NAV] 🔁 Fallback next-episode synthesis (cache-miss):', {
+          currentEpisode: currentEpisodeNumber,
+          nextEpisode: nextEpisodeNumber,
+          provider,
+          episodeId
+        });
+
+        return {
+          hasNext: true,
+          nextEpisode: { number: nextEpisodeNumber } as any,
+          episodeId,
+          provider
+        };
       }
 
       // Find the next episode (current episode number + 1)
@@ -117,37 +141,23 @@ export class EpisodeNavigationUtils {
    */
   private static async loadEpisodeListFromCache(anilistId: string, animeTitle?: string): Promise<Episode[]> {
     try {
-      // Try to find cached episodes with various key patterns
-      const possibleKeys = [
-        `episodes_cache_${anilistId}`,
-        `episodes_cache_${animeTitle?.replace(/[^a-zA-Z0-9]/g, '_')}`,
-        `providerEpisodes_${anilistId}`,
-      ];
-
-      for (const key of possibleKeys) {
-        try {
-          const cached = await AsyncStorage.getItem(key);
-          if (cached) {
-            const parsedData = JSON.parse(cached);
-            if (parsedData.episodes && Array.isArray(parsedData.episodes)) {
-              console.log('[EPISODE_NAV] 📦 Loaded episodes from cache key:', key, 'count:', parsedData.episodes.length);
-              return parsedData.episodes;
-            }
-          }
-        } catch (error) {
-          console.warn('[EPISODE_NAV] ⚠️ Failed to load from key:', key, error);
-        }
+      // Use the same cache loader as EpisodeList.tsx → utils/episodeOptimization.loadEpisodesFromCache
+      const cached = await loadEpisodesFromCache(anilistId, undefined, animeTitle);
+      if (cached && cached.episodes && Array.isArray(cached.episodes) && cached.episodes.length > 0) {
+        console.log('[EPISODE_NAV] 📦 Loaded episodes via shared loader', {
+          count: cached.episodes.length,
+          isStale: cached.isStale,
+        });
+        return cached.episodes as unknown as Episode[];
       }
 
-      // If no cache found, try to get from current provider episodes (if stored)
-      const sourceSettings = await this.getSourceSettings();
-      const providerKey = `${sourceSettings.defaultProvider}_episodes_${anilistId}`;
-      
-      const providerCached = await AsyncStorage.getItem(providerKey);
-      if (providerCached) {
-        const episodes = JSON.parse(providerCached);
-        if (Array.isArray(episodes)) {
-          console.log('[EPISODE_NAV] 📦 Loaded episodes from provider cache:', episodes.length);
+      // Legacy/provider-specific fallbacks (compat with older caches)
+      const legacyKey = `providerEpisodes_${anilistId}`;
+      const legacy = await AsyncStorage.getItem(legacyKey);
+      if (legacy) {
+        const episodes = JSON.parse(legacy);
+        if (Array.isArray(episodes) && episodes.length > 0) {
+          console.log('[EPISODE_NAV] 📦 Loaded episodes from legacy provider cache:', episodes.length);
           return episodes;
         }
       }

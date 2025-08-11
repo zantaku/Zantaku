@@ -41,6 +41,7 @@ interface NewsItem {
 }
 
 const ITEMS_PER_PAGE = 5;
+const MAX_AUTO_ITEMS = 10; // Safety cap for auto-loading to avoid heavy renders
 
 export default function NewsSection({ news }: { news: NewsItem[] }) {
   const router = useRouter();
@@ -78,6 +79,12 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
     }
   }, [router]);
 
+  // Reset pagination when incoming news changes
+  useEffect(() => {
+    setDisplayCount(Math.min(ITEMS_PER_PAGE, news.length));
+    setHasReachedEnd(false);
+  }, [news]);
+
   // Load news settings
   useEffect(() => {
     const loadNewsSettings = async () => {
@@ -111,10 +118,11 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
     }, 500);
   }, [displayCount, news.length, isLoading, hasReachedEnd, newsSettings]);
 
-  // Auto load more when reaching the end (only if endless loading is enabled)
+  // Auto load a limited amount only when explicitly enabled in settings
   useEffect(() => {
-    const shouldAutoLoad = newsSettings?.enableEndlessLoading !== false; // Default to true
-    if (!isLoading && displayCount < news.length && !hasReachedEnd && shouldAutoLoad) {
+    const shouldAutoLoad = newsSettings?.enableEndlessLoading === true;
+    const autoTarget = Math.min(MAX_AUTO_ITEMS, newsSettings?.maxNewsItems || 50, news.length);
+    if (!isLoading && shouldAutoLoad && displayCount < autoTarget && !hasReachedEnd) {
       loadMore();
     }
   }, [displayCount, news.length, isLoading, hasReachedEnd, newsSettings, loadMore]);
@@ -281,8 +289,8 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
           </View>
         )}
         
-        {/* Load More Button (when endless loading is disabled) */}
-        {!isLoading && displayCount < news.length && !hasReachedEnd && newsSettings?.enableEndlessLoading === false && (
+        {/* Load More Button (when endless loading is not explicitly enabled) */}
+        {!isLoading && displayCount < news.length && !hasReachedEnd && newsSettings?.enableEndlessLoading !== true && (
           <View style={[styles.loadMoreContainer, { borderTopColor: currentTheme.colors.border }]}>
             <TouchableOpacity 
               style={[styles.loadMoreButton, { backgroundColor: '#02A9FF' }]}

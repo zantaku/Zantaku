@@ -55,7 +55,8 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
   const tooltipAnim = useRef(new Animated.Value(0)).current;
   const thumbScaleAnim = useRef(new Animated.Value(1)).current;
   
-  const THUMB_SIZE = 16;
+  // Thumb size constant kept for readability; inlined in styles
+  const THUMB_SIZE = 16; // eslint-disable-line @typescript-eslint/no-unused-vars
 
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
@@ -83,7 +84,7 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
       duration: 200,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [tooltipAnim]);
 
   // Hide tooltip with animation
   const hideTooltipWithAnimation = useCallback(() => {
@@ -94,7 +95,7 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
     }).start(() => {
       setShowTooltip(false);
     });
-  }, []);
+  }, [tooltipAnim]);
 
   // Scale thumb animation
   const scaleThumb = useCallback((scale: number) => {
@@ -103,7 +104,7 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
       duration: 150,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [thumbScaleAnim]);
 
   // Handle tap on seekbar track
   const handleTrackPress = useCallback((event: GestureResponderEvent) => {
@@ -140,7 +141,7 @@ const CustomSeekBar: React.FC<CustomSeekBarProps> = ({
       console.log(`🎯 Tap-to-seek: ${time.toFixed(1)}s at position ${adjustedX}px`);
       onSeek(time);
     });
-  }, [disabled, duration, isSeeking, onSeek, positionToTime]);
+  }, [disabled, duration, isSeeking, onSeek, positionToTime, rippleAnim]);
 
   // Pan responder for dragging the thumb
   const panResponder = useRef(

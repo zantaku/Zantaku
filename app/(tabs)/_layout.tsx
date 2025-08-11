@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { TouchableOpacity, Image, Platform, Dimensions, StyleSheet, View, StatusBar, Text, Animated, Pressable } from 'react-native';
+import { TouchableOpacity, Image, Platform, Dimensions, StyleSheet, View, StatusBar, Text, Animated, Pressable, BackHandler } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth';
 import { BlurView } from 'expo-blur';
@@ -126,6 +126,7 @@ export default function TabsLayout() {
   const isMangaPage = pathname.startsWith('/manga') || pathname === '/@manga';
   const insets = useSafeAreaInsets();
   const isTV = isTVEnvironment();
+  const mainRouteHistoryRef = useRef<string[]>([]);
 
   // DEBUG: Log all dimensions
   useEffect(() => {
@@ -272,6 +273,73 @@ export default function TabsLayout() {
     setShowSettings(false);
     setIsSearchVisible(false);
   }, [pathname]);
+
+  // Track last visited main routes (anime, home, manga) for unified back behavior
+  useEffect(() => {
+    const detectMainRouteKey = (): string | null => {
+      if (pathname === '/@anime' || pathname.startsWith('/anime')) return 'anime';
+      if (pathname === '/@manga' || pathname.startsWith('/manga')) return 'manga';
+      if (pathname === '/' || pathname === '/index') return 'home';
+      return null;
+    };
+
+    const key = detectMainRouteKey();
+    if (!key) return;
+
+    const history = mainRouteHistoryRef.current;
+    if (history[history.length - 1] !== key) {
+      history.push(key);
+      // keep the last 10 entries
+      if (history.length > 10) history.shift();
+    }
+  }, [pathname]);
+
+  // Unified hardware back handling on mobile
+  useEffect(() => {
+    if (isTV) return; // TV has its own back handling
+
+    const atMainRoot = pathname === '/@anime' || pathname === '/@manga' || pathname === '/' || pathname === '/index';
+
+    const onBackPress = () => {
+      // 1) Close any root-level modals first
+      if (isSearchVisible) {
+        setIsSearchVisible(false);
+        return true;
+      }
+      if (showSettings) {
+        setShowSettings(false);
+        return true;
+      }
+
+      // 2) If not at a main root, let default/back of nested screens handle it
+      if (!atMainRoot) {
+        return false;
+      }
+
+      // 3) At a main root: navigate to previous main route if available
+      const history = mainRouteHistoryRef.current;
+      if (history.length >= 2) {
+        // current is last; previous is second last
+        const currentKey = history[history.length - 1];
+        let i = history.length - 2;
+        // find the most recent different key
+        while (i >= 0 && history[i] === currentKey) i--;
+        const previousKey = i >= 0 ? history[i] : null;
+        if (previousKey) {
+          if (previousKey === 'home') router.replace('/');
+          if (previousKey === 'anime') router.replace('/@anime');
+          if (previousKey === 'manga') router.replace('/@manga');
+          return true;
+        }
+      }
+
+      // 4) No previous main route → fall back to default (minimize/exit per platform policy)
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [pathname, isSearchVisible, showSettings, isTV, router]);
 
   // Show loading state
   if (loading) {

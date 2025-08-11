@@ -237,7 +237,7 @@ const VideoControls = ({
         </Animated.View>
       </TouchableWithoutFeedback>
 
-      {/* Skip Intro Button */}
+      {/* Skip Opening Button */}
       {showSkipIntro && (
         <Animated.View 
           style={[
@@ -249,7 +249,7 @@ const VideoControls = ({
             style={styles.skipIntroButton}
             onPress={onSkipIntro}
           >
-            <Text style={styles.skipIntroText}>Skip Intro</Text>
+            <Text style={styles.skipIntroText}>Skip Opening</Text>
             <View style={styles.iconWrapper}>
               <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
             </View>
@@ -257,7 +257,7 @@ const VideoControls = ({
         </Animated.View>
       )}
       
-      {/* Skip Outro Button */}
+      {/* Skip Ending Button */}
       {showSkipOutro && (
         <Animated.View 
           style={[
@@ -269,7 +269,7 @@ const VideoControls = ({
             style={styles.skipOutroButton}
             onPress={onSkipOutro}
           >
-            <Text style={styles.skipOutroText}>Skip Outro</Text>
+            <Text style={styles.skipOutroText}>Skip Ending</Text>
             <View style={styles.iconWrapper}>
               <Ionicons name="play-forward" size={PLAYER_UI.ICON_SIZE.SMALL} color={PLAYER_COLORS.TEXT_LIGHT} />
             </View>

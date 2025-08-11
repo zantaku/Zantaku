@@ -56,11 +56,14 @@ import EnhancedExitModal from './components/EnhancedExitModal';
 import BufferingIndicator from './components/BufferingIndicator';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 // import DebugOverlay from './components/DebugOverlay'; // Temporarily disabled
+import EpisodeSourcesModal from '../components/EpisodeSourcesModal';
+import NextUpToast from './components/NextUpToast';
 
 // Import types and constants
 import { VideoProgressData, Subtitle, SubtitleCue, VideoTimings, AudioTrack } from './types';
 import { usePlayerContext } from './PlayerContext';
 import { EpisodeNavigationUtils, NextEpisodeResult } from '../../utils/episodeNavigation';
+import { useIncognito } from '../../hooks/useIncognito';
 import {
   PLAYER_COLORS,
   PLAYER_BEHAVIOR,
@@ -91,6 +94,7 @@ const PlayerScreen: React.FC = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { preferences, setPreferences, anilistUser, onSaveToAniList, onEnterPiP, isPipSupported, isInPipMode } = usePlayerContext();
+  const { isIncognito } = useIncognito();
   
   // Add a simple delay to prevent viewState errors
   const [isVideoReady, setIsVideoReady] = useState(false);
@@ -201,6 +205,11 @@ const PlayerScreen: React.FC = () => {
   const [showNextEpisodeCountdown, setShowNextEpisodeCountdown] = useState(false);
   const [nextEpisodeData, setNextEpisodeData] = useState<NextEpisodeResult | null>(null);
   const [countdownDismissed, setCountdownDismissed] = useState(false);
+  
+  // NEW: Next episode sources modal state
+  const [showNextSourceModal, setShowNextSourceModal] = useState(false);
+  const [nextEpisodeIdForModal, setNextEpisodeIdForModal] = useState<string | null>(null);
+  const [nextSourceModalProvider, setNextSourceModalProvider] = useState<string | undefined>(undefined);
   
   // Progress save throttling
   const lastProgressSaveRef = useRef(0);
@@ -380,6 +389,37 @@ const PlayerScreen: React.FC = () => {
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   
+  // Normalize external timing payloads (AniSkip returns seconds, but guard against ms)
+  const normalizeTimings = useCallback((t?: VideoTimings | null, epDuration?: number | null): VideoTimings | undefined => {
+    if (!t) return undefined;
+    const coerce = (x: any) => (typeof x === 'number' && isFinite(x) ? x : undefined);
+    const fix = (start?: number, end?: number) => {
+      if (start === undefined || end === undefined) return undefined as any;
+      let s = start;
+      let e = end;
+      const dur = typeof epDuration === 'number' && isFinite(epDuration) && epDuration > 0 ? epDuration : undefined;
+
+      // If values look like milliseconds, convert to seconds
+      if (e > 10000) {
+        s = s / 1000;
+        e = e / 1000;
+      }
+      // If values look like minutes (while duration is long in seconds), convert to seconds
+      if (e > 0 && e <= 60 && (dur ? dur > 60 * 15 : true)) {
+        s = s * 60;
+        e = e * 60;
+      }
+
+      // Clamp within [0, duration] if duration known
+      const cs = dur ? Math.max(0, Math.min(dur, s)) : s;
+      const ce = dur ? Math.max(0, Math.min(dur, e)) : e;
+      return cs < ce ? { start: cs, end: ce } : undefined;
+    };
+    const intro = fix(coerce(t.intro?.start), coerce(t.intro?.end));
+    const outro = fix(coerce(t.outro?.start), coerce(t.outro?.end));
+    return intro || outro ? { intro, outro } : undefined;
+  }, []);
+
   // Auto-detected timing state (when source doesn't provide timing data)
   const [autoDetectedTiming, setAutoDetectedTiming] = useState<{
     intro?: { start: number; end: number };
@@ -813,6 +853,154 @@ const PlayerScreen: React.FC = () => {
     }
   }, [videoPlayer, videoData, autoDetectedTiming, nextEpisodeData, countdownDismissed, showNextEpisodeCountdown, preferences.markerSettings.autoPlayNextEpisode]); // Added dependencies for countdown logic
 
+  // Helper: cross-platform toast (Android toast + console log fallback)
+  const toast = useCallback((msg: string) => {
+    try {
+      if (Platform.OS === 'android') {
+        ToastAndroid.showWithGravity(msg, ToastAndroid.SHORT, ToastAndroid.CENTER);
+      }
+    } catch {}
+    console.log(`[TOAST] ${msg}`);
+  }, []);
+
+  // LAST-MINUTE TOASTS (60/30/10s)
+  const lastToastFiredRef = useRef<number | null>(null);
+  const lastToastDebugLoggedRef = useRef<boolean>(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastLabel, setToastLabel] = useState<string>('');
+  useEffect(() => {
+    if (!duration || duration <= 0) return;
+    const remaining = Math.max(0, duration - currentTime);
+    const hasNext = !!nextEpisodeData?.hasNext;
+    if (!hasNext) return;
+
+    const fireAt = (seconds: number, label: string) => {
+      if (remaining <= seconds && lastToastFiredRef.current !== seconds) {
+        lastToastFiredRef.current = seconds;
+        console.log('[NEXT_TOAST] ⏳', { remaining: remaining.toFixed(1), milestone: seconds });
+        // Show in-app toast overlay instead of system toast
+        setToastLabel(label);
+        setToastVisible(true);
+      }
+    };
+
+    fireAt(60, '1 min');
+    fireAt(30, '30 sec');
+    fireAt(10, '10 sec');
+  }, [currentTime, duration, nextEpisodeData?.hasNext, toast]);
+
+  // Reset toast milestones and end-handled flag when episode changes
+  useEffect(() => {
+    lastToastFiredRef.current = null;
+    endedHandledRef.current = false;
+    lastToastDebugLoggedRef.current = false;
+  }, [videoData?.episodeId]);
+
+  // Debug log when entering last 70s to verify conditions
+  useEffect(() => {
+    if (!duration || duration <= 0) return;
+    const remaining = Math.max(0, duration - currentTime);
+    if (remaining <= 70 && !lastToastDebugLoggedRef.current) {
+      lastToastDebugLoggedRef.current = true;
+      console.log('[NEXT_TOAST][DEBUG] Entered last 70s window', {
+        remaining: remaining.toFixed(1),
+        currentTime: currentTime.toFixed(1),
+        duration: duration.toFixed(1),
+        hasNext: !!nextEpisodeData?.hasNext,
+        nextEpisodeId: nextEpisodeData?.episodeId,
+        nextNumber: nextEpisodeData?.nextEpisode?.number,
+        autoNext: !!preferences?.markerSettings?.autoPlayNextEpisode,
+        episodeId: videoData?.episodeId,
+        provider: detectedProvider,
+      });
+    }
+  }, [currentTime, duration, nextEpisodeData, preferences?.markerSettings?.autoPlayNextEpisode, videoData?.episodeId, detectedProvider]);
+
+  // Safety: if we enter last 70s and next-episode info is missing, try a refresh lookup
+  useEffect(() => {
+    if (!duration || duration <= 0 || !videoData?.anilistId || !videoData?.episodeNumber) return;
+    const remaining = Math.max(0, duration - currentTime);
+    if (remaining <= 70 && (!nextEpisodeData || nextEpisodeData.hasNext === false)) {
+      console.log('[NEXT_TOAST][DEBUG] Refreshing next-episode lookup in last-minute window...');
+      EpisodeNavigationUtils.findNextEpisode(videoData).then((result) => {
+        setNextEpisodeData(result);
+        console.log('[NEXT_TOAST][DEBUG] Refresh lookup result:', {
+          hasNext: result.hasNext,
+          episodeId: result.episodeId,
+          nextNumber: result.nextEpisode?.number
+        });
+      }).catch((error) => {
+        console.error('[NEXT_TOAST][DEBUG] Error refreshing next episode:', error);
+      });
+    }
+  }, [currentTime, duration, videoData, nextEpisodeData]);
+
+  // OPEN SOURCES MODAL FOR NEXT EP
+  const openNextEpisodeModal = useCallback(() => {
+    // Prefer computed next data when available
+    let episodeIdToUse: string | null = nextEpisodeData?.episodeId || null;
+    let providerForModal: string | undefined = nextEpisodeData?.provider || undefined;
+
+    // Fallback: synthesize from current context so it opens regardless
+    if (!episodeIdToUse && videoData?.anilistId && videoData?.episodeNumber) {
+      const nextNum = (videoData.episodeNumber || 0) + 1;
+      // Use legacy format that EpisodeSourcesModal understands and can route by AniList
+      episodeIdToUse = `${videoData.anilistId}?ep=${nextNum}`;
+      // If we don't have a precise provider-specific ID (like AnimePahe ID), let the modal decide via priority
+      providerForModal = undefined;
+      console.log('[NEXT][FALLBACK] Synthesized next episode for modal:', {
+        episodeId: episodeIdToUse,
+        nextNum,
+        detectedProvider,
+      });
+    }
+
+    if (!episodeIdToUse) {
+      console.log('[NEXT] ❌ Unable to resolve next episode ID for modal');
+      return;
+    }
+
+    console.log('[NEXT] 🎬 Opening EpisodeSourcesModal for next episode', {
+      episodeId: episodeIdToUse,
+      preferredType: currentAudioTrack,
+      provider: providerForModal ?? detectedProvider,
+    });
+    setNextSourceModalProvider(providerForModal);
+    setNextEpisodeIdForModal(episodeIdToUse);
+    setShowNextSourceModal(true);
+  }, [nextEpisodeData, currentAudioTrack, detectedProvider, videoData?.anilistId, videoData?.episodeNumber]);
+
+  // END-OF-VIDEO BEHAVIOR
+  const endedHandledRef = useRef(false);
+  useEffect(() => {
+    if (!duration || duration <= 0) return;
+    const ended = duration - currentTime <= 1; // within 1s of duration
+    if (!ended || endedHandledRef.current) return;
+
+    endedHandledRef.current = true;
+    console.log('[END] 🎞️ Episode ended. Handling end-of-video flow...', {
+      autoPlayNext: !!preferences?.markerSettings?.autoPlayNextEpisode,
+      hasNext: !!nextEpisodeData?.hasNext,
+    });
+
+    if (preferences?.markerSettings?.autoPlayNextEpisode && nextEpisodeData?.hasNext) {
+      console.log('[END] ▶️ Auto-next enabled. Opening sources modal for next episode.');
+      openNextEpisodeModal();
+    } else {
+      console.log('[END] 🧭 Prompting user for next action.');
+      Alert.alert(
+        'Episode finished',
+        nextEpisodeData?.hasNext ? 'Go to the next episode?' : 'Return to the episode list?',
+        [
+          ...(nextEpisodeData?.hasNext
+            ? [{ text: 'Next episode', onPress: () => { console.log('[END] User selected Next episode'); openNextEpisodeModal(); } }]
+            : []),
+          { text: 'Back to list', style: 'cancel', onPress: () => { console.log('[END] User selected Back to list'); router.back(); } },
+        ]
+      );
+    }
+  }, [currentTime, duration, preferences?.markerSettings?.autoPlayNextEpisode, nextEpisodeData, openNextEpisodeModal]);
+
   // Auto-enter PiP when app goes to background (for seamless UX)
   useEffect(() => {
     const { AppState } = require('react-native');
@@ -1211,9 +1399,11 @@ const PlayerScreen: React.FC = () => {
   // Check for intro/outro timing - optimized (with logging and validation)
   useEffect(() => {
     if (videoData?.timings) {
-      console.log('[PLAYER_SCREEN] ⏱️ Provided timings:', JSON.stringify(videoData.timings));
-      const rawIntro = videoData.timings.intro;
-      const rawOutro = videoData.timings.outro;
+      const norm = normalizeTimings(videoData.timings, duration || undefined);
+      console.log('[PLAYER_SCREEN] ⏱️ Provided timings (raw):', JSON.stringify(videoData.timings));
+      console.log('[PLAYER_SCREEN] ⏱️ Provided timings (normalized):', JSON.stringify(norm));
+      const rawIntro = norm?.intro;
+      const rawOutro = norm?.outro;
       const intro = rawIntro && rawIntro.start >= 0 && rawIntro.end > rawIntro.start ? rawIntro : undefined;
       const outro = rawOutro && rawOutro.start >= 0 && rawOutro.end > rawOutro.start ? rawOutro : undefined;
       if ((rawIntro && !intro) || (rawOutro && !outro)) {
@@ -1282,7 +1472,7 @@ const PlayerScreen: React.FC = () => {
   // Check for intro/outro timing using both provided and auto-detected data
   useEffect(() => {
     // Merge provided timing with auto-detected: fill missing or invalid parts with detected ones
-    const provided = videoData?.timings;
+    const provided = normalizeTimings(videoData?.timings, duration || undefined);
     const detected = autoDetectedTiming;
     const isValid = (t?: { start: number; end: number }) => !!(t && t.start >= 0 && t.end > t.start);
     const merged = (provided || detected) ? {
@@ -1462,13 +1652,18 @@ const PlayerScreen: React.FC = () => {
 
   // Handle back button (both hardware and UI)
   const handleBackPress = useCallback(() => {
-    // Always show save progress modal if there's significant progress and AniList user
+    // If incognito mode is enabled, exit immediately without any save prompts
+    if (isIncognito) {
+      router.back();
+      return;
+    }
+    // Otherwise, decide whether to show save or exit modal
     if (videoData && currentTime > 30 && duration > 0) {
       setShowSaveProgressModal(true);
     } else {
       setShowExitModal(true);
     }
-  }, [videoData, currentTime, duration]);
+  }, [isIncognito, videoData, currentTime, duration, router]);
 
   // Handle hardware back button
   useEffect(() => {
@@ -1852,7 +2047,7 @@ const PlayerScreen: React.FC = () => {
       )}
       
       {/* Exit Modal */}
-      {showExitModal && (
+      {!isIncognito && showExitModal && (
         <EnhancedExitModal
           visible={showExitModal}
           onExit={handleExit}
@@ -1863,7 +2058,7 @@ const PlayerScreen: React.FC = () => {
           }}
           isSaving={false}
           saveError={null}
-          isIncognito={false}
+          isIncognito={isIncognito}
           episodeProgress={duration > 0 ? currentTime / duration : 0}
         />
       )}
@@ -1971,7 +2166,7 @@ const PlayerScreen: React.FC = () => {
       )}
 
       {/* Save Progress Modal */}
-      {showSaveProgressModal && (
+      {!isIncognito && showSaveProgressModal && (
         <SaveProgressModal
           isVisible={showSaveProgressModal}
           onCancel={() => setShowSaveProgressModal(false)}
@@ -2015,6 +2210,83 @@ const PlayerScreen: React.FC = () => {
           onSkipToNext={handleSkipToNextEpisode}
           onDismiss={handleDismissCountdown}
           canAutoPlay={preferences.markerSettings?.autoPlayNextEpisode || false}
+        />
+      )}
+
+      {/* Next-Up Sliding Toast */}
+      <NextUpToast
+        isVisible={toastVisible}
+        label={toastLabel}
+        nextEpisodeNumber={nextEpisodeData?.nextEpisode?.number}
+        nextEpisodeTitle={nextEpisodeData?.nextEpisode?.title}
+        provider={detectedProvider}
+        onHide={() => setToastVisible(false)}
+        onPress={() => {
+          console.log('[NEXT_TOAST][UI] 🔗 Toast clicked → open next episode modal');
+          setToastVisible(false);
+          openNextEpisodeModal();
+        }}
+      />
+
+      {/* Next Episode Sources Modal (auto-select) */}
+      {showNextSourceModal && nextEpisodeIdForModal && (
+        <EpisodeSourcesModal
+          visible={showNextSourceModal}
+          episodeId={nextEpisodeIdForModal}
+          episodeNumber={nextEpisodeData?.nextEpisode?.number}
+          onClose={() => {
+            console.log('[NEXT] 🔒 Closing EpisodeSourcesModal');
+            setShowNextSourceModal(false);
+          }}
+          onSelectSource={(url, headers, epId, epNumber, subtitles, timings, anilistIdParam, dataKey, provider, audioType) => {
+            console.log('[NEXT] ✅ Source selected (auto). Navigating to next episode player with stored dataKey', {
+              epId,
+              epNumber,
+              provider,
+              audioType,
+              hasDataKey: !!dataKey,
+            });
+            setShowNextSourceModal(false);
+            try {
+              // Prefer stored payload by dataKey for stability
+              if (dataKey) {
+                router.replace({
+                  pathname: '/player',
+                  params: {
+                    dataKey,
+                    provider: provider || detectedProvider,
+                    audioType: audioType || currentAudioTrack,
+                    episodeNumber: epNumber,
+                    anilistId: anilistIdParam || videoData?.anilistId,
+                    animeTitle: videoData?.animeTitle,
+                    episodeId: epId,
+                  },
+                });
+              } else {
+                // Fallback: navigate with direct URL if dataKey not provided
+                router.replace({
+                  pathname: '/player',
+                  params: {
+                    episodeId: epId,
+                    animeTitle: videoData?.animeTitle,
+                    episodeNumber: epNumber,
+                    source: url,
+                    anilistId: anilistIdParam || videoData?.anilistId,
+                    provider: provider || detectedProvider,
+                    audioType: audioType || currentAudioTrack,
+                  },
+                });
+              }
+            } catch (navErr) {
+              console.error('[NEXT] ❌ Navigation error after source select:', navErr);
+            }
+          }}
+          preferredType={currentAudioTrack}
+          animeTitle={videoData?.animeTitle}
+          anilistId={videoData?.anilistId}
+          autoSelectSource={true}
+          skipTypeSelection={true}
+          currentProvider={nextSourceModalProvider}
         />
       )}
 

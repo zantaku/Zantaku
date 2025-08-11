@@ -1,32 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Platform } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, TouchableWithoutFeedback, FlatList } from 'react-native';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
-import LottieView from 'lottie-react-native';
-import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
-import Reanimated, { 
-  useAnimatedStyle, 
-  withRepeat, 
-  withSequence,
-  useSharedValue,
-  withTiming,
-  Easing,
-  FadeIn,
-  FadeOut
-} from 'react-native-reanimated';
-import { createShimmerPlaceholder } from 'react-native-shimmer-placeholder';
-import Constants from 'expo-constants';
+import Reanimated, { Easing } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { ScrollView } from 'react-native';
-import { animeProviderManager } from '../../api/proxy/providers/anime';
+// Removed unused heavy imports
 import { zoroProvider } from '../../api/proxy/providers/anime/zorohianime';
 import { animePaheProvider } from '../../api/proxy/providers/anime/animepahe';
 
-const ShimmerPlaceholder = createShimmerPlaceholder(ExpoLinearGradient);
-const AnimatedLinearGradient = Reanimated.createAnimatedComponent(ExpoLinearGradient);
 const ReanimatedTouchableOpacity = Reanimated.createAnimatedComponent(TouchableOpacity);
+
+// Color tokens
+const COLOR = {
+  primary: '#02A9FF',
+  success: '#3CCB7F',
+  warning: '#FFB020',
+  danger: '#FF5E5E',
+  backdrop: 'rgba(0,0,0,0.85)'
+};
 
 // Hook to load source settings
 const useSourceSettings = () => {
@@ -59,52 +53,23 @@ const useSourceSettings = () => {
   return sourceSettings;
 };
 
-// Add this new component for the auto-select mode pill indicator
-const AutoSelectPill = ({ visible, message = "Loading video..." }: { visible: boolean; message?: string }) => {
-  const opacity = useSharedValue(0.7);
-  const scale = useSharedValue(1);
-  
+// Simple bottom toast for auto-select message (no loops)
+const AutoSelectPill = ({ visible, message = 'Loading…' }: { visible: boolean; message?: string }) => {
+  const fade = new Animated.Value(0);
   useEffect(() => {
-    // Create a subtle pulsing effect
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(0.95, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.7, { duration: 800, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-    
-    scale.value = withRepeat(
-      withSequence(
-        withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-  
-  const pillStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: scale.value }]
-  }));
-  
+    if (visible) {
+      Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(fade, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+    }
+  }, [visible]);
   if (!visible) return null;
-  
   return (
-    <Reanimated.View 
-      style={[styles.pillContainer]}
-      entering={FadeIn.duration(300)}
-      exiting={FadeOut.duration(300)}
-    >
-      <Reanimated.View style={[styles.pillBackground, pillStyle]}>
-        <View style={styles.pillContent}>
-          <View style={styles.loadingDot} />
-          <Text style={styles.pillText}>{message}</Text>
-        </View>
-      </Reanimated.View>
-    </Reanimated.View>
+    <Animated.View style={[styles.pillContainer, { opacity: fade }]}> 
+      <View style={styles.pillBackground}>
+        <Text style={styles.pillText}>{message}</Text>
+      </View>
+    </Animated.View>
   );
 };
 
@@ -120,225 +85,24 @@ const LoadingMessages = [
   "Readying your anime journey..."
 ];
 
-// Add this new component for animated particles
-const AnimatedParticle = ({ index, totalParticles }: { index: number; totalParticles: number }) => {
-  const animatedValue = useSharedValue(0);
-  
-  useEffect(() => {
-    const delay = index * 200;
-    setTimeout(() => {
-      animatedValue.value = withRepeat(
-        withTiming(1, { duration: 1500 + Math.random() * 1000 }),
-        -1,
-        false
-      );
-    }, delay);
-  }, [index]);
-  
-  const particleStyle = useAnimatedStyle(() => {
-    const size = 4 + Math.random() * 4;
-    const angle = (index / totalParticles) * Math.PI * 2;
-    const radius = 30 + Math.random() * 40;
-    
-    return {
-      width: size,
-      height: size,
-      borderRadius: size / 2,
-      backgroundColor: index % 3 === 0 ? '#02A9FF' : index % 3 === 1 ? '#5D3FD3' : '#FF6B6B',
-      position: 'absolute',
-      opacity: 0.2 + (animatedValue.value * 0.8),
-      transform: [
-        { translateX: radius * Math.cos(angle) * (0.4 + animatedValue.value * 0.6) },
-        { translateY: radius * Math.sin(angle) * (0.4 + animatedValue.value * 0.6) },
-        { scale: 0.5 + animatedValue.value * 1 }
-      ]
-    };
-  });
-  
-  return <Reanimated.View style={particleStyle} />;
-};
+// Removed animated particles per perf guidelines
 
-const AnimatedParticles = () => {
-  const particles = Array(12).fill(0);
-  
-  return (
-    <View style={styles.particleContainer}>
-      {particles.map((_, index) => (
-        <AnimatedParticle key={index} index={index} totalParticles={particles.length} />
-      ))}
-    </View>
-  );
-};
+// Minimal thin progress bar (indeterminate look without loops)
+const ThinProgressBar = () => (
+  <View style={{ width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 2, overflow: 'hidden' }}>
+    <View style={{ width: '55%', height: '100%', backgroundColor: COLOR.primary, borderRadius: 2 }} />
+  </View>
+);
 
-// Enhanced loading spinner with glow effect
-const LoadingSpinner = () => {
-  const spinAnim = useSharedValue(0);
-  const glowAnim = useSharedValue(0);
+// Deleted shimmer/indeterminate loops
 
-  useEffect(() => {
-    spinAnim.value = withRepeat(
-      withTiming(1, { 
-        duration: 1000,
-        easing: Easing.linear
-      }),
-      -1
-    );
-    
-    glowAnim.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.4, { duration: 800, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-
-  const spinStyle = useAnimatedStyle(() => ({
-    transform: [
-      { rotate: `${spinAnim.value * 360}deg` }
-    ]
-  }));
-  
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glowAnim.value,
-    transform: [
-      { scale: 0.8 + (glowAnim.value * 0.4) }
-    ]
-  }));
-
-  return (
-    <View style={styles.spinnerContainer}>
-      <Reanimated.View style={[styles.spinnerGlow, glowStyle]} />
-      <Reanimated.View style={[styles.spinner, spinStyle]}>
-        <View style={styles.spinnerRing}>
-          <View style={styles.spinnerDot} />
-          <View style={[styles.spinnerDot, { transform: [{ rotate: '90deg' }, { translateY: -40 }] }]} />
-          <View style={[styles.spinnerDot, { transform: [{ rotate: '180deg' }, { translateY: -40 }] }]} />
-          <View style={[styles.spinnerDot, { transform: [{ rotate: '270deg' }, { translateY: -40 }] }]} />
-        </View>
-      </Reanimated.View>
-      <AnimatedParticles />
-    </View>
-  );
-};
-
-// Animated progress bar with shimmer effect
-const LoadingProgress = () => {
-  const progress = useSharedValue(0);
-  const shimmer = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withTiming(0.95, { 
-      duration: 5000, 
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1) 
-    });
-    
-    shimmer.value = withRepeat(
-      withTiming(1, { duration: 1000, easing: Easing.linear }),
-      -1,
-      false
-    );
-  }, []);
-
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
-  }));
-  
-  const shimmerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: -100 + shimmer.value * 200 }],
-  }));
-
-  return (
-    <View style={styles.progressBarContainer}>
-      <Reanimated.View style={[styles.progressBar, progressStyle]}>
-        <Reanimated.View style={[styles.progressBarShimmer, shimmerStyle]} />
-      </Reanimated.View>
-    </View>
-  );
-};
-
-// Replace the AutoLoadingMessage component
-const AutoLoadingMessage = ({ 
-  episodeNumber, 
-  onClose 
-}: { 
-  episodeNumber: string; 
-  onClose: () => void;
-}) => {
-  const scaleAnim = useSharedValue(1);
-  const textOpacity = useSharedValue(1);
-  const [messageIndex, setMessageIndex] = useState(0);
-  
-  useEffect(() => {
-    // Subtle pulse animation
-    scaleAnim.value = withRepeat(
-      withSequence(
-        withTiming(1.03, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-    
-    // Cycle through loading messages
-    const interval = setInterval(() => {
-      textOpacity.value = withSequence(
-        withTiming(0, { duration: 300 }),
-        withTiming(1, { duration: 300 })
-      );
-      setMessageIndex((prev) => (prev + 1) % LoadingMessages.length);
-    }, 3500);
-    
-    return () => clearInterval(interval);
-  }, []);
-  
-  const containerStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scaleAnim.value }]
-  }));
-  
-  const msgStyle = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateY: (1 - textOpacity.value) * 8 }]
-  }));
-
-  return (
-    <Reanimated.View style={[styles.autoLoadingContainer, containerStyle]}>
-      <View style={styles.autoLoadingContent}>
-        <View style={styles.glowContainer}>
-          <LoadingSpinner />
-        </View>
-        <Reanimated.Text style={[styles.autoLoadingTitle, msgStyle]}>
-          🔥 Finding Episode {episodeNumber}
-        </Reanimated.Text>
-        <Reanimated.Text style={[styles.autoLoadingSubtitle, msgStyle]}>
-          {LoadingMessages[messageIndex]}
-        </Reanimated.Text>
-        <LoadingProgress />
-        <ReanimatedTouchableOpacity 
-          style={styles.cancelButton}
-          onPress={() => {
-            // Add micro-animation on press
-            scaleAnim.value = withSequence(
-              withTiming(0.95, { duration: 100 }),
-              withTiming(1, { duration: 100 })
-            );
-            onClose();
-          }}
-        >
-          <ExpoLinearGradient
-            colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.cancelButtonGradient}
-          >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </ExpoLinearGradient>
-        </ReanimatedTouchableOpacity>
-      </View>
-    </Reanimated.View>
-  );
-};
+// Simple loading body
+const AutoLoadingMessage = ({ episodeNumber }: { episodeNumber: string }) => (
+  <View style={styles.loadingSimple}>
+    <Text style={styles.bodyTitle}>Fetching sources…</Text>
+    <ThinProgressBar />
+  </View>
+);
 
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
 
@@ -360,75 +124,34 @@ interface VideoTimings {
   outro?: { start: number; end: number; };
 }
 
-const VersionButton = ({ 
-  type, 
-  isSelected, 
-  onPress 
-}: { 
-  type: 'sub' | 'dub', 
-  isSelected: boolean, 
-  onPress: () => void 
-}) => {
-  const scale = useSharedValue(1);
-  const glow = useSharedValue(0);
-  
-  const handlePressIn = () => {
-    scale.value = withSequence(
-      withTiming(0.95, { duration: 100 }),
-      withTiming(1, { duration: 100 })
-    );
-    glow.value = withTiming(1, { duration: 200 });
-  };
+// Minimal segmented control
+const Segmented = ({ value, onChange, disabled }: { value: 'sub' | 'dub', onChange: (v: 'sub' | 'dub') => void, disabled?: boolean }) => (
+  <View style={[styles.segmented, disabled && { opacity: 0.6 }]}> 
+    {(['sub','dub'] as const).map(opt => (
+      <TouchableOpacity key={opt} onPress={() => !disabled && onChange(opt)} style={[styles.segment, value===opt && styles.segmentActive]} accessibilityRole="button" accessibilityLabel={`Audio: ${opt==='sub'?'Sub':'Dub'}`}>
+        <Text style={[styles.segmentText, value===opt && styles.segmentTextActive]}>{opt==='sub'?'Sub':'Dub'}</Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+);
 
-  const handlePressOut = () => {
-    glow.value = withTiming(0, { duration: 200 });
-  };
+const MetaChip = ({ label }: { label: string }) => (
+  <View style={styles.metaChip}><Text style={styles.metaChipText}>{label}</Text></View>
+);
 
-  const buttonStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    shadowOpacity: glow.value * 0.5,
-  }));
-
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glow.value * 0.4,
-  }));
-
-  return (
-    <View style={styles.buttonWrapper}>
-      <Reanimated.View style={[
-        styles.buttonGlow,
-        isSelected && styles.buttonGlowActive,
-        glowStyle
-      ]} />
-      <ReanimatedTouchableOpacity
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        onPress={onPress}
-        style={[
-          styles.versionButton,
-          isSelected && styles.versionButtonActive,
-          buttonStyle
-        ]}
-      >
-        <ExpoLinearGradient
-          colors={isSelected ? ['#02A9FF', '#0066FF'] : ['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.buttonGradient}
-        >
-          <View style={styles.buttonContent}>
-            <Text style={styles.buttonIcon}>
-              {type === 'sub' ? '💬' : '🎤'}
-            </Text>
-            <Text style={[styles.versionButtonText, isSelected && styles.versionButtonTextActive]}>
-              {type === 'sub' ? 'Subbed' : 'Dubbed'}
-            </Text>
-          </View>
-        </ExpoLinearGradient>
-      </ReanimatedTouchableOpacity>
+type RowItem = { label: string; url: string; headers: Record<string,string>; isM3U8: boolean; note?: string };
+const SourceRow = React.memo(({ selected, item, onPress }: { selected: boolean; item: RowItem; onPress: () => void }) => (
+  <TouchableOpacity onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={`Play ${item.label} ${item.isM3U8 ? 'HLS' : 'MP4'}${item.note?`, ${item.note}`:''}`}>
+    <View style={{ flex: 1 }}>
+      <Text style={styles.rowLabel}>{item.label}</Text>
+      <View style={styles.rowTags}>
+        <Text style={[styles.tag, { borderColor: 'rgba(255,255,255,0.2)'}]}>{item.isM3U8 ? 'HLS' : 'MP4'}</Text>
+        {item.note ? <Text style={[styles.tag, { borderColor: COLOR.primary, color: COLOR.primary }]}>{item.note}</Text> : null}
+      </View>
     </View>
-  );
-};
+    <FontAwesome5 name="play" color={COLOR.primary} size={16} />
+  </TouchableOpacity>
+));
 
 export default function EpisodeSourcesModal({ 
   visible, 
@@ -541,13 +264,13 @@ export default function EpisodeSourcesModal({
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 300,
+          duration: 220,
           useNativeDriver: true,
         }),
-        Animated.spring(scaleAnim, {
+        Animated.timing(scaleAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 7,
+          duration: 220,
+          easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         })
       ]).start();
@@ -732,6 +455,126 @@ export default function EpisodeSourcesModal({
     return null;
   };
 
+  // Fetch OP/ED timings from AniSkip using MAL id
+  const fetchAniSkipTimings = async (
+    malIdValue?: string,
+    episodeNum?: number
+  ): Promise<VideoTimings | null> => {
+    try {
+      if (!malIdValue || !episodeNum || Number.isNaN(episodeNum)) {
+        return null;
+      }
+
+      const mal = String(malIdValue).trim();
+      const url = `https://api.aniskip.com/v2/skip-times/${encodeURIComponent(mal)}/${encodeURIComponent(
+        String(episodeNum)
+      )}`;
+
+      // Build query correctly as an array: types=op&types=ed&types=mixed-op&types=mixed-ed
+      const qs = new URLSearchParams();
+      ['op', 'ed', 'mixed-op', 'mixed-ed'].forEach((t) => qs.append('types', t));
+      // Per API docs: use 0 to get proper response without extra filtering
+      qs.append('episodeLength', '0');
+      const fullUrl = `${url}?${qs.toString()}`;
+      console.log(`[ANISKIP] 🔎 Request → ${fullUrl}`);
+      const res = await axios.get(url, {
+        params: qs,
+        // Ensure axios doesn't re-index arrays; we already built URLSearchParams
+        paramsSerializer: {
+          serialize: (p: any) => (p instanceof URLSearchParams ? p.toString() : new URLSearchParams(p).toString()),
+        },
+        headers: {
+          accept: 'application/json',
+        },
+      });
+
+      const data = res?.data;
+      try {
+        console.log('[ANISKIP] 🧾 Raw response JSON:', JSON.stringify(data, null, 2));
+      } catch {}
+      if (!data?.found || !Array.isArray(data?.results)) {
+        console.log('[ANISKIP] ℹ️ No skip timings found or invalid response shape');
+        return null;
+      }
+
+      // Group results
+      const opItems = data.results.filter((r: any) => ['op', 'mixed-op'].includes(r?.skipType));
+      const edItems = data.results.filter((r: any) => ['ed', 'mixed-ed'].includes(r?.skipType));
+
+      const pickBestOp = (items: any[]) => {
+        if (!items || items.length === 0) return undefined;
+        // Prefer earliest plausible OP (usually < 3m or < 60% of episode)
+        const scored = items
+          .filter((r) => r?.interval && typeof r.interval.startTime === 'number' && typeof r.interval.endTime === 'number')
+          .map((r) => {
+            const len = Number(r.episodeLength || 0);
+            const start = Number(r.interval.startTime);
+            const end = Number(r.interval.endTime);
+            const typicalCap = len > 0 ? Math.min(220, len * 0.6) : 220;
+            const plausibility = start <= typicalCap ? 1 : 0; // 1 if plausible early
+            const width = Math.max(1, end - start);
+            const confidence = Number(r.confidence || 0);
+            const score = plausibility * 1000 + (220 - Math.min(220, start)) + confidence - Math.min(60, width);
+            return { r, score };
+          })
+          .sort((a, b) => b.score - a.score);
+        return scored.length ? scored[0].r : items[0];
+      };
+
+      const pickBestEd = (items: any[]) => {
+        if (!items || items.length === 0) return undefined;
+        // Prefer latest plausible ED (usually in last 40% of episode)
+        const scored = items
+          .filter((r) => r?.interval && typeof r.interval.startTime === 'number' && typeof r.interval.endTime === 'number')
+          .map((r) => {
+            const len = Number(r.episodeLength || 0);
+            const start = Number(r.interval.startTime);
+            const end = Number(r.interval.endTime);
+            const threshold = len > 0 ? len * 0.4 : 0;
+            const plausibility = start >= threshold ? 1 : 0;
+            const confidence = Number(r.confidence || 0);
+            const score = plausibility * 1000 + start + confidence;
+            return { r, score };
+          })
+          .sort((a, b) => b.score - a.score);
+        return scored.length ? scored[0].r : items[0];
+      };
+
+      const bestOp = pickBestOp(opItems);
+      const bestEd = pickBestEd(edItems);
+
+      console.log('[ANISKIP] 🎯 Selection:', {
+        pickOpFrom: opItems.length,
+        pickEdFrom: edItems.length,
+        chosenOp: bestOp ? { start: bestOp.interval.startTime, end: bestOp.interval.endTime, epLen: bestOp.episodeLength } : null,
+        chosenEd: bestEd ? { start: bestEd.interval.startTime, end: bestEd.interval.endTime, epLen: bestEd.episodeLength } : null,
+      });
+
+      const timings: VideoTimings = {};
+      if (bestOp) {
+        timings.intro = {
+          start: Number(bestOp.interval.startTime),
+          end: Number(bestOp.interval.endTime),
+        };
+      }
+      if (bestEd) {
+        timings.outro = {
+          start: Number(bestEd.interval.startTime),
+          end: Number(bestEd.interval.endTime),
+        };
+      }
+
+      if (timings.intro || timings.outro) {
+        console.log('[ANISKIP] ✅ Timings found:', timings);
+        return timings;
+      }
+      return null;
+    } catch (err) {
+      console.log('[ANISKIP] ❌ Failed to fetch timings:', err);
+      return null;
+    }
+  };
+
   const fetchSources = async (episodeId: string, type: 'sub' | 'dub') => {
     // Use source settings for auto-select behavior
     const shouldAutoSelect = sourceSettings.autoSelectSource && autoSelectSource;
@@ -817,19 +660,21 @@ export default function EpisodeSourcesModal({
                 intro: paheWatchData.intro,
                 outro: paheWatchData.outro
               } : null;
-              setTimings(paheTimings);
+
+              // Prefer AniSkip timings if available
+              const aniTimings = await fetchAniSkipTimings(malId, episodeNum!);
+              const finalTimings = aniTimings || paheTimings || undefined;
+              setTimings(finalTimings || null);
               console.log('[SOURCES_MODAL] ⏱️ AnimePahe timings:', paheTimings ? JSON.stringify(paheTimings) : 'none');
               
               if (shouldAutoSelect && formattedSources.length > 0) {
                 console.log(`📡 [ANIMEPAHE] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
                 handleDirectSourceSelect(
-                  formattedSources[0], 
-                  paheWatchData.subtitles || [], 
-                  paheWatchData.intro || paheWatchData.outro ? {
-                    intro: paheWatchData.intro,
-                    outro: paheWatchData.outro
-                  } : undefined,
-                  anilistId
+                  formattedSources[0],
+                  paheWatchData.subtitles || [],
+                  finalTimings,
+                  anilistId,
+                  'animepahe'
                 );
                 return;
               }
@@ -844,6 +689,14 @@ export default function EpisodeSourcesModal({
               }));
               
               setAvailableQualities(qualityOptions);
+              // Auto-select if only one source
+              if (qualityOptions.length === 1) {
+                const q = qualityOptions[0];
+                setPillVisible(true);
+                setPillMessage(`Loading ${q.quality} (${q.url.includes('.m3u8') ? 'HLS' : 'MP4'})…`);
+                handleSourceSelect({ url: q.url, quality: q.quality, type, headers: q.headers, isM3U8: q.url.includes('.m3u8') });
+                return;
+              }
               setShowQualitySelection(true);
               setLoading(false);
               return;
@@ -890,19 +743,21 @@ export default function EpisodeSourcesModal({
                   intro: zoroWatchData.intro,
                   outro: zoroWatchData.outro
                 } : null;
-                setTimings(zoroTimings);
+
+                // Prefer AniSkip timings if available
+                const aniTimings = await fetchAniSkipTimings(malId, episodeNum!);
+                const finalTimings = aniTimings || zoroTimings || undefined;
+                setTimings(finalTimings || null);
                 console.log('[SOURCES_MODAL] ⏱️ Zoro timings:', zoroTimings ? JSON.stringify(zoroTimings) : 'none');
                 
                 if (shouldAutoSelect && formattedSources.length > 0) {
                   console.log(`📡 [ZORO] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
                   handleDirectSourceSelect(
-                    formattedSources[0], 
-                    zoroWatchData.subtitles || [], 
-                    zoroWatchData.intro || zoroWatchData.outro ? {
-                      intro: zoroWatchData.intro,
-                      outro: zoroWatchData.outro
-                    } : undefined,
-                    anilistId
+                    formattedSources[0],
+                    zoroWatchData.subtitles || [],
+                    finalTimings,
+                    anilistId,
+                    'zoro'
                   );
                   return;
                 }
@@ -917,6 +772,13 @@ export default function EpisodeSourcesModal({
                 }));
                 
                 setAvailableQualities(qualityOptions);
+                if (qualityOptions.length === 1) {
+                  const q = qualityOptions[0];
+                  setPillVisible(true);
+                  setPillMessage(`Loading ${q.quality} (${q.url.includes('.m3u8') ? 'HLS' : 'MP4'})…`);
+                  handleSourceSelect({ url: q.url, quality: q.quality, type, headers: q.headers, isM3U8: q.url.includes('.m3u8') });
+                  return;
+                }
                 setShowQualitySelection(true);
                 setLoading(false);
                 return;
@@ -965,8 +827,14 @@ export default function EpisodeSourcesModal({
     }
   };
 
-  // Update the handleDirectSourceSelect function to include a dataKey parameter
-  const handleDirectSourceSelect = (source: Source, directSubtitles: Subtitle[], directTimings?: VideoTimings, anilistId?: string) => {
+  // Update the handleDirectSourceSelect to forward provider explicitly
+  const handleDirectSourceSelect = (
+    source: Source,
+    directSubtitles: Subtitle[],
+    directTimings?: VideoTimings,
+    anilistId?: string,
+    selectedProvider?: string
+  ) => {
     // Log detailed information about the selected source
     console.log('\n=== SOURCE SELECT DEBUG (DIRECT DATA) ===');
     console.log('[SOURCE SELECT DEBUG] Source URL:', source.url.substring(0, 50) + '...');
@@ -1023,7 +891,7 @@ export default function EpisodeSourcesModal({
       timings: directTimings || null,
       anilistId: anilistId || '',
       animeTitle: animeTitle || '',
-      provider: currentProvider || 'zoro',
+      provider: selectedProvider || currentProvider || 'animepahe',
       audioType: source.type,
       timestamp: Date.now()
     };
@@ -1061,7 +929,7 @@ export default function EpisodeSourcesModal({
       directTimings,
       anilistId,
       dataKey,
-      currentProvider || 'zoro',
+      selectedProvider || currentProvider || 'animepahe',
       source.type
     );
   };
@@ -1192,6 +1060,9 @@ export default function EpisodeSourcesModal({
           intro: watchData.intro,
           outro: watchData.outro
         } : undefined;
+        // Prefer AniSkip timings if available
+        const aniTimings = await fetchAniSkipTimings(malId, episodeNumber);
+        const finalTimings = aniTimings || directTimings;
         
         const directSubtitles = watchData.subtitles || [];
         
@@ -1205,7 +1076,7 @@ export default function EpisodeSourcesModal({
         setServerProcessingMessage('');
         
         // Process and send to player
-        handleDirectSourceSelect(formattedSource, directSubtitles, directTimings, anilistId);
+        handleDirectSourceSelect(formattedSource, directSubtitles, finalTimings, anilistId);
       } else {
         throw new Error(`No streams available from ${server.name}`);
       }
@@ -1217,7 +1088,7 @@ export default function EpisodeSourcesModal({
     }
   };
 
-  // Add new component for quality selection
+  // Add new component for quality selection (calm layout)
   const QualitySelectionView = () => {
     // Check if we have Zoro server options stored
     const zoroOptions = (window as any).zoroServerOptions;
@@ -1286,73 +1157,36 @@ export default function EpisodeSourcesModal({
       );
     }
     
-    // Fallback to regular quality selection
+    // Fallback to regular quality selection: calm list with radio
+    const data: RowItem[] = availableQualities.map((q, idx) => ({
+      label: `${q.quality}`,
+      url: q.url,
+      headers: q.headers,
+      isM3U8: q.url.includes('.m3u8'),
+      note: idx === 0 ? 'Recommended' : undefined,
+    }));
+
     return (
-      <View style={styles.qualitySelectionContainer}>
-        <Text style={styles.title}>Multiple Sources Found</Text>
-        <Text style={styles.subtitle}>
-          Choose from {availableQualities.length} available streaming {availableQualities.length === 1 ? 'source' : 'sources'}
-        </Text>
-        
-        <View style={styles.sourceCountBadge}>
-          <Text style={styles.sourceCountText}>{availableQualities.length} Sources Available</Text>
+      <View style={{ width: '100%', marginTop: 8 }}>
+        <Text style={styles.bodyTitle}>{availableQualities.length} {availableQualities.length>1?'sources':'source'} available</Text>
+        <FlatList
+          data={data}
+          keyExtractor={(item, index) => `${item.label}-${index}`}
+          renderItem={({ item, index }) => (
+            <SourceRow
+              selected={index===0}
+              item={item}
+              onPress={() => handleSourceSelect({ url: item.url, quality: item.label, type, headers: item.headers, isM3U8: item.isM3U8 })}
+            />
+          )}
+          style={{ maxHeight: 360 }}
+        />
+        <View style={styles.footerRow}>
+          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={() => handleTypeSelect(type)}>
+            <Text style={styles.secondaryBtnText}>Refresh</Text>
+          </TouchableOpacity>
         </View>
-        
-        <ScrollView style={styles.qualityList} showsVerticalScrollIndicator={false}>
-          {availableQualities.map((quality, index) => (
-            <ReanimatedTouchableOpacity
-              key={`quality-${index}`}
-              style={[
-                styles.qualityButton,
-                quality.isDefault && styles.defaultQualityButton,
-                quality.isZoroServer && styles.zoroServerButton
-              ]}
-              onPress={() => {
-                // Create source object from selected quality
-                const selectedSource: Source = {
-                  url: quality.url,
-                  quality: quality.quality,
-                  type,
-                  headers: quality.headers,
-                  isM3U8: quality.url.includes('.m3u8')
-                };
-                
-                // Use existing handler with this selection
-                handleSourceSelect(selectedSource);
-              }}
-            >
-              <View style={styles.qualityButtonContent}>
-                <View style={styles.qualityInfo}>
-                  <View>
-                    <Text style={styles.qualityLabel}>{quality.quality}</Text>
-                    <View style={styles.sourceTypeContainer}>
-                      <Text style={styles.sourceTypeText}>
-                        {quality.isZoroServer ? '🔥 HiAnime Server' : quality.url.includes('.m3u8') ? '🎬 HLS Stream' : '📺 Direct Stream'}
-                      </Text>
-                      {quality.isDefault && (
-                        <View style={styles.recommendedBadge}>
-                          <Text style={styles.recommendedText}>Recommended</Text>
-                        </View>
-                      )}
-                      {quality.isZoroServer && !quality.isDefault && (
-                        <View style={styles.serverBadge}>
-                          <Text style={styles.serverText}>HiAnime</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-                <FontAwesome5 name="play-circle" size={20} color="#02A9FF" />
-              </View>
-            </ReanimatedTouchableOpacity>
-          ))}
-        </ScrollView>
-        
-        <View style={styles.selectionFooter}>
-          <Text style={styles.footerHint}>
-            💡 HLS streams typically offer better stability and quality adaptation
-          </Text>
-        </View>
+        <Text style={styles.smallHint}>HLS adapts quality automatically.</Text>
       </View>
     );
   };
@@ -1410,111 +1244,70 @@ export default function EpisodeSourcesModal({
     }
   }, [animeTitle]);
 
+  const hasResults = availableQualities && availableQualities.length > 0;
+
   // Now replace the return statement entirely
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="none"
-      onRequestClose={onClose}
-    >
-      <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-        <BlurView intensity={20} tint="dark" style={styles.blurContainer}>
-          <Animated.View style={[styles.content, { transform: [{ scale: scaleAnim }] }]}>
-            {showQualitySelection ? (
-              // Quality selection UI - PRIORITIZE this over auto-select
-              <QualitySelectionView />
-            ) : (autoSelectSource || skipTypeSelection) && !showQualitySelection ? (
-              // Show simplified UI with prominent loading for auto-select mode ONLY when we don't have server options yet
-              <AutoLoadingMessage episodeNumber={episodeNumberStr} onClose={onClose} />
-            ) : loading ? (
-              // Regular loading UI for manual mode
-              <View style={styles.loadingContainer}>
-                <View style={styles.loadingContent}>
-                  <View style={styles.spinnerContainer}>
-                    <LoadingSpinner />
-                  </View>
-                  <View style={styles.loadingTextContainer}>
-                    <Reanimated.Text style={styles.loadingText}>
-                      {serverProcessingMessage || LoadingMessages[Math.floor(Math.random() * LoadingMessages.length)]}
-                    </Reanimated.Text>
-                    <LoadingProgress />
-                  </View>
-                  <ShimmerPlaceholder
-                    style={styles.shimmer}
-                    shimmerColors={['#02A9FF20', '#02A9FF40', '#02A9FF20']}
-                  />
-                  <ReanimatedTouchableOpacity 
-                    style={styles.cancelButton}
-                    onPress={onClose}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </ReanimatedTouchableOpacity>
-                </View>
-              </View>
-            ) : error ? (
-              // Error state
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-                <ReanimatedTouchableOpacity 
-                  style={styles.retryButton}
-                  onPress={() => handleTypeSelect(type)}
-                >
-                  <Text style={styles.retryButtonText}>Retry</Text>
-                </ReanimatedTouchableOpacity>
-              </View>
-            ) : skipTypeSelection ? (
-              // Skip type selection - this shouldn't normally be reached as we should go to quality selection or auto-select
-              <View style={styles.typeSelection}>
-                <Text style={styles.title}>Loading Sources...</Text>
-                <Text style={styles.subtitle}>Fetching {type.toUpperCase()} version</Text>
-                <LoadingSpinner />
-              </View>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <Animated.View style={[styles.container, { opacity: fadeAnim }]} />
+      </TouchableWithoutFeedback>
+      <BlurView intensity={10} tint="dark" style={styles.blurContainer}>
+        <Animated.View style={[styles.content, { transform: [{ scale: scaleAnim }] }]}> 
+          {/* Header */}
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={onClose} style={styles.headerCloseLeft} accessibilityRole="button" accessibilityLabel="Close">
+              <FontAwesome5 name="times" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.titleText}>Sources for Episode {episodeNumberStr}</Text>
+            <View style={{ width: 32 }} />
+          </View>
+
+          {/* Meta */}
+          <View style={styles.metaRow}> 
+            <MetaChip label={currentProvider === 'animepahe' ? 'AnimePahe' : 'HiAnime'} />
+            {currentProvider === 'animepahe' ? (
+              <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: Sub</Text></View>
             ) : (
-              // Type selection UI (only shown when skipTypeSelection is false)
-              <View style={styles.typeSelection}>
-                <ReanimatedTouchableOpacity 
-                  style={styles.closeButtonTop}
-                  onPress={onClose}
-                >
-                  <FontAwesome5 name="times" size={18} color="#FFFFFF" />
-                </ReanimatedTouchableOpacity>
-                
-                <Text style={styles.title}>Choose Your Experience!</Text>
-                <Text style={styles.subtitle}>Select your preferred version</Text>
-                <View style={styles.buttonContainer}>
-                  <VersionButton
-                    type="sub"
-                    isSelected={type === 'sub'}
-                    onPress={() => handleTypeSelect('sub')}
-                  />
-                  {/* Only show DUB option if the provider supports it */}
-                  {currentProvider !== 'animepahe' && (
-                    <VersionButton
-                      type="dub"
-                      isSelected={type === 'dub'}
-                      onPress={() => handleTypeSelect('dub')}
-                    />
-                  )}
-                </View>
-                {/* Show a note for providers that only support SUB */}
-                {currentProvider === 'animepahe' && (
-                  <Text style={[styles.subtitle, { marginTop: 16, fontSize: 14, opacity: 0.6 }]}>
-                    AnimePahe only provides subtitled content
-                  </Text>
+              <Segmented value={type} onChange={(v) => handleTypeSelect(v)} />
+            )}
+          </View>
+
+          {/* Body */}
+          {hasResults ? (
+            <QualitySelectionView />
+          ) : (autoSelectSource || skipTypeSelection) && !showQualitySelection ? (
+            <AutoLoadingMessage episodeNumber={episodeNumberStr} />
+          ) : loading ? (
+            <View style={styles.loadingSimple}> 
+              <Text style={styles.bodyTitle}>Fetching sources…</Text>
+              <ThinProgressBar />
+            </View>
+          ) : error ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTextPlain}>{error}</Text>
+              <View style={styles.footerRow}>
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => handleTypeSelect(type)}>
+                  <Text style={styles.primaryBtnText}>Retry</Text>
+                </TouchableOpacity>
+                {currentProvider !== 'zoro' && (
+                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => fetchSources(episodeId, type)}>
+                    <Text style={styles.secondaryBtnText}>Try HiAnime</Text>
+                  </TouchableOpacity>
                 )}
               </View>
-            )}
-          </Animated.View>
-        </BlurView>
-      </Animated.View>
-      
-      {/* Also keep the pill for additional subtle feedback */}
+            </View>
+          ) : (
+            // Fallback small loading
+            <View style={styles.loadingSimple}> 
+              <Text style={styles.bodyTitle}>Fetching sources…</Text>
+              <ThinProgressBar />
+            </View>
+          )}
+        </Animated.View>
+      </BlurView>
       {(autoSelectSource || skipTypeSelection) && (
-        <AutoSelectPill 
-          visible={pillVisible} 
-          message={pillMessage} 
-        />
+        <AutoSelectPill visible={pillVisible && !hasResults && (loading || (!error))} message={pillMessage} />
       )}
     </Modal>
   );
@@ -1524,8 +1317,12 @@ const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: COLOR.backdrop,
   },
   blurContainer: {
     flex: 1,
@@ -1533,23 +1330,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    width: width * 0.9,
-    maxWidth: 400,
-    backgroundColor: 'rgba(18, 18, 18, 0.95)',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    width: Math.min(width * 0.92, 420),
+    backgroundColor: '#151515',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'stretch',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  headerCloseLeft: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)' },
+  titleText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  metaChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(2,169,255,0.12)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(2,169,255,0.35)' },
+  metaChipText: { color: '#DFF4FF', fontSize: 12, fontWeight: '700' },
+  metaStatic: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)' },
+  metaStaticText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  segmented: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' },
+  segment: { paddingVertical: 8, paddingHorizontal: 14 },
+  segmentActive: { backgroundColor: 'rgba(2,169,255,0.15)' },
+  segmentText: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' },
+  segmentTextActive: { color: '#fff' },
+  bodyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', marginBottom: 8 },
+  loadingSimple: { paddingVertical: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
+  rowLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  rowTags: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  tag: { color: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, fontSize: 11 },
+  footerRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  primaryBtn: { flex: 1, backgroundColor: COLOR.primary, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  primaryBtnText: { color: '#000', fontWeight: '800' },
+  secondaryBtn: { flex: 1, borderColor: 'rgba(255,255,255,0.2)', borderWidth: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  secondaryBtnText: { color: '#fff', fontWeight: '700' },
+  smallHint: { color: 'rgba(255,255,255,0.7)', marginTop: 8, fontSize: 12 },
+  errorBox: { paddingVertical: 12 },
+  errorTextPlain: { color: COLOR.danger, fontSize: 13, marginBottom: 6 },
   loadingContainer: {
     alignItems: 'center',
     justifyContent: 'center',

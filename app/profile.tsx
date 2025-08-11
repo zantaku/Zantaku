@@ -5,7 +5,7 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supabase } from '../lib/supabase';
+import { supabase, getAnilistUser } from '../lib/supabase';
 import * as SecureStore from 'expo-secure-store';
 import { STORAGE_KEY } from '../constants/auth';
 import { useStreaks } from '../hooks/useStreaks';
@@ -162,9 +162,22 @@ const CleanHeader = ({ userProfile, isVerified, currentStreak, colors }: any) =>
               source={{ uri: userProfile?.avatar?.large || 'https://placekitten.com/200/200' }}
               style={[styles.avatar, { borderColor: colors.border }]}
             />
-            <View style={[styles.levelBadge, { backgroundColor: level.color }]}>
-              <Text style={styles.levelEmoji}>{level.emoji}</Text>
-            </View>
+            {isVerified ? (
+              <View style={styles.verifiedAvatarBadge}>
+                <LinearGradient
+                  colors={["#1DA1F2", "#1A91DA"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.verifiedAvatarInner}
+                >
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                </LinearGradient>
+              </View>
+            ) : (
+              <View style={[styles.levelBadge, { backgroundColor: level.color }]}>
+                <Text style={styles.levelEmoji}>{level.emoji}</Text>
+              </View>
+            )}
           </View>
           
           <View style={styles.userInfo}>
@@ -172,11 +185,6 @@ const CleanHeader = ({ userProfile, isVerified, currentStreak, colors }: any) =>
               <Text style={[styles.username, { color: colors.text }]}>
                 {userProfile?.name || 'Username'}
               </Text>
-              {isVerified && (
-                <View style={styles.verifiedBadgeIcon}>
-                  <Ionicons name="checkmark-circle" size={24} color="#1DA1F2" />
-                </View>
-              )}
             </View>
             
             <View style={styles.tagsRow}>
@@ -434,19 +442,9 @@ const ProfileScreen = () => {
         setIsVerified(false);
         return;
       }
-      
       try {
-        const { data, error } = await supabase
-          .from('anilist_users')
-          .select('is_verified')
-          .eq('anilist_id', targetUserId)
-          .single();
-        
-        if (!error && data) {
-          setIsVerified(data.is_verified || false);
-        } else {
-          setIsVerified(false);
-        }
+        const anilistUser = await getAnilistUser(targetUserId);
+        setIsVerified(Boolean(anilistUser?.is_verified));
       } catch (error) {
         console.error('Error checking verification status:', error);
         setIsVerified(false);
@@ -749,6 +747,25 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     borderWidth: 2, 
     borderColor: '#FFFFFF' 
+  },
+  verifiedAvatarBadge: {
+    position: 'absolute',
+    right: -6,
+    bottom: -6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...tokens.shadows.medium,
+  },
+  verifiedAvatarInner: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   levelEmoji: { fontSize: 12 },
   userInfo: { flex: 1 },
