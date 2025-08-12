@@ -11,6 +11,7 @@ export interface Episode {
   provider?: string;
   isSubbed?: boolean;
   isDubbed?: boolean;
+  isFiller?: boolean;
   providerIds?: { [key: string]: string };
 }
 
@@ -212,6 +213,20 @@ export class ZoroHiAnimeProvider {
       const epUrl = `${ZoroHiAnimeProvider.ANIWATCH_BASE}/anime/${encodeURIComponent(slug)}/episodes`;
       const resp = await ZoroHiAnimeProvider.httpGetJson<any>(epUrl, { 'User-Agent': ZoroHiAnimeProvider.DESKTOP_UA });
       const list: any[] = resp?.data?.episodes || resp?.data?.data?.episodes || resp?.episodes || [];
+      
+      // Debug: Log raw API response for filler detection
+      if (list.length > 0) {
+        console.log(`[ZoroProvider] 🔍 Raw episode data sample:`, {
+          firstEpisode: {
+            number: list[0]?.number,
+            title: list[0]?.title,
+            isFiller: list[0]?.isFiller,
+            filler: list[0]?.filler,
+            is_filler: list[0]?.is_filler,
+            rawKeys: Object.keys(list[0] || {})
+          }
+        });
+      }
       const converted: Episode[] = list
         .map((e: any) => ({
           id: String(e?.episodeId || ''),
@@ -221,6 +236,7 @@ export class ZoroHiAnimeProvider {
           provider: 'zoro',
           isSubbed: true,
           isDubbed: true,
+          isFiller: Boolean(e?.isFiller ?? e?.filler ?? e?.is_filler ?? false),
           providerIds: { zoro: `${slug}` },
         }))
         .filter((x: Episode) => !!x.id && !Number.isNaN(x.number));
@@ -400,19 +416,32 @@ export class ZoroHiAnimeProvider {
       const intro = data?.data?.intro || data?.intro;
       const outro = data?.data?.outro || data?.outro;
 
+      // Debug: log track keys to understand structure variations
+      try {
+        console.log(`[ZoroProvider] 📜 Aniwatch subtitle tracks count: ${apiSubs?.length || 0}`);
+        if (Array.isArray(apiSubs) && apiSubs.length) {
+          const sample = apiSubs[0];
+          console.log(`[ZoroProvider] 🔍 Subtitle sample keys:`, Object.keys(sample || {}));
+        }
+      } catch {}
+
       const sources: Source[] = apiSources.map((s: any) => ({
-        url: s?.url,
-        quality: s?.quality,
-        type: cat,
-        headers: headers,
+        url: s?.url || s?.file,
+        quality: s?.quality || s?.label || 'default',
+        type: cat === 'dub' ? 'dub' : 'sub',
+        headers: headers || {},
         isM3U8: Boolean(s?.isM3U8),
       })).filter((s: Source) => !!s.url);
 
-      const subtitles: Subtitle[] = apiSubs.map((s: any) => ({ url: s?.url, lang: s?.lang || s?.language || '' })).filter((s: Subtitle) => !!s.url);
+      // Map a variety of possible subtitle field names returned by Aniwatch
+      const subtitles: Subtitle[] = (Array.isArray(apiSubs) ? apiSubs : []).map((s: any) => ({
+        url: s?.url || s?.file || s?.src,
+        lang: s?.lang || s?.language || s?.label || s?.srclang || ''
+      })).filter((s: Subtitle) => !!s.url);
 
       if (!sources.length) throw new Error('No playable sources from Aniwatch API');
 
-      console.log(`[ZoroProvider] 🎬 Returning ${sources.length} Aniwatch ${cat} sources`);
+      console.log(`[ZoroProvider] 🎬 Returning ${sources.length} Aniwatch ${cat} sources with ${subtitles.length} subtitle track(s)`);
       return { sources, subtitles, headers, intro, outro };
     } catch (error: any) {
       console.error(`[ZoroProvider] ❌ Error getting watch data:`, error?.message);

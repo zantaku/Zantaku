@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, TouchableWithoutFeedback, FlatList } from 'react-native';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
@@ -124,16 +124,62 @@ interface VideoTimings {
   outro?: { start: number; end: number; };
 }
 
-// Minimal segmented control
-const Segmented = ({ value, onChange, disabled }: { value: 'sub' | 'dub', onChange: (v: 'sub' | 'dub') => void, disabled?: boolean }) => (
-  <View style={[styles.segmented, disabled && { opacity: 0.6 }]}> 
-    {(['sub','dub'] as const).map(opt => (
-      <TouchableOpacity key={opt} onPress={() => !disabled && onChange(opt)} style={[styles.segment, value===opt && styles.segmentActive]} accessibilityRole="button" accessibilityLabel={`Audio: ${opt==='sub'?'Sub':'Dub'}`}>
-        <Text style={[styles.segmentText, value===opt && styles.segmentTextActive]}>{opt==='sub'?'Sub':'Dub'}</Text>
-      </TouchableOpacity>
-    ))}
-  </View>
-);
+// Enhanced segmented control with availability checking
+const Segmented = ({ value, onChange, disabled, episodeId, anilistId, onCheck }: { 
+  value: 'sub' | 'dub', 
+  onChange: (v: 'sub' | 'dub') => void, 
+  disabled?: boolean,
+  episodeId?: string,
+  anilistId?: string,
+  onCheck?: (episodeId: string, anilistId: string) => Promise<{ sub: boolean; dub: boolean }>
+}) => {
+  const [availability, setAvailability] = useState<{ sub: boolean; dub: boolean }>({ sub: true, dub: true });
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+
+  // Check availability when component mounts or episode changes
+  useEffect(() => {
+    if (episodeId && anilistId && !checkingAvailability && onCheck) {
+      setCheckingAvailability(true);
+      onCheck(episodeId, anilistId)
+        .then(setAvailability)
+        .catch(() => setAvailability({ sub: true, dub: true }))
+        .finally(() => setCheckingAvailability(false));
+    }
+  }, [episodeId, anilistId]);
+
+  return (
+    <View style={[styles.segmented, disabled && { opacity: 0.6 }]}> 
+      {(['sub','dub'] as const).map(opt => {
+        const isAvailable = availability[opt];
+        const isDisabled = disabled || !isAvailable;
+        
+        return (
+          <TouchableOpacity 
+            key={opt} 
+            onPress={() => !isDisabled && onChange(opt)} 
+            style={[
+              styles.segment, 
+              value === opt && styles.segmentActive,
+              !isAvailable && styles.segmentUnavailable
+            ]} 
+            accessibilityRole="button" 
+            accessibilityLabel={`Audio: ${opt==='sub'?'Sub':'Dub'}${!isAvailable ? ' (Unavailable)' : ''}`}
+            disabled={isDisabled}
+          >
+            <Text style={[
+              styles.segmentText, 
+              value === opt && styles.segmentTextActive,
+              !isAvailable && styles.segmentTextUnavailable
+            ]}>
+              {opt==='sub'?'Sub':'Dub'}
+              {!isAvailable && ' ✗'}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+};
 
 const MetaChip = ({ label }: { label: string }) => (
   <View style={styles.metaChip}><Text style={styles.metaChipText}>{label}</Text></View>
@@ -209,6 +255,7 @@ export default function EpisodeSourcesModal({
   const [outroEndTime, setOutroEndTime] = useState<number | null>(null);
   const [timings, setTimings] = useState<VideoTimings | null>(null);
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
+  const subtitlesRef = useRef<Subtitle[]>([]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
   const [animeId, setAnimeId] = useState('');
@@ -303,31 +350,19 @@ export default function EpisodeSourcesModal({
 
       logUserSettings();
 
-      // Always fetch sources for the preferred type when modal opens
+      // Always fetch sources on open, but never auto-play
       setLoading(true);
-      // Use source settings to determine initial type and auto-select behavior
-      // Important: honor the caller's preferredType first, then fall back to saved settings
       let initialType = preferredType || sourceSettings.preferredType || 'sub';
-      const shouldAutoSelect = sourceSettings.autoSelectSource;
-      
       // For AnimePahe, force SUB type since it doesn't support DUB
       if (currentProvider === 'animepahe') {
         initialType = 'sub';
       }
-      
       setType(initialType);
-      setPillVisible(shouldAutoSelect);
-      
-      if (shouldAutoSelect) {
-        setPillMessage(`Loading ${initialType} version...`);
-      }
-      
-      // If skipTypeSelection is true, directly fetch sources
-      if (skipTypeSelection || currentProvider === 'animepahe') {
-        fetchSources(episodeId, initialType);
-      } else {
-        fetchSources(episodeId, initialType);
-      }
+      // Never show auto-select pill
+      setPillVisible(false);
+
+      // Fetch sources for the initial type
+      fetchSources(episodeId, initialType);
     } else {
       fadeAnim.setValue(0);
       scaleAnim.setValue(0.95);
@@ -648,7 +683,7 @@ export default function EpisodeSourcesModal({
               console.log(`✅ [ANIMEPAHE] Found ${paheWatchData.sources.length} sources`);
               console.log(`📡 [ANIMEPAHE] Source URLs:`, paheWatchData.sources.map((s: any, i: number) => `${i + 1}: ${s.url?.substring(0, 80)}...`));
               
-              // For AnimePahe, process immediately since it's fast
+              // Format sources (no auto-play)
               console.log(`[ANIMEPAHE] 🔧 Formatting ${paheWatchData.sources.length} sources with AnimePahe headers...`);
               const formattedSources = paheWatchData.sources.map((source: any) => 
                 formatSourceWithHeaders(source, paheWatchData.headers || {}, type, 'animepahe')
@@ -656,6 +691,18 @@ export default function EpisodeSourcesModal({
               
               setSources(formattedSources);
               setSubtitles(paheWatchData.subtitles || []);
+              subtitlesRef.current = (paheWatchData.subtitles || []);
+              if ((paheWatchData.subtitles || []).length) {
+                try {
+                  console.log(`[ANIMEPAHE] 🎞️ Subtitles (${paheWatchData.subtitles.length}):`, (paheWatchData.subtitles || []).map((s: any, i: number) => ({
+                    index: i + 1,
+                    lang: s?.lang || s?.language || '',
+                    url: (s?.url || '').substring(0, 100) + '...'
+                  })));
+                } catch {}
+              } else {
+                console.log('[ANIMEPAHE] ℹ️ No subtitles returned for this episode');
+              }
               const paheTimings = paheWatchData.intro || paheWatchData.outro ? {
                 intro: paheWatchData.intro,
                 outro: paheWatchData.outro
@@ -667,36 +714,15 @@ export default function EpisodeSourcesModal({
               setTimings(finalTimings || null);
               console.log('[SOURCES_MODAL] ⏱️ AnimePahe timings:', paheTimings ? JSON.stringify(paheTimings) : 'none');
               
-              if (shouldAutoSelect && formattedSources.length > 0) {
-                console.log(`📡 [ANIMEPAHE] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
-                handleDirectSourceSelect(
-                  formattedSources[0],
-                  paheWatchData.subtitles || [],
-                  finalTimings,
-                  anilistId,
-                  'animepahe'
-                );
-                return;
-              }
-              
-              // Show quality selection for AnimePahe
+              // Build quality list and always show selector (even if one)
               const qualityOptions = formattedSources.map((source: Source, index: number) => ({
                 quality: source.quality || `Source ${index + 1}`,
                 url: source.url,
-                isDefault: index === 0,
                 headers: source.headers,
+                isDefault: index === 0,
                 isZoroServer: false
               }));
-              
               setAvailableQualities(qualityOptions);
-              // Auto-select if only one source
-              if (qualityOptions.length === 1) {
-                const q = qualityOptions[0];
-                setPillVisible(true);
-                setPillMessage(`Loading ${q.quality} (${q.url.includes('.m3u8') ? 'HLS' : 'MP4'})…`);
-                handleSourceSelect({ url: q.url, quality: q.quality, type, headers: q.headers, isM3U8: q.url.includes('.m3u8') });
-                return;
-              }
               setShowQualitySelection(true);
               setLoading(false);
               return;
@@ -739,6 +765,18 @@ export default function EpisodeSourcesModal({
                 
                 setSources(formattedSources);
                 setSubtitles(zoroWatchData.subtitles || []);
+                subtitlesRef.current = (zoroWatchData.subtitles || []);
+                if ((zoroWatchData.subtitles || []).length) {
+                  try {
+                    console.log(`[ZORO] 🎞️ Subtitles (${zoroWatchData.subtitles.length}):`, (zoroWatchData.subtitles || []).map((s: any, i: number) => ({
+                      index: i + 1,
+                      lang: s?.lang || s?.language || '',
+                      url: (s?.url || '').substring(0, 100) + '...'
+                    })));
+                  } catch {}
+                } else {
+                  console.log('[ZORO] ℹ️ No subtitles returned for this episode');
+                }
                 const zoroTimings = zoroWatchData.intro || zoroWatchData.outro ? {
                   intro: zoroWatchData.intro,
                   outro: zoroWatchData.outro
@@ -750,19 +788,7 @@ export default function EpisodeSourcesModal({
                 setTimings(finalTimings || null);
                 console.log('[SOURCES_MODAL] ⏱️ Zoro timings:', zoroTimings ? JSON.stringify(zoroTimings) : 'none');
                 
-                if (shouldAutoSelect && formattedSources.length > 0) {
-                  console.log(`📡 [ZORO] Auto-selecting first source: ${formattedSources[0].url?.substring(0, 80)}...`);
-                  handleDirectSourceSelect(
-                    formattedSources[0],
-                    zoroWatchData.subtitles || [],
-                    finalTimings,
-                    anilistId,
-                    'zoro'
-                  );
-                  return;
-                }
-                
-                // Show quality selection for Zoro
+                // Build quality list and always show selector (even if single source)
                 const qualityOptions = formattedSources.map((source: Source, index: number) => ({
                   quality: source.quality || `Source ${index + 1}`,
                   url: source.url,
@@ -772,13 +798,7 @@ export default function EpisodeSourcesModal({
                 }));
                 
                 setAvailableQualities(qualityOptions);
-                if (qualityOptions.length === 1) {
-                  const q = qualityOptions[0];
-                  setPillVisible(true);
-                  setPillMessage(`Loading ${q.quality} (${q.url.includes('.m3u8') ? 'HLS' : 'MP4'})…`);
-                  handleSourceSelect({ url: q.url, quality: q.quality, type, headers: q.headers, isM3U8: q.url.includes('.m3u8') });
-                  return;
-                }
+                // Always present selection UI, even if single source
                 setShowQualitySelection(true);
                 setLoading(false);
                 return;
@@ -938,7 +958,11 @@ export default function EpisodeSourcesModal({
   const handleSourceSelect = (source: Source) => {
     // Capture subtitles state here to avoid race conditions
     // This ensures we always use the latest subtitles available
-    const currentSubtitles = [...subtitles];
+    let currentSubtitles = [...subtitles];
+    if (currentSubtitles.length === 0 && subtitlesRef.current.length > 0) {
+      console.log('[SOURCES_MODAL] ℹ️ State subtitles empty; using latest fetched subtitles from ref');
+      currentSubtitles = [...subtitlesRef.current];
+    }
     const currentTimings = timings;
 
     // Log detailed information about the selected source
@@ -949,6 +973,7 @@ export default function EpisodeSourcesModal({
     console.log('[SOURCE SELECT DEBUG] Episode Number (parsed as int):', episodeNumberStr ? parseInt(episodeNumberStr) : undefined);
     console.log('[SOURCE SELECT DEBUG] Anime ID:', animeId || '');
     console.log('[SOURCE SELECT DEBUG] AniList ID:', anilistId || 'Not provided');
+    console.log('[SOURCE SELECT DEBUG] Subtitle count (state/ref):', subtitles.length, '/', subtitlesRef.current.length);
     
     // Generate unique store key for dataKey
     const dataKey = `source_${Date.now().toString()}`;
@@ -990,6 +1015,16 @@ export default function EpisodeSourcesModal({
       timestamp: Date.now()
     })).then(() => {
       console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey);
+      console.log('[SOURCE SELECT DEBUG] Stored subtitles:', (currentSubtitles || []).length);
+      if ((currentSubtitles || []).length) {
+        try {
+          console.log('[SOURCE SELECT DEBUG] Subtitles detail:', (currentSubtitles || []).map((s: any, i: number) => ({
+            index: i + 1,
+            lang: s?.lang || s?.language || '',
+            url: (s?.url || '').substring(0, 100) + '...'
+          })));
+        } catch {}
+      }
     }).catch(err => {
       console.error('[SOURCE SELECT DEBUG] Error storing video data:', err);
     });
@@ -1211,27 +1246,64 @@ export default function EpisodeSourcesModal({
       let subAvailable = false;
       let dubAvailable = false;
       
-      // Check Zoro provider if AniList ID is available
-      if (anilistId) {
-        try {
-          const subCheck = await zoroProvider.checkEpisodeAvailability(anilistId, parseInt(episodeNum));
-          subAvailable = subCheck.sub;
-          dubAvailable = subCheck.dub;
-          console.log(`📊 [ZORO] Availability: SUB=${subAvailable}, DUB=${dubAvailable}`);
-        } catch (error) {
-          console.log(`❌ [ZORO] Availability check failed:`, error);
+      // NEW: Check AniAnime API first for accurate server availability
+      try {
+        console.log(`🔍 [ANIANIME] Checking episode servers via API: ${episodeId}`);
+        const anianimeUrl = `https://anianiwatchwatching.vercel.app/api/v2/hianime/episode/servers?animeEpisodeId=${encodeURIComponent(episodeId)}`;
+        const response = await axios.get(anianimeUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          },
+          timeout: 10000
+        });
+        
+        const serversData = response?.data?.data;
+        if (serversData) {
+          // Schema returns { sub: Server[], dub: Server[], episodeId, episodeNo, raw }
+          const subArr = Array.isArray(serversData.sub) ? serversData.sub : [];
+          const dubArr = Array.isArray(serversData.dub) ? serversData.dub : [];
+          subAvailable = subArr.length > 0;
+          dubAvailable = dubArr.length > 0;
+          console.log(`📊 [ANIANIME] Server availability: SUB=${subAvailable} (${subArr.length}), DUB=${dubAvailable} (${dubArr.length})`);
+          console.log(`📊 [ANIANIME] Sub names:`, subArr.map((s: any) => s?.name || s?.server || 'unknown'));
+          console.log(`📊 [ANIANIME] Dub names:`, dubArr.map((s: any) => s?.name || s?.server || 'unknown'));
+        } else {
+          console.log(`⚠️ [ANIANIME] Unexpected response shape:`, response?.data);
         }
+      } catch (anianimeError: any) {
+        console.log(`❌ [ANIANIME] API check failed:`, {
+          errorMessage: anianimeError?.message,
+          status: anianimeError?.response?.status,
+          data: anianimeError?.response?.data
+        });
       }
       
-      // Check AnimePahe provider if anime title is available
-      if (animeTitle && (!subAvailable || !dubAvailable)) {
-        try {
-          const paheAvailability = await animePaheProvider.checkEpisodeAvailability(animeTitle, parseInt(episodeNum));
-          if (!subAvailable) subAvailable = paheAvailability.sub;
-          if (!dubAvailable) dubAvailable = paheAvailability.dub; // AnimePahe only provides SUB
-          console.log(`📊 [ANIMEPAHE] Availability: SUB=${paheAvailability.sub}, DUB=${paheAvailability.dub}`);
-        } catch (error) {
-          console.log(`❌ [ANIMEPAHE] Availability check failed:`, error);
+      // Fallback to provider checks if AniAnime API didn't work
+      if (!subAvailable && !dubAvailable) {
+        console.log(`🔄 [FALLBACK] AniAnime API failed, trying provider checks...`);
+        
+        // Check Zoro provider if AniList ID is available
+        if (anilistId) {
+          try {
+            const subCheck = await zoroProvider.checkEpisodeAvailability(anilistId, parseInt(episodeNum));
+            if (!subAvailable) subAvailable = subCheck.sub;
+            if (!dubAvailable) dubAvailable = subCheck.dub;
+            console.log(`📊 [ZORO] Fallback availability: SUB=${subAvailable}, DUB=${dubAvailable}`);
+          } catch (error) {
+            console.log(`❌ [ZORO] Fallback availability check failed:`, error);
+          }
+        }
+        
+        // Check AnimePahe provider if anime title is available
+        if (animeTitle && (!subAvailable || !dubAvailable)) {
+          try {
+            const paheAvailability = await animePaheProvider.checkEpisodeAvailability(animeTitle, parseInt(episodeNum));
+            if (!subAvailable) subAvailable = paheAvailability.sub;
+            if (!dubAvailable) dubAvailable = paheAvailability.dub; // AnimePahe only provides SUB
+            console.log(`📊 [ANIMEPAHE] Fallback availability: SUB=${paheAvailability.sub}, DUB=${paheAvailability.dub}`);
+          } catch (error) {
+            console.log(`❌ [ANIMEPAHE] Fallback availability check failed:`, error);
+          }
         }
       }
       
@@ -1269,7 +1341,13 @@ export default function EpisodeSourcesModal({
             {currentProvider === 'animepahe' ? (
               <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: Sub</Text></View>
             ) : (
-              <Segmented value={type} onChange={(v) => handleTypeSelect(v)} />
+              <Segmented 
+                value={type} 
+                onChange={(v) => handleTypeSelect(v)} 
+                episodeId={episodeId}
+                anilistId={anilistId}
+                onCheck={checkAvailability}
+              />
             )}
           </View>
 
@@ -1349,8 +1427,10 @@ const styles = StyleSheet.create({
   segmented: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' },
   segment: { paddingVertical: 8, paddingHorizontal: 14 },
   segmentActive: { backgroundColor: 'rgba(2,169,255,0.15)' },
+  segmentUnavailable: { backgroundColor: 'rgba(255,68,68,0.15)', opacity: 0.5 },
   segmentText: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' },
   segmentTextActive: { color: '#fff' },
+  segmentTextUnavailable: { color: 'rgba(255,255,255,0.5)' },
   bodyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', marginBottom: 8 },
   loadingSimple: { paddingVertical: 12 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },

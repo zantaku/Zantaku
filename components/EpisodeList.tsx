@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions, ScrollView, DeviceEventEmitter } from 'react-native';
 import { Image } from 'expo-image';
+// Removed gradient ribbon for a cleaner watched indicator
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
@@ -275,9 +276,12 @@ const OptimizedGridEpisodeCard = memo<{
         
         {/* Watched Indicator */}
         {isWatched && (
-          <View style={styles.gridWatchedBadge}>
-            <FontAwesome5 name="check" size={10} color="#FFFFFF" />
-          </View>
+          <>
+            <View style={styles.watchedCheckBadgeGrid}>
+              <FontAwesome5 name="check" size={10} color="#FFFFFF" />
+            </View>
+            <View pointerEvents="none" style={styles.watchedOverlay} />
+          </>
         )}
         
         {/* Unavailable Warning */}
@@ -287,12 +291,7 @@ const OptimizedGridEpisodeCard = memo<{
           </View>
         )}
 
-        {/* Filler Badge */}
-        {episode.isFiller && (
-          <View style={styles.gridFillerBadge}>
-            <Text style={styles.gridFillerBadgeText}>Filler</Text>
-          </View>
-        )}
+        {/* Filler Badge - Removed from thumbnail overlay */}
       </View>
 
       {/* Content Section */}
@@ -322,6 +321,12 @@ const OptimizedGridEpisodeCard = memo<{
                 preferredAudioType === 'dub' && styles.gridPreferredPill
               ]}>
                 <Text style={styles.gridPillText}>🎧 DUB</Text>
+              </View>
+            )}
+            {episode.isFiller && (
+              <View style={[styles.gridAudioPill, styles.gridFillerPill]}>
+                <FontAwesome5 name="star" size={8} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Text style={styles.gridPillText}>Filler</Text>
               </View>
             )}
           </View>
@@ -454,9 +459,12 @@ const OptimizedListEpisodeCard = memo<{
         
         {/* Watched Indicator */}
         {isWatched && (
-          <View style={styles.listWatchedBadge}>
-            <FontAwesome5 name="check" size={10} color="#FFFFFF" />
-          </View>
+          <>
+            <View style={styles.watchedCheckBadgeList}>
+              <FontAwesome5 name="check" size={10} color="#FFFFFF" />
+            </View>
+            <View pointerEvents="none" style={styles.watchedOverlay} />
+          </>
         )}
         
         {/* Unavailable Warning */}
@@ -466,12 +474,7 @@ const OptimizedListEpisodeCard = memo<{
           </View>
         )}
 
-        {/* Filler Badge */}
-        {episode.isFiller && (
-          <View style={styles.listFillerBadge}>
-            <Text style={styles.listFillerBadgeText}>Filler</Text>
-          </View>
-        )}
+        {/* Filler Badge - Removed from thumbnail overlay */}
       </View>
 
       {/* Content Section */}
@@ -501,6 +504,12 @@ const OptimizedListEpisodeCard = memo<{
                 preferredAudioType === 'dub' && styles.listPreferredPill
               ]}>
                 <Text style={styles.listPillText}>🎧 DUB</Text>
+              </View>
+            )}
+            {episode.isFiller && (
+              <View style={[styles.listAudioPill, styles.listFillerPill]}>
+                <FontAwesome5 name="star" size={8} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Text style={styles.listPillText}>Filler</Text>
               </View>
             )}
           </View>
@@ -993,6 +1002,20 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             currentProvider,
             preferredAudioType
         });
+        
+        // Debug: Log filler episodes
+        const fillerEpisodes = episodesToProcess.filter(ep => ep.isFiller);
+        if (fillerEpisodes.length > 0) {
+            console.log(`[EPISODE_LIST] 🎭 Found ${fillerEpisodes.length} filler episodes:`, 
+                fillerEpisodes.slice(0, 5).map(ep => ({
+                    number: ep.number,
+                    title: ep.title,
+                    isFiller: ep.isFiller
+                }))
+            );
+        } else {
+            console.log(`[EPISODE_LIST] ℹ️ No filler episodes detected`);
+        }
         
         // Apply audio preference filtering only for Zoro provider
         let filteredEpisodes = episodesToProcess;
@@ -2222,21 +2245,23 @@ const styles = StyleSheet.create({
     },
     gridThumbnailContainer: { width: '100%', aspectRatio: 16 / 9, position: 'relative' },
     gridEpisodeThumbnail: { width: '100%', height: '100%' },
-    gridWatchedBadge: { 
-        position: 'absolute', 
-        top: 8, 
-        right: 8, 
-        backgroundColor: '#02A9FF', 
-        width: 22, 
-        height: 22, 
-        borderRadius: 11, 
-        justifyContent: 'center', 
+    watchedCheckBadgeGrid: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: '#17C964',
+        justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
+        shadowColor: 'rgba(0,0,0,0.15)',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.8,
+        shadowRadius: 2,
+        elevation: 2,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)'
     },
     gridEpisodeNumberBadge: { 
         position: 'absolute', 
@@ -2287,6 +2312,9 @@ const styles = StyleSheet.create({
     },
     gridDubPill: {
         backgroundColor: 'rgba(255, 152, 0, 0.9)',
+    },
+    gridFillerPill: {
+        backgroundColor: 'rgba(255, 107, 53, 0.9)',
     },
     gridPreferredPill: {
         opacity: 1,
@@ -2342,21 +2370,28 @@ const styles = StyleSheet.create({
     listThumbnailContainer: { position: 'relative' },
     listEpisodeThumbnail: { width: 110, height: 75, borderRadius: 8, marginRight: 16 },
     watchedListThumbnail: { opacity: 0.6 },
-    listWatchedBadge: { 
-        position: 'absolute', 
-        top: 6, 
-        right: 20, 
-        backgroundColor: '#02A9FF', 
-        width: 20, 
-        height: 20, 
-        borderRadius: 10, 
-        justifyContent: 'center', 
+    watchedCheckBadgeList: {
+        position: 'absolute',
+        top: 6,
+        right: 16,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: '#17C964',
+        justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
+        shadowColor: 'rgba(0,0,0,0.12)',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.3,
-        shadowRadius: 2,
-        elevation: 3,
+        shadowOpacity: 0.6,
+        shadowRadius: 1.5,
+        elevation: 1,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)'
+    },
+    watchedOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.18)',
+        borderRadius: 8,
     },
     listEpisodeContent: { flex: 1, justifyContent: 'space-between' },
     listEpisodeTitle: { 
@@ -2393,6 +2428,9 @@ const styles = StyleSheet.create({
     },
     listDubPill: {
         backgroundColor: 'rgba(255, 152, 0, 0.9)',
+    },
+    listFillerPill: {
+        backgroundColor: 'rgba(255, 107, 53, 0.9)',
     },
     listPreferredPill: {
         opacity: 1,
@@ -2458,19 +2496,30 @@ const styles = StyleSheet.create({
     },
     gridFillerBadge: {
         position: 'absolute',
-        top: 6,
-        left: 6,
-        backgroundColor: 'rgba(255, 193, 7, 0.95)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
+        top: 8,
+        left: 8,
+        backgroundColor: 'rgba(255, 107, 53, 0.95)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#1c1c1e',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.4,
+        shadowRadius: 4,
+        elevation: 4,
+        zIndex: 10,
+        backdropFilter: 'blur(10px)',
     },
     gridFillerBadgeText: {
-        color: '#1c1c1e',
-        fontSize: 10,
-        fontWeight: '700',
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: '600',
+        letterSpacing: 0.3,
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 1,
     },
     listUnavailableBadge: {
         position: 'absolute',
@@ -2487,19 +2536,30 @@ const styles = StyleSheet.create({
     },
     listFillerBadge: {
         position: 'absolute',
-        top: 4,
+        top: 6,
         left: 16,
-        backgroundColor: 'rgba(255, 193, 7, 0.95)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
+        backgroundColor: 'rgba(255, 107, 53, 0.95)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#1c1c1e',
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.4,
+        shadowRadius: 4,
+        elevation: 4,
+        zIndex: 10,
+        backdropFilter: 'blur(10px)',
     },
     listFillerBadgeText: {
-        color: '#1c1c1e',
-        fontSize: 10,
-        fontWeight: '700',
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: '600',
+        letterSpacing: 0.3,
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 1,
     },
     gridEpisodeAudioType: {
         fontSize: 11,

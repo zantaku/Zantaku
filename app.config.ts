@@ -74,8 +74,7 @@ export default {
           "image": "./assets/images/transparent_Splash.png",
           "resizeMode": "contain"
         }
-      ],
-      "./translucent-default-splash-screen-config"
+      ]
     ],
     "build": {
       "production": {
