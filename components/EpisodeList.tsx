@@ -61,6 +61,8 @@ const useSourceSettings = () => {
     };
 
     loadSettings();
+    const sub = DeviceEventEmitter.addListener('sourceSettingsChanged', loadSettings);
+    return () => sub.remove();
   }, []);
 
   return sourceSettings;
@@ -284,6 +286,13 @@ const OptimizedGridEpisodeCard = memo<{
             <FontAwesome5 name="exclamation-triangle" size={12} color="#FFFFFF" />
           </View>
         )}
+
+        {/* Filler Badge */}
+        {episode.isFiller && (
+          <View style={styles.gridFillerBadge}>
+            <Text style={styles.gridFillerBadgeText}>Filler</Text>
+          </View>
+        )}
       </View>
 
       {/* Content Section */}
@@ -456,6 +465,13 @@ const OptimizedListEpisodeCard = memo<{
             <FontAwesome5 name="exclamation-triangle" size={12} color="#FFFFFF" />
           </View>
         )}
+
+        {/* Filler Badge */}
+        {episode.isFiller && (
+          <View style={styles.listFillerBadge}>
+            <Text style={styles.listFillerBadgeText}>Filler</Text>
+          </View>
+        )}
       </View>
 
       {/* Content Section */}
@@ -566,6 +582,12 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [isNewestFirst, setIsNewestFirst] = useState(false);
     const [columnCount, setColumnCount] = useState(width > 600 ? 2 : 1);
+    const [listUiSettings, setListUiSettings] = useState({
+      showAiredDates: true,
+      showFillerBadges: true,
+      defaultColumnCount: width > 600 ? 2 : 1,
+      newestFirst: false,
+    });
     const [showCorrectAnimeModal, setShowCorrectAnimeModal] = useState(false);
     const [currentAnimeTitle, setCurrentAnimeTitle] = useState(animeTitle);
     const [preferredAudioType, setPreferredAudioType] = useState<'sub' | 'dub'>(sourceSettings.preferredType);
@@ -630,6 +652,34 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             MemoryManager.clearCache();
         };
     }, []);
+
+    // Load EpisodeList UI settings and react to changes
+    useEffect(() => {
+        let isMounted = true;
+        const loadListSettings = async () => {
+            try {
+                const stored = await AsyncStorage.getItem('episodeListSettings');
+                if (stored && isMounted) {
+                    const parsed = JSON.parse(stored);
+                    setListUiSettings(prev => ({ ...prev, ...parsed }));
+                    if (typeof parsed.defaultColumnCount === 'number') {
+                        setColumnCount(parsed.defaultColumnCount);
+                    }
+                    if (typeof parsed.newestFirst === 'boolean') {
+                        setIsNewestFirst(parsed.newestFirst);
+                    }
+                }
+            } catch (e) {
+                console.warn('[EPISODE_LIST] Failed to load episodeListSettings:', e);
+            }
+        };
+        loadListSettings();
+        const sub = DeviceEventEmitter.addListener('episodeListSettingsChanged', loadListSettings);
+        return () => {
+            isMounted = false;
+            sub.remove();
+        };
+    }, [width]);
 
     // NEW: Function to fetch related seasons
     const fetchRelatedSeasonsData = useCallback(async (anilistId: string, animeTitle: string) => {
@@ -2406,6 +2456,22 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#1c1c1e',
     },
+    gridFillerBadge: {
+        position: 'absolute',
+        top: 6,
+        left: 6,
+        backgroundColor: 'rgba(255, 193, 7, 0.95)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#1c1c1e',
+    },
+    gridFillerBadgeText: {
+        color: '#1c1c1e',
+        fontSize: 10,
+        fontWeight: '700',
+    },
     listUnavailableBadge: {
         position: 'absolute',
         top: 4,
@@ -2418,6 +2484,22 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 1,
         borderColor: '#1c1c1e',
+    },
+    listFillerBadge: {
+        position: 'absolute',
+        top: 4,
+        left: 16,
+        backgroundColor: 'rgba(255, 193, 7, 0.95)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#1c1c1e',
+    },
+    listFillerBadgeText: {
+        color: '#1c1c1e',
+        fontSize: 10,
+        fontWeight: '700',
     },
     gridEpisodeAudioType: {
         fontSize: 11,

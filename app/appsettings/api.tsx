@@ -19,6 +19,17 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { TAKIAPI_URL, MAGAAPI_URL, JELLEE_API_URL, API_CONFIG } from '../constants/api';
+// Health checks for in-repo providers
+import { zoroProvider, animePaheProvider } from '../../api/proxy/providers/anime';
+import { MangaFireProvider } from '../../api/proxy/providers/manga/mangafire';
+import { AniListProvider } from '../../api/proxy/providers/news/AniList';
+import { ANNProvider } from '../../api/proxy/providers/news/ANN';
+import { CrunchyrollProvider } from '../../api/proxy/providers/news/Crunchyroll';
+import { NHKProvider } from '../../api/proxy/providers/news/NHK';
+import { MALProvider } from '../../api/proxy/providers/news/MALNews';
+import { SoraNews24Provider } from '../../api/proxy/providers/news/soranews24';
+import { TokyoReporterProvider } from '../../api/proxy/providers/news/ToykoReporter';
+import { resolveAnimeId, getAnimeInfo } from '../../api/kuroji';
 
 const { width } = Dimensions.get('window');
 
@@ -32,6 +43,12 @@ interface APIEndpoint {
   component: string;
   icon: string;
   color: string;
+  // Optional custom functional health check used for in-repo providers
+  customCheck?: () => Promise<{
+    ok: boolean;
+    detail?: string;
+    responseTimeMs?: number;
+  }>;
 }
 
 interface APIStatus {
@@ -46,56 +63,252 @@ interface APIStatus {
 }
 
 const API_ENDPOINTS: APIEndpoint[] = [
-  {
-    name: 'TakiAPI',
-    url: TAKIAPI_URL,
-    category: 'Anime',
-    description: 'Main anime streaming API - Episodes & video sources (animepahe.ts, zorohianime.ts)',
-    healthCheckPath: '/anime/zoro/info?id=steins-gate-3',
-    component: 'EpisodeList.tsx, EpisodeSourcesModal.tsx',
-    icon: 'play-circle',
-    color: '#FF6B6B'
-  },
-  {
-    name: 'MagaAPI',
-    url: MAGAAPI_URL,
-    category: 'Manga',
-    description: 'Manga & novel content API - Chapters & volumes (mangafire.ts)',
-    healthCheckPath: '/api/search/naruto',
-    component: 'chapterlist.tsx, ChapterSourcesModal.tsx, NovelVolumeList.tsx',
-    icon: 'book-open',
-    color: '#4ECDC4'
-  },
-  {
-    name: 'JelleeAPI',
-    url: JELLEE_API_URL,
-    category: 'Core',
-    description: 'New unified API endpoint - Multi-purpose content',
-    healthCheckPath: '',
-    component: 'Multiple components',
-    icon: 'server',
-    color: '#45B7D1'
-  },
+  // Core external services
   {
     name: 'AniList GraphQL',
     url: 'https://graphql.anilist.co',
     category: 'Core',
-    description: 'User profiles, authentication, anime/manga metadata',
+    description: 'GraphQL API for profiles and rich anime/manga metadata',
     healthCheckPath: '',
     expectedResponse: 'errors',
-    component: 'All authentication components',
+    component: 'Authentication, Explore, Metadata',
     icon: 'user-circle',
     color: '#9B59B6'
+  },
+  // Novel provider: Jellee API
+  {
+    name: 'Jellee API (Novels)',
+    url: JELLEE_API_URL,
+    category: 'Novel',
+    description: 'Light novel search and data via Jellee API',
+    component: 'Novel screens, readers',
+    icon: 'book',
+    color: '#1ABC9C',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const checkUrl = `${JELLEE_API_URL}/novel/jellee/search?query=${encodeURIComponent('overlord')}`;
+        const res = await axios.get(checkUrl, { timeout: API_CONFIG.TIMEOUT || 10000 });
+        const data = res?.data;
+        let count = 0;
+        if (Array.isArray(data)) count = data.length;
+        else if (Array.isArray(data?.data)) count = data.data.length;
+        else if (Array.isArray(data?.results)) count = data.results.length;
+        if (count <= 0) throw new Error('No results');
+        return { ok: true, detail: `${count} results`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };
+      }
+    }
   },
   {
     name: 'Jikan (MyAnimeList)',
     url: 'https://api.jikan.moe/v4',
     category: 'Core',
-    description: 'Anime metadata, rankings, episode information',
+    description: 'REST API for anime metadata, rankings, schedules',
     healthCheckPath: '/top/anime?limit=1',
-    component: 'EpisodeList.tsx, anime details',
+    component: 'Explore, Details',
     icon: 'chart-line',
     color: '#F39C12'
+  },
+  // Internal app providers (function checks)
+  {
+    name: 'Kuroji Resolver',
+    url: 'internal:kuroji',
+    category: 'Anime',
+    description: 'Kuroji base and resolver (resolve/search/info)',
+    component: 'Playback pipeline',
+    icon: 'link',
+    color: '#45B7D1',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const id = await resolveAnimeId({ title: 'Naruto' });
+        if (!id) throw new Error('resolveAnimeId returned null');
+        const info = await getAnimeInfo(id);
+        if (!info) throw new Error('getAnimeInfo returned null');
+        return { ok: true, detail: `Resolved id ${id}`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Unknown error', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'Zoro/HiAnime Provider',
+    url: 'internal:zoro',
+    category: 'Anime',
+    description: 'Episode sourcing via Zoro/HiAnime provider',
+    component: 'EpisodeList.tsx, Playback',
+    icon: 'play-circle',
+    color: '#FF6B6B',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const results = await zoroProvider.searchAnime('Naruto');
+        if (!Array.isArray(results) || results.length === 0) throw new Error('Empty search results');
+        return { ok: true, detail: `${results.length} results`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'AnimePahe Provider',
+    url: 'internal:animepahe',
+    category: 'Anime',
+    description: 'Episode sourcing via AnimePahe provider',
+    component: 'EpisodeList.tsx, Playback',
+    icon: 'video',
+    color: '#E67E22',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const results = await animePaheProvider.searchAnime('Naruto');
+        if (!Array.isArray(results) || results.length === 0) throw new Error('Empty search results');
+        return { ok: true, detail: `${results.length} results`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'MangaFire Provider',
+    url: 'internal:mangafire',
+    category: 'Manga',
+    description: 'Manga search and chapters via MangaFire provider',
+    component: 'chapterlist.tsx',
+    icon: 'book-open',
+    color: '#4ECDC4',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const provider = new MangaFireProvider();
+        const results = await provider.search('One Piece', 1);
+        if (!Array.isArray(results) || results.length === 0) throw new Error('Empty search results');
+        // Probe chapters for the first result lightly
+        try {
+          await provider.getChapters(results[0].id, { limit: 1 });
+        } catch { /* ignore chapter fetch errors for health */ }
+        return { ok: true, detail: `${results.length} results`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  // News providers
+  {
+    name: 'News: AniList',
+    url: 'internal:news-anilist',
+    category: 'Core',
+    description: 'AniList-based news/activity feed',
+    component: 'News screens',
+    icon: 'newspaper',
+    color: '#1ABC9C',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await AniListProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'News: ANN',
+    url: 'https://www.animenewsnetwork.com/all/rss.xml?ann-edition=w',
+    category: 'Core',
+    description: 'Anime News Network RSS',
+    component: 'News screens',
+    icon: 'rss',
+    color: '#F39C12',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await ANNProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'News: Crunchyroll',
+    url: 'https://www.crunchyroll.com/news/rss',
+    category: 'Core',
+    description: 'Crunchyroll RSS feed',
+    component: 'News screens',
+    icon: 'rss',
+    color: '#E67E22',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await CrunchyrollProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'News: MAL',
+    url: 'https://myanimelist.net/news',
+    category: 'Core',
+    description: 'MAL news fetch',
+    component: 'News screens',
+    icon: 'rss',
+    color: '#2C3E50',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await MALProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'News: NHK',
+    url: 'https://www3.nhk.or.jp/nhkworld/en/news/',
+    category: 'Core',
+    description: 'NHK World RSS',
+    component: 'News screens',
+    icon: 'rss',
+    color: '#2980B9',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await NHKProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
+  },
+  {
+    name: 'News: Tokyo Reporter',
+    url: 'https://www.tokyoreporter.com/',
+    category: 'Core',
+    description: 'Tokyo Reporter RSS',
+    component: 'News screens',
+    icon: 'rss',
+    color: '#8E44AD',
+    customCheck: async () => {
+      const started = Date.now();
+      try {
+        const items = await TokyoReporterProvider.fetchNews(3);
+        if (!Array.isArray(items) || items.length === 0) throw new Error('No items');
+        return { ok: true, detail: `${items.length} items`, responseTimeMs: Date.now() - started };
+      } catch (e: any) {
+        return { ok: false, detail: e?.message || 'Fetch failed', responseTimeMs: Date.now() - started };
+      }
+    }
   }
 ];
 
@@ -106,7 +319,7 @@ export default function APIStatusPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const autoRefreshInterval = useRef<NodeJS.Timeout | null>(null);
@@ -145,14 +358,14 @@ export default function APIStatusPage() {
     checkAllAPIs();
   }, []);
 
-  // Improved auto-refresh with proper cleanup
+  // Improved auto-refresh with proper cleanup (default every hour)
   useEffect(() => {
     if (autoRefresh) {
-      console.log('[API Status] 🔄 Auto-refresh ENABLED - will check APIs every 30 seconds');
+      console.log('[API Status] 🔄 Auto-refresh ENABLED - will check APIs every 60 minutes');
       autoRefreshInterval.current = setInterval(() => {
         console.log('[API Status] ⏰ Auto-refresh triggered - checking all APIs...');
         checkAllAPIs();
-      }, 30000);
+      }, 60 * 60 * 1000);
     } else {
       console.log('[API Status] ⏸️ Auto-refresh DISABLED - stopping interval');
       if (autoRefreshInterval.current) {
@@ -174,6 +387,23 @@ export default function APIStatusPage() {
     console.log(`[API Status] 🔍 Testing ${endpoint.name} (${endpoint.category}) - ${endpoint.url}`);
     
     try {
+      // If a custom functional check is defined, run it
+      if (endpoint.customCheck) {
+        const res = await endpoint.customCheck();
+        const responseTime = res.responseTimeMs ?? Date.now() - startTime;
+        const ok = res.ok === true;
+        const status: 'online' | 'offline' | 'slow' = ok ? (responseTime > 2000 ? 'slow' : 'online') : 'offline';
+        await updateHistory(endpoint.name, ok, responseTime, ok ? 200 : 0, res.detail);
+        return {
+          status,
+          responseTime,
+          lastChecked: Date.now(),
+          successRate: await computeSuccessRate(endpoint.name),
+          uptime: await computeSuccessRate(endpoint.name),
+          ...(ok ? {} : { error: res.detail, lastError: res.detail })
+        };
+      }
+
       let checkUrl = endpoint.url;
       if (endpoint.healthCheckPath) {
         checkUrl += endpoint.healthCheckPath;
@@ -211,25 +441,9 @@ export default function APIStatusPage() {
       console.log(`[API Status] ✅ ${endpoint.name} responded in ${responseTime}ms (Status: ${response.status})`);
       
       // Enhanced history tracking
-      const historyKey = `api_history_${endpoint.name.replace(/\s+/g, '_')}`;
-      const history = await AsyncStorage.getItem(historyKey);
-      const checks = history ? JSON.parse(history) : [];
-      
-      const newCheck = {
-        timestamp: Date.now(),
-        success: true,
-        responseTime,
-        status: response.status
-      };
-      
-      checks.push(newCheck);
-      const recentChecks = checks.slice(-20); // Keep more history
-      await AsyncStorage.setItem(historyKey, JSON.stringify(recentChecks));
-      
-      // Calculate metrics
-      const successCount = recentChecks.filter((check: any) => check.success).length;
-      const successRate = (successCount / recentChecks.length) * 100;
-      const uptime = recentChecks.length > 0 ? successRate : 100;
+      await updateHistory(endpoint.name, true, responseTime, response.status);
+      const successRate = await computeSuccessRate(endpoint.name);
+      const uptime = successRate;
 
       let status: 'online' | 'offline' | 'slow' = 'online';
       if (responseTime > 5000) {
@@ -252,24 +466,8 @@ export default function APIStatusPage() {
       console.log(`[API Status] ❌ ${endpoint.name} FAILED after ${responseTime}ms - Error: ${error.message}`);
       
       // Log failed check with more detail
-      const historyKey = `api_history_${endpoint.name.replace(/\s+/g, '_')}`;
-      const history = await AsyncStorage.getItem(historyKey);
-      const checks = history ? JSON.parse(history) : [];
-      
-      const errorCheck = {
-        timestamp: Date.now(),
-        success: false,
-        responseTime,
-        error: error.message,
-        code: error.code
-      };
-      
-      checks.push(errorCheck);
-      const recentChecks = checks.slice(-20);
-      await AsyncStorage.setItem(historyKey, JSON.stringify(recentChecks));
-      
-      const successCount = recentChecks.filter((check: any) => check.success).length;
-      const successRate = (successCount / recentChecks.length) * 100;
+      await updateHistory(endpoint.name, false, responseTime, 0, error.message, error.code);
+      const successRate = await computeSuccessRate(endpoint.name);
       const uptime = successRate;
 
       console.log(`[API Status] 📊 ${endpoint.name} marked as OFFLINE (Success Rate: ${successRate.toFixed(1)}%, Uptime: ${uptime.toFixed(1)}%)`);
@@ -284,6 +482,39 @@ export default function APIStatusPage() {
         uptime
       };
     }
+  };
+
+  // Helpers for history tracking reused by both HTTP and custom checks
+  const getHistoryKey = (name: string) => `api_history_${name.replace(/\s+/g, '_')}`;
+  const updateHistory = async (
+    name: string,
+    success: boolean,
+    responseTime: number,
+    status: number,
+    detail?: string,
+    code?: string
+  ) => {
+    const historyKey = getHistoryKey(name);
+    const history = await AsyncStorage.getItem(historyKey);
+    const checks = history ? JSON.parse(history) : [];
+    checks.push({
+      timestamp: Date.now(),
+      success,
+      responseTime,
+      status,
+      detail,
+      code
+    });
+    const recentChecks = checks.slice(-20);
+    await AsyncStorage.setItem(historyKey, JSON.stringify(recentChecks));
+  };
+  const computeSuccessRate = async (name: string) => {
+    const historyKey = getHistoryKey(name);
+    const history = await AsyncStorage.getItem(historyKey);
+    const checks = history ? JSON.parse(history) : [];
+    if (checks.length === 0) return 100;
+    const successCount = checks.filter((c: any) => c.success).length;
+    return (successCount / checks.length) * 100;
   };
 
   const checkAllAPIs = useCallback(async () => {
@@ -405,6 +636,8 @@ export default function APIStatusPage() {
 
   const handleAPIDetails = (apiStatus: APIStatus) => {
     const statusInfo = getStatusInfo(apiStatus.status);
+    const redactText = (text?: string) =>
+      (text || '').replace(/https?:\/\/[\w.-]+(?::\d+)?[^\s]*/gi, '[redacted]');
     
     Alert.alert(
       `${apiStatus.endpoint.icon} ${apiStatus.endpoint.name}`,
@@ -414,9 +647,8 @@ export default function APIStatusPage() {
       `📈 Success Rate: ${apiStatus.successRate.toFixed(1)}%\n` +
       `⏰ Uptime: ${apiStatus.uptime.toFixed(1)}%\n` +
       `🔄 Last Check: ${formatLastChecked(apiStatus.lastChecked)}\n` +
-      `🔗 Endpoint: ${apiStatus.endpoint.url}\n` +
       `🛠️ Used in: ${apiStatus.endpoint.component}` +
-      (apiStatus.error ? `\n\n❌ Error: ${apiStatus.error}` : ''),
+      (apiStatus.error ? `\n\n❌ Error: ${redactText(apiStatus.error)}` : ''),
       [
         {
           text: '🔄 Test Again',
@@ -443,6 +675,8 @@ export default function APIStatusPage() {
   const StatusCard = ({ apiStatus, index }: { apiStatus: APIStatus; index: number }) => {
     const statusInfo = getStatusInfo(apiStatus.status);
     const cardAnim = useRef(new Animated.Value(0)).current;
+    const redactText = (text?: string) =>
+      (text || '').replace(/https?:\/\/[\w.-]+(?::\d+)?[^\s]*/gi, '[redacted]');
 
     useEffect(() => {
       Animated.timing(cardAnim, {
@@ -494,7 +728,7 @@ export default function APIStatusPage() {
               </Text>
             </View>
 
-            <View style={[styles.statusIndicator, { backgroundColor: statusInfo.color }]}>
+            <View style={[styles.statusIndicator, { backgroundColor: statusInfo.color }]}> 
               {apiStatus.status === 'checking' ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
@@ -503,8 +737,8 @@ export default function APIStatusPage() {
             </View>
           </View>
 
-          {/* Description */}
-          <Text style={[styles.apiDescription, { color: currentTheme.colors.textSecondary }]}>
+          {/* Description (no raw URLs shown) */}
+          <Text style={[styles.apiDescription, { color: currentTheme.colors.textSecondary }]}> 
             {apiStatus.endpoint.description}
           </Text>
 
@@ -561,7 +795,7 @@ export default function APIStatusPage() {
             <View style={styles.errorBanner}>
               <FontAwesome5 name="exclamation-triangle" size={12} color="#FF5252" />
               <Text style={styles.errorText} numberOfLines={2}>
-                {apiStatus.error}
+                {redactText(apiStatus.error)}
               </Text>
             </View>
           )}

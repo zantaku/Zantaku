@@ -67,14 +67,6 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
       requiresAuth: true,
     },
     {
-      id: 'notifications',
-      icon: 'bell',
-      title: 'Notifications',
-      description: 'Customise your news and updates',
-      iconBgColor: '#EF5350',
-      requiresAuth: true,
-    },
-    {
       id: 'theme',
       icon: 'palette',
       title: 'Theme',
@@ -128,7 +120,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
       title: 'News Feed',
       description: 'Customize your news sources and preferences',
       iconBgColor: '#FF6B35',
-      requiresAuth: false,
+      requiresAuth: true,
     },
     {
       id: 'apistatus',
@@ -249,10 +241,10 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
           >
             <Logo width={120} height={40} variant="auto" />
             <Text style={[styles.versionText, { color: currentTheme.colors.textSecondary }]}>
-              Public Beta V1.5
+              Public Beta V1.5.5
             </Text>
             <Text style={[styles.tapHintText, { color: currentTheme.colors.textSecondary }]}>
-              Tap to visit website
+            Visit website
             </Text>
           </TouchableOpacity>
           

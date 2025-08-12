@@ -1,22 +1,17 @@
-import { StyleSheet, View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, ImageBackground, Dimensions, Animated, Platform, RefreshControl, DeviceEventEmitter } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, RefreshControl, DeviceEventEmitter } from 'react-native';
 import { isTVEnvironment, getTVScreenDimensions } from '../../utils/tvDetection';
 import { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useAuth } from '../../hooks/useAuth';
 import { useRouter } from 'expo-router';
 import { ANILIST_GRAPHQL_ENDPOINT, STORAGE_KEY } from '../../constants/auth';
 import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../hooks/useTheme';
 import NewsSection from '../../components/NewsSection';
-import { XMLParser } from 'fast-xml-parser';
-import { format } from 'date-fns';
 import WelcomeSection from '../../components/WelcomeSection';
 import GlobalSearch from '../../components/GlobalSearch';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define welcome section storage key (should be the same as in homesections.tsx)
 const WELCOME_SECTION_STORAGE_KEY = "welcome_section";
@@ -27,10 +22,7 @@ enum WelcomeSectionType {
   ACHIEVEMENT = 'achievement'
 }
 
-// Default welcome section preferences
-const DEFAULT_WELCOME_PREFERENCES = {
-  type: WelcomeSectionType.BASIC
-};
+
 
 interface MediaItem {
   id: number;
@@ -156,13 +148,15 @@ const MediaSection = memo(({ title, subtitle, icon, iconColors, items, onPress, 
   );
 });
 
+MediaSection.displayName = 'MediaSection';
+
 // Memoized media card component
 const MediaCard = memo(({ item, onPress, type }: { 
   item: MediaItem; 
   onPress: () => void; 
   type: 'anime' | 'manga';
 }) => {
-  const { isDarkMode, currentTheme } = useTheme();
+  const { currentTheme } = useTheme();
 
   const formatScore = (score: number | undefined, format: string | undefined) => {
     if (score === undefined || score === null) return '';
@@ -194,11 +188,7 @@ const MediaCard = memo(({ item, onPress, type }: {
           source={{ uri: item.coverImage.large }}
           style={styles.mediaCover}
         />
-        {item.status === 'PAUSED' && (
-          <View style={styles.pausedIndicator}>
-            <FontAwesome5 name="pause" size={12} color="#fff" />
-          </View>
-        )}
+
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.9)']}
           style={styles.mediaCoverOverlay}
@@ -214,14 +204,7 @@ const MediaCard = memo(({ item, onPress, type }: {
         <Text style={[styles.mediaTitle, { color: currentTheme.colors.text }]} numberOfLines={2}>
           {item.title.userPreferred}
         </Text>
-        {item.status === 'PAUSED' && (
-          <View style={styles.pausedStatusContainer}>
-            <FontAwesome5 name="pause-circle" size={10} color="#F39C12" />
-            <Text style={[styles.pausedStatusText, { color: '#F39C12' }]}>
-              Paused
-            </Text>
-          </View>
-        )}
+
         {item.score !== undefined && item.score > 0 && (
           <View style={styles.scoreContainer}>
             <FontAwesome5 name="star" size={10} color="#FFD700" solid />
@@ -234,6 +217,8 @@ const MediaCard = memo(({ item, onPress, type }: {
     </TouchableOpacity>
   );
 });
+
+MediaCard.displayName = 'MediaCard';
 
 const EmptyLibraryPrompt = memo(() => {
   const { currentTheme } = useTheme();
@@ -270,9 +255,11 @@ const EmptyLibraryPrompt = memo(() => {
   );
 });
 
+EmptyLibraryPrompt.displayName = 'EmptyLibraryPrompt';
+
 const GuestView = () => {
   const { currentTheme } = useTheme();
-  const { signIn, user } = useAuth();
+  const { user } = useAuth();
   const [showSearch, setShowSearch] = useState(false);
   const router = useRouter();
 
@@ -389,13 +376,13 @@ const GuestView = () => {
   );
 };
 
+GuestView.displayName = 'GuestView';
+
 export default function TabsIndex() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const { isDarkMode, currentTheme } = useTheme();
+  const { currentTheme } = useTheme();
   const isTV = isTVEnvironment();
-  const searchModalRef = useRef(null);
-  const welcomeModalRef = useRef(null);
 
   // Debug TV dimensions
   useEffect(() => {
@@ -413,7 +400,6 @@ export default function TabsIndex() {
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [mediaList, setMediaList] = useState<MediaListResponse>({
     watching: [],
     reading: [],
@@ -447,17 +433,7 @@ export default function TabsIndex() {
     loadWelcomeSectionPreference();
   }, []);
 
-  // Add event listener for refreshing media lists when List Editor saves data
-  useEffect(() => {
-    const refreshMediaListsListener = DeviceEventEmitter.addListener('refreshMediaLists', () => {
-      console.log('[Home] Received refreshMediaLists event, refreshing data...');
-      fetchMediaLists();
-    });
 
-    return () => {
-      refreshMediaListsListener.remove();
-    };
-  }, []);
 
   useEffect(() => {
     const handleAuthState = async () => {
@@ -499,7 +475,7 @@ export default function TabsIndex() {
         {
           id: 'watching',
           title: 'Continue Watching',
-          subtitle: 'Currently watching & paused anime',
+          subtitle: 'Currently watching anime',
           icon: 'play-circle',
           visible: true,
           order: 0,
@@ -586,7 +562,7 @@ export default function TabsIndex() {
         {
           id: 'watching',
           title: 'Continue Watching',
-          subtitle: 'Currently watching & paused anime',
+          subtitle: 'Currently watching anime',
           icon: 'play-circle',
           visible: true,
           order: 0,
@@ -594,7 +570,7 @@ export default function TabsIndex() {
         {
           id: 'reading',
           title: 'Continue Reading',
-          subtitle: 'Currently reading & paused manga',
+          subtitle: 'Currently reading manga',
           icon: 'book-reader',
           visible: true,
           order: 1,
@@ -623,7 +599,7 @@ export default function TabsIndex() {
           {
                           query: `
               query ($userId: Int) {
-                MediaListCollection(userId: $userId, type: ANIME, status_in: [CURRENT, PAUSED]) {
+                MediaListCollection(userId: $userId, type: ANIME, status: CURRENT) {
                   lists {
                     status
                     entries {
@@ -1034,7 +1010,7 @@ export default function TabsIndex() {
     {
       id: 'watching',
       title: 'Continue Watching',
-      subtitle: 'Continue your journey & paused anime',
+      subtitle: 'Continue your journey with currently watching anime',
       icon: 'play-circle',
       iconColors: ['#FF6B6B', '#ee5253'],
       items: mediaList.watching,
@@ -1043,7 +1019,7 @@ export default function TabsIndex() {
     {
       id: 'reading',
       title: 'Continue Reading',
-      subtitle: 'Pick up where you left off & paused manga',
+      subtitle: 'Pick up where you left off with currently reading manga',
       icon: 'book-reader',
       iconColors: ['#4ECDC4', '#45B7AF'],
       items: mediaList.reading,
@@ -1153,7 +1129,19 @@ export default function TabsIndex() {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [fetchMediaLists, fetchNews, fetchTrendingMedia]);
+
+  // Add event listener for refreshing media lists when List Editor saves data
+  useEffect(() => {
+    const refreshMediaListsListener = DeviceEventEmitter.addListener('refreshMediaLists', () => {
+      console.log('[Home] Received refreshMediaLists event, refreshing data...');
+      fetchMediaLists();
+    });
+
+    return () => {
+      refreshMediaListsListener.remove();
+    };
+  }, [fetchMediaLists]);
 
   const isLibraryEmpty = useMemo(() => {
     return (

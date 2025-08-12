@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, BackHandler, DeviceEventEmitter } from 'react-native';
 import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -79,6 +79,16 @@ export default function AnimeSettingsPage() {
         if (sourceData) {
           setSourceSettings(JSON.parse(sourceData));
         }
+
+        // Load player integration settings
+        const playerData = await AsyncStorage.getItem('playerSettings');
+        if (playerData) {
+          const parsed = JSON.parse(playerData);
+          setPlayerSettings(prev => ({
+            ...prev,
+            ...parsed,
+          }));
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
       }
@@ -92,6 +102,7 @@ export default function AnimeSettingsPage() {
     try {
       await AsyncStorage.setItem('episodeListSettings', JSON.stringify(newSettings));
       setEpisodeListSettings(newSettings);
+      DeviceEventEmitter.emit('episodeListSettingsChanged');
     } catch (error) {
       console.error('Failed to save episode list settings:', error);
     }
@@ -102,15 +113,41 @@ export default function AnimeSettingsPage() {
     try {
       await AsyncStorage.setItem('sourceSettings', JSON.stringify(newSettings));
       setSourceSettings(newSettings);
+      DeviceEventEmitter.emit('sourceSettingsChanged');
     } catch (error) {
       console.error('Failed to save source settings:', error);
     }
   };
 
+  // Removed preset helper: we keep independent controls to support future providers
+
   // Save player preferences
-  const savePlayerPreferences = (newPreferences: any) => {
+  const savePlayerPreferences = async (newPreferences: any) => {
     setPreferences(newPreferences as typeof preferences);
+    try {
+      await AsyncStorage.setItem('playerPreferences', JSON.stringify(newPreferences));
+      DeviceEventEmitter.emit('playerPreferencesChanged');
+    } catch (e) {
+      console.warn('Failed to persist player preferences:', e);
+    }
   };
+
+  // Player integration settings (reflect in Player component)
+  const [playerSettings, setPlayerSettings] = useState({
+    pipEnabled: true,
+    forceLandscape: true,
+    saveToAniList: true,
+  });
+
+  const savePlayerSettings = useCallback(async (newSettings: typeof playerSettings) => {
+    try {
+      await AsyncStorage.setItem('playerSettings', JSON.stringify(newSettings));
+      setPlayerSettings(newSettings);
+      DeviceEventEmitter.emit('playerSettingsChanged');
+    } catch (error) {
+      console.error('Failed to save player settings:', error);
+    }
+  }, []);
 
   // Handle back navigation
   const handleBack = () => {
@@ -137,6 +174,52 @@ export default function AnimeSettingsPage() {
         <View style={styles.sectionHeader}>
           <FontAwesome5 name="play-circle" size={20} color="#2196F3" />
           <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Video Player</Text>
+        </View>
+
+        {/* Player integration settings */}
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Enable Picture-in-Picture</Text>
+            <Switch
+              value={playerSettings.pipEnabled}
+              onValueChange={(value) => {
+                savePlayerSettings({ ...playerSettings, pipEnabled: value });
+              }}
+              trackColor={{ false: '#767577', true: '#2196F3' }}
+              thumbColor={playerSettings.pipEnabled ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+          <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>Show PiP when supported by device</Text>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Force Landscape Orientation</Text>
+            <Switch
+              value={playerSettings.forceLandscape}
+              onValueChange={(value) => {
+                savePlayerSettings({ ...playerSettings, forceLandscape: value });
+              }}
+              trackColor={{ false: '#767577', true: '#2196F3' }}
+              thumbColor={playerSettings.forceLandscape ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+          <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>Rotate and lock player to landscape when opening</Text>
+        </View>
+
+        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Save Progress to AniList</Text>
+            <Switch
+              value={playerSettings.saveToAniList}
+              onValueChange={(value) => {
+                savePlayerSettings({ ...playerSettings, saveToAniList: value });
+              }}
+              trackColor={{ false: '#767577', true: '#2196F3' }}
+              thumbColor={playerSettings.saveToAniList ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+          <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>Update your AniList watch progress while watching</Text>
         </View>
 
         <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
@@ -499,7 +582,7 @@ export default function AnimeSettingsPage() {
                   sourceSettings.autoSelectSource && styles.providerOptionDisabled
                 ]}
                 onPress={() => {
-                  if (!sourceSettings.autoSelectSource) {
+                    if (!sourceSettings.autoSelectSource) {
                     saveSourceSettings({
                       ...sourceSettings,
                       defaultProvider: provider.id as 'animepahe' | 'zoro'
@@ -512,7 +595,7 @@ export default function AnimeSettingsPage() {
                   { 
                     color: sourceSettings.defaultProvider === provider.id 
                       ? '#fff' 
-                      : sourceSettings.autoSelectSource
+                      : (sourceSettings.autoSelectSource)
                       ? '#666'
                       : currentTheme.colors.text 
                   }
@@ -588,6 +671,12 @@ export default function AnimeSettingsPage() {
               defaultProvider: 'animepahe',
               autoSelectSource: true,
               providerPriority: ['animepahe', 'zoro'],
+            });
+
+            savePlayerSettings({
+              pipEnabled: true,
+              forceLandscape: true,
+              saveToAniList: true,
             });
             
             alert('All settings reset to default');

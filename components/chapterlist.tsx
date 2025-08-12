@@ -368,11 +368,17 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         const findBestMatch = (results: any[], searchTitle: string): any => {
             if (results.length === 0) return null;
             
+            // Since MangaFire now returns results sorted by relevance, the first result is usually the best match
+            // But let's still do some validation to ensure we're getting the right manga
+            
             // First, try to find an exact match (case insensitive)
             const exactMatch = results.find(r => 
                 r.title.toLowerCase() === searchTitle.toLowerCase()
             );
-            if (exactMatch) return exactMatch;
+            if (exactMatch) {
+                logDebug(`Found exact match: "${exactMatch.title}" for search "${searchTitle}"`);
+                return exactMatch;
+            }
             
             // Special case: Look for "golshi" or "gol-shi" in the title
             // This is a unique identifier for "Uma Musume Pretty Derby PisuPisu☆SupiSupi Golshi-chan"
@@ -396,9 +402,33 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 return correctIdMatch;
             }
             
+            // For Japanese titles, check if the first result contains key Japanese words
+            const japaneseKeywords = ['地雷', '地原', 'なんですか', 'jirai', 'chihara'];
+            const hasJapaneseKeywords = japaneseKeywords.some(keyword => 
+                searchTitle.toLowerCase().includes(keyword.toLowerCase())
+            );
+            
+            if (hasJapaneseKeywords) {
+                // Look for results that contain Japanese keywords or their English equivalents
+                const japaneseMatch = results.find(r => {
+                    const title = r.title.toLowerCase();
+                    return japaneseKeywords.some(keyword => 
+                        title.includes(keyword.toLowerCase()) ||
+                        (keyword === '地雷' && title.includes('landmine')) ||
+                        (keyword === '地原' && title.includes('chihara')) ||
+                        (keyword === 'なんですか' && title.includes('desu ka'))
+                    );
+                });
+                
+                if (japaneseMatch) {
+                    logDebug(`Found Japanese keyword match: "${japaneseMatch.title}" for search "${searchTitle}"`);
+                    return japaneseMatch;
+                }
+            }
+            
             // If no exact match, try to find the best partial match
             const searchWords = searchTitle.toLowerCase().split(/\s+/).filter(word => word.length > 2);
-            let bestMatch = results[0];
+            let bestMatch = results[0]; // Start with the first result (already sorted by relevance)
             let bestScore = 0;
             
             for (const result of results) {
@@ -433,6 +463,20 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                     score -= 20;
                 }
                 
+                // Special handling for Japanese titles
+                if (hasJapaneseKeywords) {
+                    // Bonus for titles that seem to match the Japanese content
+                    if (resultTitle.includes('landmine') && searchTitle.includes('地雷')) {
+                        score += 25;
+                    }
+                    if (resultTitle.includes('chihara') && searchTitle.includes('地原')) {
+                        score += 25;
+                    }
+                    if (resultTitle.includes('dangerous') && searchTitle.includes('地雷')) {
+                        score += 20;
+                    }
+                }
+                
                 if (score > bestScore) {
                     bestScore = score;
                     bestMatch = result;
@@ -440,7 +484,56 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
             }
             
             logDebug(`Best match found: "${bestMatch.title}" with score ${bestScore} for search "${searchTitle}"`);
+            
+            // Additional validation: if the first result has a much higher score than others, prefer it
+            if (results.length > 1) {
+                const firstResultScore = calculateScoreForResult(results[0], searchTitle, searchWords, hasJapaneseKeywords);
+                if (firstResultScore > bestScore + 10) {
+                    logDebug(`First result has significantly higher score (${firstResultScore}), using it instead`);
+                    return results[0];
+                }
+            }
+            
             return bestMatch;
+        };
+        
+        // Helper function to calculate score for a specific result
+        const calculateScoreForResult = (result: any, searchTitle: string, searchWords: string[], hasJapaneseKeywords: boolean): number => {
+            const resultTitle = result.title.toLowerCase();
+            let score = 0;
+            
+            // Check how many search words are found in the result title
+            for (const word of searchWords) {
+                if (resultTitle.includes(word)) {
+                    score += word.length;
+                }
+            }
+            
+            // Bonus for matching at the beginning of the title
+            if (resultTitle.startsWith(searchWords[0] || '')) {
+                score += 10;
+            }
+            
+            // Bonus for having similar length
+            const lengthDiff = Math.abs(resultTitle.length - searchTitle.length);
+            if (lengthDiff < 10) {
+                score += 5;
+            }
+            
+            // Special handling for Japanese titles
+            if (hasJapaneseKeywords) {
+                if (resultTitle.includes('landmine') && searchTitle.includes('地雷')) {
+                    score += 25;
+                }
+                if (resultTitle.includes('chihara') && searchTitle.includes('地原')) {
+                    score += 25;
+                }
+                if (resultTitle.includes('dangerous') && searchTitle.includes('地雷')) {
+                    score += 20;
+                }
+            }
+            
+            return score;
         };
 
         // Try each title variation until we find results
@@ -456,11 +549,44 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                     continue;
                 }
 
+                // Debug: Log all search results to understand what we're working with
+                logDebug(`Search results for "${titleToSearch}":`);
+                results.slice(0, 5).forEach((result: any, index: number) => {
+                    logDebug(`  ${index + 1}. "${result.title}" (ID: ${result.id})`);
+                });
+                if (results.length > 5) {
+                    logDebug(`  ... and ${results.length - 5} more results`);
+                }
+
                 // Step 2: Find the best match using improved algorithm
-                const bestMatch = findBestMatch(results, titleToSearch);
+                let bestMatch = findBestMatch(results, titleToSearch);
                 if (!bestMatch) {
                     logDebug(`No suitable match found for "${titleToSearch}", trying next variation...`);
                     continue;
+                }
+                
+                logDebug(`Selected manga: "${bestMatch.title}" (ID: ${bestMatch.id}) from search results`);
+                
+                // Additional validation: Check if this seems like the right manga
+                const expectedTitle = mangaTitle.userPreferred || mangaTitle.english || '';
+                if (expectedTitle && bestMatch.title !== expectedTitle) {
+                    logDebug(`⚠️ Title mismatch detected!`);
+                    logDebug(`  Expected: "${expectedTitle}"`);
+                    logDebug(`  Found: "${bestMatch.title}"`);
+                    logDebug(`  Search query was: "${titleToSearch}"`);
+                    
+                    // Check if we should try to find a better match
+                    const betterMatch = results.find(r => 
+                        r.title.toLowerCase().includes('landmine') || 
+                        r.title.toLowerCase().includes('chihara') ||
+                        r.title.toLowerCase().includes('dangerous')
+                    );
+                    
+                    if (betterMatch && betterMatch.id !== bestMatch.id) {
+                        logDebug(`🔍 Found potentially better match: "${betterMatch.title}" (ID: ${betterMatch.id})`);
+                        logDebug(`   Switching to better match`);
+                        bestMatch = betterMatch;
+                    }
                 }
                 
                 setInternalMangaId(bestMatch.id);

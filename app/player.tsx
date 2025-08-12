@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, StyleSheet, StatusBar, BackHandler, DeviceEventEmitter } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { PlayerProvider } from './videoplayer/PlayerContext';
@@ -17,6 +17,11 @@ export default function Player() {
   const [isReady, setIsReady] = useState(false);
   const [isPipSupported, setIsPipSupported] = useState(false);
   const [isInPipMode, setIsInPipMode] = useState(false);
+  const [playerSettings, setPlayerSettings] = useState<{ pipEnabled: boolean; forceLandscape: boolean; saveToAniList: boolean }>({
+    pipEnabled: true,
+    forceLandscape: true,
+    saveToAniList: true,
+  });
   const params = useLocalSearchParams();
   const router = useRouter();
   
@@ -55,12 +60,57 @@ export default function Player() {
     loadAnilistUser();
   }, []);
 
+  // Sync player preferences saved from settings (intro/outro markers, auto-skip, etc.)
+  useEffect(() => {
+    const loadPrefs = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('playerPreferences');
+        if (stored) {
+          const prefs = JSON.parse(stored);
+          // Forward to children via PlayerProvider context by updating default through event
+          // We can't set here directly; PlayerProvider holds state. We'll emit for PlayerScreen to listen.
+          DeviceEventEmitter.emit('playerPreferencesHydrated', prefs);
+        }
+      } catch (e) {
+        console.warn('[PLAYER] Failed to hydrate preferences:', e);
+      }
+    };
+    loadPrefs();
+    const sub = DeviceEventEmitter.addListener('playerPreferencesChanged', loadPrefs);
+    return () => sub.remove();
+  }, []);
+
+  // Load player settings and subscribe to changes
+  useEffect(() => {
+    let isMounted = true;
+    const loadSettings = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('playerSettings');
+        if (stored && isMounted) {
+          const parsed = JSON.parse(stored);
+          setPlayerSettings((prev) => ({ ...prev, ...parsed }));
+        }
+      } catch (e) {
+        console.warn('[PLAYER] ⚠️ Failed to load playerSettings:', e);
+      }
+    };
+    loadSettings();
+
+    const sub = DeviceEventEmitter.addListener('playerSettingsChanged', () => {
+      loadSettings();
+    });
+    return () => {
+      isMounted = false;
+      sub.remove();
+    };
+  }, []);
+
   // Initialize PiP support detection (deferred to next frame to avoid main-thread contention)
   useEffect(() => {
     let raf: number | null = null;
     const checkPipSupport = async () => {
       try {
-        setIsPipSupported(true);
+        setIsPipSupported(playerSettings.pipEnabled === true);
         console.log('[PLAYER] 📱 PiP support initialized');
       } catch (error) {
         console.error('[PLAYER] ❌ Error checking PiP support:', error);
@@ -76,7 +126,7 @@ export default function Player() {
         global.cancelAnimationFrame(raf);
       }
     };
-  }, []);
+  }, [playerSettings.pipEnabled]);
 
   // PiP Functions - These will be passed to PlayerScreen to handle via expo-video
   const enterPiP = async () => {
@@ -96,6 +146,10 @@ export default function Player() {
     currentTime: number;
     duration: number;
   }) => {
+    if (!playerSettings.saveToAniList) {
+      console.log('[PLAYER] ⏸️ AniList saving disabled by settings');
+      return false;
+    }
     if (!anilistUser || !episodeData.anilistId) {
       console.log('[PLAYER] ⚠️ Cannot save to AniList: missing user or anime ID');
       return false;
@@ -284,6 +338,13 @@ export default function Player() {
 
     const setupOrientation = async () => {
       if (!isMounted || isLocked.current) return;
+      if (!playerSettings.forceLandscape) {
+        // Do not force orientation; just mark ready
+        StatusBar.setHidden(false, 'fade');
+        setIsReady(true);
+        console.log('[PLAYER] ℹ️ Force landscape disabled; skipping orientation lock');
+        return;
+      }
       
       try {
         console.log('[PLAYER] 🔒 Setting up orientation handling...');
@@ -324,6 +385,7 @@ export default function Player() {
       // Only handle orientation changes when NOT in PiP mode
       lockTimeout.current = setTimeout(async () => {
         if (!isMounted || isInPipMode) return;
+        if (!playerSettings.forceLandscape) return;
         
         const currentOrientation = event.orientationInfo.orientation;
         console.log('[PLAYER] 📱 Orientation changed to:', currentOrientation);
@@ -352,7 +414,9 @@ export default function Player() {
     };
 
     // Add listener after a short delay to ensure initial setup is complete
-    setTimeout(addListener, 300);
+    if (playerSettings.forceLandscape) {
+      setTimeout(addListener, 300);
+    }
 
     // Cleanup: unlock and return to portrait when unmounting
     return () => {
@@ -399,7 +463,7 @@ export default function Player() {
       };
       restoreOrientation();
     };
-  }, []); // Empty dependency array to prevent re-running
+  }, [playerSettings.forceLandscape]); // Re-run if orientation policy changes
 
   // Don't render the player until orientation is ready
   if (!isReady) {

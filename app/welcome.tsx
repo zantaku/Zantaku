@@ -79,6 +79,7 @@ export default function WelcomeScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAnimeDetailsExpanded, setIsAnimeDetailsExpanded] = useState(false);
   const router = useRouter();
+  const [showGuestHint, setShowGuestHint] = useState(true);
 
   const headerStyle = useAnimatedStyle(() => {
     return {
@@ -118,6 +119,12 @@ export default function WelcomeScreen() {
   useEffect(() => {
     fetchTrendingAnime();
   }, []);
+
+  useEffect(() => {
+    if (!showGuestHint) return;
+    const timer = setTimeout(() => setShowGuestHint(false), 4500);
+    return () => clearTimeout(timer);
+  }, [showGuestHint]);
 
   // Add a safety check to ensure functions are not optimized away
   useEffect(() => {
@@ -411,6 +418,43 @@ export default function WelcomeScreen() {
         </>
       )}
 
+      {/* Top-left guest continue (big X) */}
+      <View style={[styles.topLeftControls, { top: insets.top + 8 }]}>
+        <TouchableOpacity
+          onPress={() => {
+            console.log('Guest continue (X) pressed');
+            handleContinueWithoutAccount();
+          }}
+          activeOpacity={0.85}
+          accessible={true}
+          accessibilityLabel="Continue without account"
+          accessibilityRole="button"
+          style={styles.skipButton}
+        >
+          <FontAwesome5 name="times" size={22} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      {showGuestHint && (
+        <MotiView
+          from={{ opacity: 0, translateY: -6 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 450 }}
+          style={[styles.guestHintContainer, { top: insets.top + 12 }]}
+        >
+          {/* Tail triangle pointing to the X */}
+          <View style={styles.guestHintTail} />
+          <TouchableOpacity
+            onPress={() => setShowGuestHint(false)}
+            activeOpacity={0.8}
+            style={styles.guestHintContent}
+          >
+            <FontAwesome5 name="arrow-left" size={14} color="#fff" style={styles.guestHintIcon} />
+            <Text style={styles.guestHintText}>Tap here to continue without an account</Text>
+          </TouchableOpacity>
+        </MotiView>
+      )}
+
       <Animated.ScrollView
         style={styles.scrollView}
         contentContainerStyle={[
@@ -552,20 +596,6 @@ export default function WelcomeScreen() {
 
         {/* Secondary Options Container */}
         <View style={styles.secondaryOptionsContainer}>
-          <View style={styles.optionRow}>
-            <TouchableOpacity 
-              onPress={() => {
-                console.log('Continue without account button pressed');
-                handleContinueWithoutAccount();
-              }}
-              activeOpacity={0.8}
-              accessible={true}
-              accessibilityLabel="Continue without account"
-              accessibilityRole="button"
-            >
-              <Text style={styles.secondaryOptionText}>Continue without account</Text>
-            </TouchableOpacity>
-          </View>
           
           {__DEV__ && (
             <View style={styles.optionRow}>
@@ -783,6 +813,58 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+  topLeftControls: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 50,
+  },
+  skipButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  guestHintContainer: {
+    position: 'absolute',
+    left: 70,
+    zIndex: 49,
+  },
+  guestHintContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)'
+  },
+  guestHintTail: {
+    position: 'absolute',
+    left: 52,
+    top: 10,
+    width: 0,
+    height: 0,
+    borderTopWidth: 8,
+    borderBottomWidth: 8,
+    borderRightWidth: 12,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderRightColor: 'rgba(0,0,0,0.7)'
+  },
+  guestHintIcon: {
+    marginRight: 8,
+    opacity: 0.95
+  },
+  guestHintText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600'
   },
   animeTitle: {
     color: '#fff',
