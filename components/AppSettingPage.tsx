@@ -1,6 +1,6 @@
 // TODO: FINISH THE SETTINGS PAGE
 
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../hooks/useTheme';
@@ -179,7 +179,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
   ];
 
   const openLink = (url: string) => {
-    Linking.openURL(url).catch(err => console.error('An error occurred', err));
+    router.push({ pathname: '/webview', params: { url } });
   };
 
   return (

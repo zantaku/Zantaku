@@ -153,14 +153,38 @@ export const useAuth = () => {
       // Make Supabase optional - wrap in try-catch
       try {
         console.log('Attempting to save user data to Supabase...');
+        // Snapshot before so we can log deltas
+        const beforeUser = await getAnilistUser(userData.id);
+
         const savedUser = await saveAnilistUser({
           anilist_id: userData.id,
           username: userData.name,
           avatar_url: userData.avatar.large,
           access_token: token,
-          is_verified: false,
+          // Always mark as verified from the client; server will preserve existing true as well
+          is_verified: true,
         });
         console.log('User data saved to Supabase:', savedUser);
+
+        if (savedUser) {
+          const operation = beforeUser ? 'update' : 'create';
+          const wasVerified = Boolean(beforeUser?.is_verified);
+          const nowVerified = Boolean(savedUser?.is_verified);
+
+          const changedFields: string[] = [];
+          if (beforeUser) {
+            if (beforeUser.username !== savedUser.username) changedFields.push('username');
+            if (beforeUser.avatar_url !== savedUser.avatar_url) changedFields.push('avatar_url');
+            if (beforeUser.access_token !== savedUser.access_token) changedFields.push('access_token');
+            if (wasVerified !== nowVerified) changedFields.push('is_verified');
+          }
+
+          console.log('🧾 Supabase write summary (main auth):', {
+            operation,
+            verification: { before: wasVerified, after: nowVerified, changed: wasVerified !== nowVerified },
+            changedFields: beforeUser ? changedFields : ['(new record)'],
+          });
+        }
       } catch (error) {
         // Don't throw error if Supabase fails, just log it
         console.log('Supabase storage failed, continuing with local storage:', error);

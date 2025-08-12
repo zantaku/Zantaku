@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, Linking, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, ActivityIndicator, Alert } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -75,7 +75,7 @@ export default function NewsSection({ news }: { news: NewsItem[] }) {
     if (item.isInternalLink) {
       router.push(item.url as any);
     } else {
-      await Linking.openURL(item.url);
+      router.push({ pathname: '/webview', params: { url: item.url, title: item.title } });
     }
   }, [router]);
 

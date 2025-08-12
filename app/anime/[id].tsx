@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions, Platform, StatusBar, ActivityIndicator, Animated, Pressable, Share, Linking, DeviceEventEmitter, Modal } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions, Platform, StatusBar, ActivityIndicator, Animated, Pressable, Share, DeviceEventEmitter, Modal } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -388,11 +388,7 @@ export default function AnimeDetailsScreen() {
   }) => {
     try {
       const url = `https://anilist.co/review/${review.id}`;
-      const supported = await Linking.canOpenURL(url);
-
-      if (supported) {
-        await Linking.openURL(url);
-      }
+      router.push({ pathname: '/webview', params: { url } });
     } catch (error) {
       console.error('Error opening review:', error);
     }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Platform, StyleSheet, ActivityIndicator, Linking, DeviceEventEmitter } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Platform, StyleSheet, ActivityIndicator, DeviceEventEmitter } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
@@ -246,7 +246,7 @@ const StaffDetailsScreen = () => {
 
   const handleSocialLink = (url?: string) => {
     if (url) {
-      Linking.openURL(url);
+      router.push({ pathname: '/webview', params: { url } });
     }
   };
 

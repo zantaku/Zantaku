@@ -133,108 +133,114 @@ export async function saveAnilistUser(userData: Omit<AnilistUser, 'id' | 'create
     // Use direct REST API access with apikey as URL parameter
     const restEndpoint = `${ENV.SUPABASE_URL.replace(/\/$/, '')}`;
     const apiKey = ENV.SUPABASE_ANON_KEY;
-    
-    // Check if user exists first
+
+    // 1) Read once to preserve any existing verification state (defensive)
     const checkUrl = `${restEndpoint}/anilist_users?apikey=${apiKey}&anilist_id=eq.${userData.anilist_id}`;
     console.log('Making direct REST request to:', checkUrl.replace(apiKey, '***'));
-    
-    const checkResponse = await fetch(checkUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    });
-    
-    let existingUser = null;
-    
-    if (!checkResponse.ok) {
-      const errorText = await checkResponse.text();
-      console.error('❌ API Error during user check:', {
-        status: checkResponse.status,
-        statusText: checkResponse.statusText,
-        body: errorText
+
+    let existingUser: any = null;
+    try {
+      const checkResponse = await fetch(checkUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
       });
-    } else {
-      const existingData = await checkResponse.json();
-      console.log(`✅ User check complete: found ${existingData.length} matching records`);
-      if (existingData.length > 0) {
-        existingUser = existingData[0];
+      if (checkResponse.ok) {
+        const existingData = await checkResponse.json();
+        console.log(`✅ User check complete: found ${existingData.length} matching records`);
+        existingUser = existingData?.[0] || null;
+      } else {
+        const errorText = await checkResponse.text();
+        console.error('❌ API Error during user check:', {
+          status: checkResponse.status,
+          statusText: checkResponse.statusText,
+          body: errorText,
+        });
       }
+    } catch (readErr) {
+      console.error('User existence check failed but will continue with upsert:', readErr);
     }
-    
-    // Prepare request body with updated timestamp
+
+    // 2) Never downgrade verification: once true, always true
+    const mergedIsVerified = (existingUser?.is_verified === true) || (userData.is_verified === true);
+
+    // 3) Build body and perform a single upsert using PostgREST conflict handling
     const requestBody = {
       anilist_id: userData.anilist_id,
       username: userData.username,
       avatar_url: userData.avatar_url,
       access_token: userData.access_token,
-      is_verified: userData.is_verified || false,
+      is_verified: mergedIsVerified === true,
       updated_at: new Date().toISOString(),
     };
-    
-    let response;
-    
-    if (existingUser) {
-      // Update existing user with PATCH
-      const updateUrl = `${restEndpoint}/anilist_users?apikey=${apiKey}&anilist_id=eq.${userData.anilist_id}`;
-      console.log('Updating existing user with PATCH');
-      
-      response = await fetch(updateUrl, {
+
+    // Upsert on unique key anilist_id
+    const upsertUrl = `${restEndpoint}/anilist_users?apikey=${apiKey}&on_conflict=anilist_id`;
+    const response = await fetch(upsertUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        // Merge duplicates and return the final representation
+        'Prefer': 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ API Error saving user (upsert):', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      });
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!data || data.length === 0) {
+      console.error('❌ No data returned from upsert operation');
+      throw new Error('Failed to save user data, no records returned');
+    }
+
+    let saved = data[0];
+
+    // 4) Sanity check: if, for any reason, the DB returned is_verified=false, force it to true
+    if (saved?.is_verified !== true) {
+      console.warn('⚠️ is_verified returned false from DB. Forcing true to prevent downgrade.');
+      const forceUrl = `${restEndpoint}/anilist_users?apikey=${apiKey}&anilist_id=eq.${userData.anilist_id}`;
+      const forceResp = await fetch(forceUrl, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Prefer': 'return=representation'
+          'Prefer': 'return=representation',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({ is_verified: true, updated_at: new Date().toISOString() }),
       });
-    } else {
-      // Create new user with POST
-      const createUrl = `${restEndpoint}/anilist_users?apikey=${apiKey}`;
-      console.log('Creating new user with POST');
-      
-      response = await fetch(createUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(requestBody)
-      });
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ API Error saving user:', {
-        status: response.status,
-        statusText: response.statusText,
-        body: errorText
-      });
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    
-    if (!data || data.length === 0) {
-      console.error('❌ No data returned from operation');
-      throw new Error('Failed to save user data, no records returned');
+      if (forceResp.ok) {
+        const forced = await forceResp.json();
+        saved = forced?.[0] || saved;
+      } else {
+        const errText = await forceResp.text();
+        console.error('❌ Failed to force is_verified=true:', {
+          status: forceResp.status,
+          statusText: forceResp.statusText,
+          body: errText,
+        });
+      }
     }
 
     console.log('✅ Successfully saved user to Supabase REST API:', {
-      id: data[0].id,
-      anilist_id: data[0].anilist_id,
-      username: data[0].username,
-      created_at: data[0].created_at
+      id: saved.id,
+      anilist_id: saved.anilist_id,
+      username: saved.username,
+      is_verified: saved.is_verified,
+      created_at: saved.created_at,
     });
-    return data[0];
+    return saved;
   } catch (error: any) {
-    console.error('❌ Error saving Anilist user:', {
-      name: error.name,
-      message: error.message,
-    });
-    // Don't throw the error, just log it and continue
-    // This way, even if Supabase fails, the app can still function
+    console.error('❌ Error saving Anilist user:', { name: error.name, message: error.message });
+    // Don't throw the error, just log it and continue so the app still works offline/local
     return null;
   }
 }

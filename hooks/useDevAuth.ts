@@ -118,19 +118,43 @@ export const useDevAuth = () => {
       try {
         console.log('�� Attempting to save user data to Supabase...');
         
+        // Grab a snapshot before saving so we can log deltas
+        const beforeUser = await getAnilistUser(userData.id);
+
         // Using the enhanced saveAnilistUser function that handles headers automatically
         const savedUser = await saveAnilistUser({
           anilist_id: userData.id,
           username: userData.name,
           avatar_url: userData.avatar.large || '',
           access_token: token,
-          is_verified: false,
+          // Dev auth should not downgrade verification; default to true
+          is_verified: true,
         });
 
         if (savedUser) {
           console.log('✅ User data successfully saved to Supabase:', {
             user_id: savedUser.id,
             anilist_id: savedUser.anilist_id
+          });
+
+          // Report whether this was a create or update
+          const operation = beforeUser ? 'update' : 'create';
+          const wasVerified = Boolean(beforeUser?.is_verified);
+          const nowVerified = Boolean(savedUser?.is_verified);
+
+          // Detect key field changes for easier debugging
+          const changedFields: string[] = [];
+          if (beforeUser) {
+            if (beforeUser.username !== savedUser.username) changedFields.push('username');
+            if (beforeUser.avatar_url !== savedUser.avatar_url) changedFields.push('avatar_url');
+            if (beforeUser.access_token !== savedUser.access_token) changedFields.push('access_token');
+            if (wasVerified !== nowVerified) changedFields.push('is_verified');
+          }
+
+          console.log('🧾 Supabase write summary:', {
+            operation,
+            verification: { before: wasVerified, after: nowVerified, changed: wasVerified !== nowVerified },
+            changedFields: beforeUser ? changedFields : ['(new record)'],
           });
           return savedUser;
         } else {
@@ -149,7 +173,7 @@ export const useDevAuth = () => {
         username: userData.name,
         avatar_url: userData.avatar.large || '',
         access_token: token,
-        is_verified: false,
+        is_verified: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
