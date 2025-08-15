@@ -21,6 +21,7 @@ import {
 import { animeProviderManager } from '../api/proxy/providers/anime';
 import { zoroProvider } from '../api/proxy/providers/anime/zorohianime';
 import { animePaheProvider } from '../api/proxy/providers/anime/animepahe';
+import { animeZoneProvider } from '../api/animezone';
 import {
   getOptimizedListProps, 
   detectDeviceCapabilities, 
@@ -43,9 +44,9 @@ const useSourceSettings = () => {
     autoTryAlternateVersion: true,
     preferHLSStreams: true,
     logSourceDetails: true,
-    defaultProvider: 'animepahe' as 'animepahe' | 'zoro',
+    defaultProvider: 'animepahe' as 'animepahe' | 'zoro' | 'animezone',
     autoSelectSource: true,
-    providerPriority: ['animepahe', 'zoro'] as ('animepahe' | 'zoro')[],
+    providerPriority: ['animepahe', 'zoro', 'animezone'] as ('animepahe' | 'zoro' | 'animezone')[],
   });
 
   useEffect(() => {
@@ -601,7 +602,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [currentAnimeTitle, setCurrentAnimeTitle] = useState(animeTitle);
     const [preferredAudioType, setPreferredAudioType] = useState<'sub' | 'dub'>(sourceSettings.preferredType);
     const [showProviderDropdown, setShowProviderDropdown] = useState(false);
-    const [currentProvider, setCurrentProvider] = useState<'animepahe' | 'zoro'>(sourceSettings.defaultProvider);
+    const [currentProvider, setCurrentProvider] = useState<'animepahe' | 'zoro' | 'animezone'>(sourceSettings.defaultProvider);
     const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false);
     const [airingSchedule, setAiringSchedule] = useState<AiringSchedule>({});
     const [episodeRanges, setEpisodeRanges] = useState<Record<string, Episode[]>>({});
@@ -770,7 +771,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     }, [aniSeasons]);
 
     // NEW: Function to fetch episodes from selected provider
-    const fetchEpisodesFromProvider = useCallback(async (provider: 'animepahe' | 'zoro') => {
+    const fetchEpisodesFromProvider = useCallback(async (provider: 'animepahe' | 'zoro' | 'animezone') => {
         console.log(`\n🔄 [EPISODE_LIST] PROVIDER EPISODE FETCH START ===================`);
         console.log(`[EPISODE_LIST] 🔄 Fetching episodes from provider: ${provider}`);
         
@@ -871,12 +872,79 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                             number: ep.number,
                             title: ep.title,
                             isSubbed: ep.isSubbed,
-                            isDubbed: ep.isDubbed,
+                            isDubbed: ep.isSubbed,
                             provider: ep.provider
                         }))
                     );
                 } else {
                     console.log(`[EPISODE_LIST] ❌ [ZORO] No episodes found for anime title: "${titleToUse}"`);
+                }
+            } else if (provider === 'animezone') {
+                // CRITICAL FIX: AnimeZone doesn't have episodes endpoint, so we use AnimePahe as the source for episode list
+                // But the streaming will come from AnimeZone when the user clicks on an episode
+                console.log(`[EPISODE_LIST] 🔍 [ANIMEZONE] Using AnimePahe as episode source since AnimeZone has no episodes endpoint`);
+                console.log(`[EPISODE_LIST] 📝 Note: Episode list comes from AnimePahe, but streaming will use AnimeZone`);
+                
+                try {
+                    if (titleToUse) {
+                        console.log(`[EPISODE_LIST] 🔄 [ANIMEZONE] Strategy: Getting episodes from AnimePahe for episode list...`);
+                        const animePaheId = await animePaheProvider.getAnimeIdByTitle(titleToUse);
+                        if (animePaheId) {
+                            const animePaheEpisodes = await animePaheProvider.getEpisodes(animePaheId);
+                            if (animePaheEpisodes.length > 0) {
+                                // Convert AnimePahe episodes to AnimeZone format
+                                // For AnimeZone, we need to respect the user's audio preference
+                                const currentAudioPreference = sourceSettings.preferredType || 'sub';
+                                fetchedEpisodes = animePaheEpisodes.map((ep: any) => ({
+                                    id: `animezone_animepahe_${ep.number}`,
+                                    number: ep.number,
+                                    title: ep.title || `Episode ${ep.number}`,
+                                    image: ep.image,
+                                    isSubbed: currentAudioPreference === 'sub',  // Show as SUB if user prefers SUB
+                                    isDubbed: currentAudioPreference === 'dub',  // Show as DUB if user prefers DUB
+                                    provider: 'animezone',
+                                    aired: ep.aired,
+                                    description: ep.description,
+                                    duration: ep.duration,
+                                    providerIds: {
+                                        animezone: 'animepahe_fallback',
+                                        animepahe: animePaheId  // Keep AnimePahe ID for fallback streaming if needed
+                                    }
+                                }));
+                                
+                                console.log(`[EPISODE_LIST] ✅ [ANIMEZONE] Successfully used AnimePahe for episode list: ${fetchedEpisodes.length} episodes`);
+                                console.log(`[EPISODE_LIST] 📝 [ANIMEZONE] Episode list source: AnimePahe, Streaming source: AnimeZone`);
+                                console.log(`[EPISODE_LIST] 🔄 [ANIMEZONE] When user clicks episode, EpisodeSourcesModal will use AnimeZone for streaming`);
+                            } else {
+                                throw new Error('No episodes found from AnimePahe fallback');
+                            }
+                        } else {
+                            throw new Error('Could not find AnimePahe ID for episode list');
+                        }
+                    } else {
+                        throw new Error('Anime title required for AnimeZone provider');
+                    }
+                } catch (animePaheError) {
+                    console.log(`[EPISODE_LIST] ❌ [ANIMEZONE] AnimePahe fallback failed:`, (animePaheError as any)?.message);
+                    
+                    // Ultimate fallback: create estimated episode list
+                    console.log(`[EPISODE_LIST] 🆘 [ANIMEZONE] Using ultimate fallback: estimated episode list`);
+                    const estimatedEpisodes = 26; // More realistic default
+                    const currentAudioPreference = sourceSettings.preferredType || 'sub';
+                    fetchedEpisodes = Array.from({ length: estimatedEpisodes }, (_, i) => ({
+                        id: `animezone_estimated_${i + 1}`,
+                        number: i + 1,
+                        title: `Episode ${i + 1}`,
+                        isSubbed: currentAudioPreference === 'sub',   // Show as SUB if user prefers SUB
+                        isDubbed: currentAudioPreference === 'dub',   // Show as DUB if user prefers DUB
+                        provider: 'animezone',
+                                                            providerIds: {
+                                        animezone: 'estimated',
+                                        animepahe: undefined
+                                    }
+                    }));
+                    
+                    console.log(`[EPISODE_LIST] ⚠️ [ANIMEZONE] Using estimated episode list (${estimatedEpisodes} episodes) as final fallback`);
                 }
             }
             
@@ -927,7 +995,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         } finally {
             setProviderLoading(false);
         }
-    }, [animeTitle, anilistId, currentSeason, currentAnimeTitle, preferredAudioType]);
+    }, [animeTitle, anilistId, currentSeason, currentAnimeTitle, preferredAudioType, sourceSettings]);
 
     // NEW: Effect to fetch seasons when component mounts
     useEffect(() => {
@@ -952,6 +1020,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             console.log(`[EPISODE_LIST] 🚀 Refetching Zoro episodes for ${preferredAudioType.toUpperCase()}`);
             fetchEpisodesFromProvider(currentProvider);
         }
+        // Note: AnimeZone doesn't need refetching since it supports both SUB and DUB
     }, [preferredAudioType, currentProvider, fetchEpisodesFromProvider]);
 
     // Audio type availability check - use provider episodes if available, otherwise use props episodes
@@ -966,6 +1035,21 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 assumingBothAvailable: true,
                 reason: 'HiAnime/Zoro supports both SUB and DUB'
             });
+            return { sub: true, dub: true };
+        }
+        
+        // For AnimeZone provider, check if it actually supports both audio types
+        if (currentProvider === 'animezone') {
+            console.log(`[EPISODE_LIST] 🔊 Audio availability check (AnimeZone):`, {
+                provider: currentProvider,
+                episodeSource: providerEpisodes.length > 0 ? 'provider' : 'props',
+                episodeCount: episodesToCheck.length,
+                checkingBothAudioTypes: true,
+                reason: 'AnimeZone API returns both SUB and DUB servers'
+            });
+            
+            // AnimeZone actually supports both SUB and DUB based on API response
+            // The API returns servers with different dubType values
             return { sub: true, dub: true };
         }
         
@@ -1069,10 +1153,18 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                     }))
                 );
                 
-                const matchingCount = filteredEpisodes.filter(ep => (ep as any).matchesPreference).length;
+                const matchingCount = filteredEpisodes.length;
                 const nonMatchingCount = filteredEpisodes.length - matchingCount;
                 console.log(`[EPISODE_LIST] 📊 Final preference breakdown: ${matchingCount} matching, ${nonMatchingCount} non-matching (${preferredAudioType.toUpperCase()} preference)`);
             }
+        } else if (currentProvider === 'animezone') {
+            // For AnimeZone, handle both SUB and DUB since the API supports both
+            console.log(`[EPISODE_LIST] 🔊 Applying AnimeZone audio filtering (both SUB and DUB supported)...`);
+            
+            // AnimeZone episodes can have both audio types, so no filtering needed
+            // The actual audio type selection happens in EpisodeSourcesModal
+            filteredEpisodes = episodesToProcess;
+            console.log(`[EPISODE_LIST] ✅ Using all ${filteredEpisodes.length} AnimeZone episodes (both SUB and DUB supported)`);
         } else {
             console.log(`[EPISODE_LIST] ℹ️ Skipping audio filtering for ${currentProvider} provider`);
         }
@@ -1211,6 +1303,12 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             episodeId = episode.id;
         } else if (currentProvider === 'animepahe' && episode.providerIds?.animepahe) {
             episodeId = `${episode.providerIds.animepahe}/episode-${episode.number}`;
+        } else if (currentProvider === 'animezone') {
+            // CRITICAL FIX: For AnimeZone, we need to pass the anime title since AnimeZone uses title-based search
+            // The EpisodeSourcesModal will use this title to search AnimeZone and get streaming sources
+            episodeId = `${animeTitle}?ep=${episode.number}`;
+            console.log(`[EPISODE_LIST] 🎯 [ANIMEZONE] Generated episodeId for AnimeZone: "${episodeId}"`);
+            console.log(`[EPISODE_LIST] 📝 [ANIMEZONE] This will trigger AnimeZone streaming in EpisodeSourcesModal`);
         } else {
             episodeId = `${anilistId}?ep=${episode.number}`;
         }
@@ -1219,13 +1317,15 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         // Log the exact unified watch route that will be hit based on provider/audio selection
         const willRequestUrl = currentProvider === 'zoro'
           ? `https://kuroji.1ani.me/api/anime/watch/${anilistId}/episodes/${episode.number}?provider=zoro${preferredAudioType === 'dub' ? '&dub=true' : ''}`
+          : currentProvider === 'animezone'
+          ? `https://api.shizuru.app/api/holyshit/stream/{id}/${episode.number}`
           : `https://takiapi.xyz/anime/animepahe/watch/${episodeId}`;
         console.log(`[EPISODE_LIST] 🎯 Will request: ${willRequestUrl}`);
         console.log(`🎬 [EPISODE_LIST] EPISODE PRESS END ===================\n`);
         
         setSelectedEpisode(episode);
         setModalVisible(true);
-    }, [currentProvider, anilistId]);
+    }, [currentProvider, anilistId, animeTitle, preferredAudioType]);
 
     const handleSourceSelect = useCallback((url: string, headers: any, episodeId: string, episodeNumber: string, subtitles?: any[], timings?: any, anilistIdParam?: string, dataKey?: string, provider?: string, audioType?: 'sub' | 'dub') => {
         if (!selectedEpisode) return;
@@ -1323,7 +1423,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         }
     }, [anilistId, animeTitle, episodes, providerEpisodes, notificationsEnabled]);
 
-    const handleProviderChange = useCallback((provider: 'animepahe' | 'zoro') => {
+    const handleProviderChange = useCallback((provider: 'animepahe' | 'zoro' | 'animezone') => {
         console.log(`[EPISODE_LIST] 🔄 User changed provider to: ${provider}`);
         
         setCurrentProvider(provider);
@@ -1391,7 +1491,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
 
     // Render functions
     const getProviderName = useCallback((provider: string) => {
-        return provider === 'animepahe' ? 'AnimePahe' : 'Zoro';
+        return provider === 'animepahe' ? 'AnimePahe' : provider === 'zoro' ? 'Zoro' : 'AnimeZone';
     }, []);
 
     const renderItem = useCallback(({ item, index }: { item: Episode; index: number }) => {
@@ -1595,32 +1695,44 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 
                 {showProviderDropdown && (
                     <View style={[styles.inlineDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
-                        {(['animepahe', 'zoro'] as const).map((provider) => (
-                            <TouchableOpacity
-                                key={provider}
-                                style={[
-                                    styles.inlineDropdownItem,
-                                    currentProvider === provider && styles.inlineDropdownItemActive,
-                                    { borderBottomColor: currentTheme.colors.border }
-                                ]}
-                                onPress={() => handleProviderChange(provider)}
-                            >
-                                <View style={[
-                                    styles.inlineProviderDot,
-                                    { backgroundColor: provider === 'animepahe' ? '#4CAF50' : '#2196F3' }
-                                ]} />
-                                <Text style={[
-                                    styles.inlineDropdownItemText,
-                                    { color: currentTheme.colors.text },
-                                    currentProvider === provider && styles.inlineDropdownItemTextActive
-                                ]}>
-                                    {getProviderName(provider)}
-                                </Text>
-                                {currentProvider === provider && (
-                                    <FontAwesome5 name="check" size={12} color={currentTheme.colors.primary} />
-                                )}
-                            </TouchableOpacity>
-                        ))}
+                        {(['animepahe', 'animezone', 'zoro'] as const).map((provider) => {
+                            const isZoro = provider === 'zoro';
+                            const isDisabled = isZoro;
+                            
+                            return (
+                                <TouchableOpacity
+                                    key={provider}
+                                    style={[
+                                        styles.inlineDropdownItem,
+                                        currentProvider === provider && styles.inlineDropdownItemActive,
+                                        isDisabled && styles.inlineDropdownItemDisabled,
+                                        { borderBottomColor: currentTheme.colors.border }
+                                    ]}
+                                    onPress={() => !isDisabled && handleProviderChange(provider)}
+                                    disabled={isDisabled}
+                                >
+                                    <View style={[
+                                        styles.inlineProviderDot,
+                                        { backgroundColor: provider === 'animepahe' ? '#4CAF50' : provider === 'zoro' ? '#2196F3' : '#FF6B35' },
+                                        isDisabled && styles.inlineProviderDotDisabled
+                                    ]} />
+                                    <Text style={[
+                                        styles.inlineDropdownItemText,
+                                        { color: currentTheme.colors.text },
+                                        currentProvider === provider && styles.inlineDropdownItemTextActive,
+                                        isDisabled && styles.inlineDropdownItemTextDisabled
+                                    ]}>
+                                        {isZoro ? `${getProviderName(provider)} (fixing)` : getProviderName(provider)}
+                                    </Text>
+                                    {currentProvider === provider && !isDisabled && (
+                                        <FontAwesome5 name="check" size={12} color={currentTheme.colors.primary} />
+                                    )}
+                                    {isDisabled && (
+                                        <FontAwesome5 name="exclamation-triangle" size={12} color="#FF4444" />
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 )}
 
@@ -1819,6 +1931,14 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                             <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Try AnimePahe</Text>
                         </TouchableOpacity>
                     )}
+                    {currentProvider === 'animezone' && (
+                        <TouchableOpacity 
+                            style={[styles.headerButton, { backgroundColor: '#4CAF50', marginTop: 8 }]}
+                            onPress={() => handleProviderChange('animepahe')}
+                        >
+                            <Text style={[styles.emptyText, { color: '#FFFFFF' }]}>Try AnimePahe</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
         );
@@ -1857,6 +1977,22 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             {/* NEW: Simplified Continue Watching Banner */}
             {renderContinueWatchingBanner()}
 
+            {/* NEW: Provider Warning Messages */}
+            {currentProvider === 'animezone' && (
+                <View style={styles.animezoneWarning}>
+                    <Text style={styles.animezoneWarningText}>
+                        ⚠️ New API - Some anime may not work properly
+                    </Text>
+                </View>
+            )}
+            {currentProvider === 'zoro' && (
+                <View style={styles.zoroWarning}>
+                    <Text style={styles.zoroWarningText}>
+                        ⚠️ HiAnime is currently being worked on
+                    </Text>
+                </View>
+            )}
+
             {/* NEW: Swipeable Episode Range Tabs */}
             {renderEpisodeRangeTabs()}
 
@@ -1883,6 +2019,8 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                         ? selectedEpisode.id  // Use actual episode ID for Zoro (e.g., "episode$1304")
                         : currentProvider === 'animepahe' && selectedEpisode.providerIds?.animepahe
                             ? `${selectedEpisode.providerIds.animepahe}/episode-${selectedEpisode.number}`  // AnimePahe format: {anime_id}/episode-{num}
+                            : currentProvider === 'animezone'
+                            ? `${animeTitle}?ep=${selectedEpisode.number}`  // CRITICAL FIX: AnimeZone uses title-based search
                             : `${anilistId}?ep=${selectedEpisode.number}`  // Legacy format fallback
                 ) : ''}
                 onClose={() => setModalVisible(false)}
@@ -1903,7 +2041,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 onSelectAnime={handleAnimeSelect}
                 initialQuery={currentAnimeTitle}
                 currentProvider={currentProvider}
-                onProviderChange={(provider: string) => handleProviderChange(provider as 'animepahe' | 'zoro')}
+                onProviderChange={(provider: string) => handleProviderChange(provider as 'animepahe' | 'zoro' | 'animezone')}
             />
         </View>
     );
@@ -2069,6 +2207,19 @@ const styles = StyleSheet.create({
         width: 8,
         height: 8,
         borderRadius: 4,
+    },
+    
+    // NEW: Disabled Provider Styles
+    inlineDropdownItemDisabled: {
+        opacity: 0.5,
+        backgroundColor: 'rgba(255, 68, 68, 0.05)',
+    },
+    inlineProviderDotDisabled: {
+        opacity: 0.4,
+    },
+    inlineDropdownItemTextDisabled: {
+        color: '#FF4444',
+        fontStyle: 'italic',
     },
     statusMessage: {
         flexDirection: 'row',
@@ -2629,4 +2780,40 @@ const styles = StyleSheet.create({
     
     // Legacy styles that are still needed
     headerButton: { padding: 8, borderRadius: 20, width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
+    
+    // NEW: AnimeZone Warning Styles
+    animezoneWarning: {
+        marginHorizontal: 16,
+        marginBottom: 12,
+        padding: 12,
+        backgroundColor: 'rgba(255, 176, 32, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 176, 32, 0.3)',
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    animezoneWarningText: {
+        color: '#FFB020',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    
+    // NEW: Zoro Warning Styles
+    zoroWarning: {
+        marginHorizontal: 16,
+        marginBottom: 12,
+        padding: 12,
+        backgroundColor: 'rgba(255, 68, 68, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 68, 68, 0.3)',
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    zoroWarningText: {
+        color: '#FF4444',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
 });

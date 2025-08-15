@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, BackHandler, TouchableOpacity, Text, Share, Animated, Easing, Pressable, Platform } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, BackHandler, TouchableOpacity, Text, Share, Animated, Easing, Pressable, Platform, InteractionManager, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { WebView, WebViewNavigation } from 'react-native-webview';
 import { FontAwesome5 } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { Menu, MenuItem } from 'react-native-material-menu';
 import { useTheme, lightTheme, darkTheme } from '../hooks/useTheme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { height: screenHeight } = Dimensions.get('window');
 
 const getHostname = (url: string): string => {
   try {
@@ -27,7 +28,10 @@ export default function WebViewScreen() {
   const currentTheme = isDarkMode ? darkTheme : lightTheme;
 
   const webViewRef = useRef<WebView>(null);
-  const menuRef = useRef<Menu>(null);
+  
+  // Performance optimization refs
+  const slowLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastProgressRef = useRef(0);
 
   const [pageTitle, setPageTitle] = useState<string>(initialTitle || '');
   const [currentUrl, setCurrentUrl] = useState<string>(url || '');
@@ -40,9 +44,39 @@ export default function WebViewScreen() {
   const insets = useSafeAreaInsets();
   const [isSlowLoad, setIsSlowLoad] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  
+  // Bottom sheet animation
+  const bottomSheetAnim = useRef(new Animated.Value(screenHeight)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+
+  // Performance utility functions
+  const safeSetSlowLoad = (v: boolean) => {
+    // avoid re-render spam
+    setIsSlowLoad(prev => (prev === v ? prev : v));
+  };
+
+  // Memoized values to prevent unnecessary recalculations
+  const hostname = useMemo(() => getHostname(currentUrl), [currentUrl]);
+  const path = useMemo(() => {
+    if (!currentUrl) return '';
+    const split = currentUrl.split(hostname);
+    return split.length > 1 ? split[1].replace(/^\/?/, '') : '';
+  }, [currentUrl, hostname]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (slowLoadTimerRef.current) clearTimeout(slowLoadTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const onBackPress = () => {
+      if (isMenuOpen) {
+        closeMenu();
+        return true;
+      }
       if (canGoBack && webViewRef.current) {
         webViewRef.current.goBack();
         return true;
@@ -53,15 +87,18 @@ export default function WebViewScreen() {
 
     const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => sub.remove();
-  }, [canGoBack, router]);
+  }, [canGoBack, router, isMenuOpen]);
 
   const onNavChange = useCallback((navState: WebViewNavigation) => {
-    setCanGoBack(!!navState.canGoBack);
+    if (canGoBack !== !!navState.canGoBack) setCanGoBack(!!navState.canGoBack);
     // @ts-ignore RN WebView navState has canGoForward on most platforms
-    setCanGoForward(!!(navState as any).canGoForward);
-    if (navState.title) setPageTitle(navState.title);
-    if (navState.url) setCurrentUrl(navState.url);
-  }, []);
+    const forward = !!(navState as any).canGoForward;
+    if (canGoForward !== forward) setCanGoForward(forward);
+
+    if (navState.title && navState.title !== pageTitle) setPageTitle(navState.title);
+    if (navState.url && navState.url !== currentUrl) setCurrentUrl(navState.url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGoBack, canGoForward, pageTitle, currentUrl]);
 
   const headerTitle = useMemo(() => {
     if (pageTitle && pageTitle.trim().length > 0) return pageTitle;
@@ -75,9 +112,12 @@ export default function WebViewScreen() {
   };
   const handleShare = async () => {
     if (!currentUrl) return;
-    try {
-      await Share.share({ message: currentUrl, url: currentUrl });
-    } catch {}
+    // Defer heavy work to prevent blocking paint
+    InteractionManager.runAfterInteractions(async () => {
+      try {
+        await Share.share({ message: currentUrl, url: currentUrl });
+      } catch {}
+    });
   };
   const handleCopy = async () => {
     if (!currentUrl) return;
@@ -91,6 +131,51 @@ export default function WebViewScreen() {
     }
     lastTapRef.current = now;
   };
+
+  const openMenu = useCallback(() => {
+    setIsMenuOpen(true);
+    // Animate backdrop fade in
+    Animated.timing(backdropAnim, {
+      toValue: 1,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    // Animate bottom sheet slide up from bottom
+    Animated.spring(bottomSheetAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 9,
+      velocity: 0.3,
+    }).start();
+  }, [backdropAnim, bottomSheetAnim]);
+
+  const closeMenu = useCallback(() => {
+    // Animate backdrop fade out
+    Animated.timing(backdropAnim, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    // Animate bottom sheet slide down to bottom
+    Animated.spring(bottomSheetAnim, {
+      toValue: screenHeight,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 9,
+      velocity: 0.3,
+    }).start(() => {
+      setIsMenuOpen(false);
+    });
+  }, [backdropAnim, bottomSheetAnim]);
+
+  const handleMenuAction = useCallback((action: () => void) => {
+    closeMenu();
+    // Small delay to ensure menu closes smoothly
+    setTimeout(action, 300);
+  }, [closeMenu]);
 
   if (!url) {
     return (
@@ -128,15 +213,15 @@ export default function WebViewScreen() {
 
           {/* Title Block */}
           <View style={styles.titleBlock}>
-            <Text numberOfLines={1} style={[styles.domainText, { color: currentTheme.colors.text }]}>{getHostname(currentUrl)}</Text>
-            {!!currentUrl && (
-              <Text numberOfLines={1} style={[styles.pathText, { color: currentTheme.colors.textSecondary }]}>/{(currentUrl.split(getHostname(currentUrl))[1] || '').replace(/^\/?/, '')}</Text>
+            <Text numberOfLines={1} style={[styles.domainText, { color: currentTheme.colors.text }]}>{hostname}</Text>
+            {!!path && (
+              <Text numberOfLines={1} style={[styles.pathText, { color: currentTheme.colors.textSecondary }]}>/{path}</Text>
             )}
             <Text numberOfLines={1} style={[styles.pageTitle, { color: currentTheme.colors.text }]}>{headerTitle}</Text>
           </View>
 
           {/* Action Menu */}
-          <TouchableOpacity onPress={() => (menuRef as any).current?.show()} style={styles.menuButton}>
+          <TouchableOpacity onPress={openMenu} style={styles.menuButton}>
             <FontAwesome5 name="ellipsis-h" size={18} color={currentTheme.colors.text} />
           </TouchableOpacity>
         </View>
@@ -147,64 +232,97 @@ export default function WebViewScreen() {
         />
       </Pressable>
 
-      {/* Modern overflow menu */}
-      <Menu
-        ref={menuRef}
-        anchor={<View />}
-        style={styles.modernMenu}
-      >
-        <TouchableOpacity onPress={() => { (menuRef as any).current?.hide(); handleRefresh(); }} style={styles.menuItem}>
-          <FontAwesome5 name="redo" size={16} color={currentTheme.colors.text} />
-          <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Reload</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity onPress={() => { (menuRef as any).current?.hide(); handleShare(); }} style={styles.menuItem}>
-          <FontAwesome5 name="share" size={16} color={currentTheme.colors.text} />
-          <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Share</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity onPress={() => { (menuRef as any).current?.hide(); handleCopy(); }} style={styles.menuItem}>
-          <FontAwesome5 name="copy" size={16} color={currentTheme.colors.text} />
-          <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Copy link</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity onPress={() => { (menuRef as any).current?.hide(); handleOpenInBrowser(); }} style={styles.menuItem}>
-          <FontAwesome5 name="external-link-alt" size={16} color={currentTheme.colors.text} />
-          <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Open in browser</Text>
-        </TouchableOpacity>
-        
-        <View style={[styles.menuDivider, { backgroundColor: currentTheme.colors.border }]} />
-        
-        <TouchableOpacity onPress={() => { (menuRef as any).current?.hide(); router.back(); }} style={styles.menuItem}>
-          <FontAwesome5 name="times" size={16} color={currentTheme.colors.text} />
-          <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Close</Text>
-        </TouchableOpacity>
-      </Menu>
+             {/* Modern bottom sheet */}
+       {isMenuOpen && (
+         <View style={styles.menuOverlay}>
+           <TouchableOpacity 
+             style={[styles.menuBackdrop, { opacity: backdropAnim }]} 
+             onPress={closeMenu} 
+             activeOpacity={1} 
+           />
+           <Animated.View
+             style={[
+               styles.bottomSheet,
+               {
+                 backgroundColor: currentTheme.colors.surface,
+                 borderColor: currentTheme.colors.border,
+                 transform: [{ translateY: bottomSheetAnim }],
+               },
+             ]}
+           >
+             {/* Bottom sheet handle */}
+             <View style={[styles.bottomSheetHandle, { backgroundColor: currentTheme.colors.border }]} />
+             
+             {/* Menu items */}
+             <View style={styles.bottomSheetContent}>
+               <TouchableOpacity onPress={() => handleMenuAction(handleRefresh)} style={styles.menuItem}>
+                 <FontAwesome5 name="redo" size={18} color={currentTheme.colors.text} />
+                 <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Reload</Text>
+               </TouchableOpacity>
+               
+               <TouchableOpacity onPress={() => handleMenuAction(handleShare)} style={styles.menuItem}>
+                 <FontAwesome5 name="share" size={18} color={currentTheme.colors.text} />
+                 <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Share</Text>
+               </TouchableOpacity>
+               
+               <TouchableOpacity onPress={() => handleMenuAction(handleCopy)} style={styles.menuItem}>
+                 <FontAwesome5 name="copy" size={18} color={currentTheme.colors.text} />
+                 <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Copy link</Text>
+               </TouchableOpacity>
+               
+               <TouchableOpacity onPress={() => handleMenuAction(handleOpenInBrowser)} style={styles.menuItem}>
+                 <FontAwesome5 name="external-link-alt" size={18} color={currentTheme.colors.text} />
+                 <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Open in browser</Text>
+               </TouchableOpacity>
+               
+               <View style={[styles.menuDivider, { backgroundColor: currentTheme.colors.border }]} />
+               
+               <TouchableOpacity onPress={() => handleMenuAction(() => router.back())} style={styles.menuItem}>
+                 <FontAwesome5 name="times" size={18} color={currentTheme.colors.text} />
+                 <Text style={[styles.menuText, { color: currentTheme.colors.text }]}>Close</Text>
+               </TouchableOpacity>
+             </View>
+           </Animated.View>
+         </View>
+       )}
 
       <WebView
+        key={url} // hard reset on new urls
         ref={webViewRef}
         source={{ uri: url }}
         onLoadStart={() => {
           setIsLoading(true);
-          setIsSlowLoad(false);
+          safeSetSlowLoad(false);
           setLoadError(null);
           // Slow-load watchdog
-          setTimeout(() => {
-            if (isLoading) setIsSlowLoad(true);
-          }, 8000);
+          if (slowLoadTimerRef.current) clearTimeout(slowLoadTimerRef.current);
+          slowLoadTimerRef.current = setTimeout(() => {
+            if (isLoading) safeSetSlowLoad(true);
+          }, 6000); // tighten to 6s
         }}
-        onLoadEnd={() => setIsLoading(false)}
+        onLoadEnd={() => {
+          setIsLoading(false);
+          if (slowLoadTimerRef.current) {
+            clearTimeout(slowLoadTimerRef.current);
+            slowLoadTimerRef.current = null;
+          }
+        }}
         onNavigationStateChange={onNavChange}
         onLoadProgress={({ nativeEvent }) => {
           const p = nativeEvent.progress || 0;
-          Animated.timing(progressAnim, {
-            toValue: p,
-            duration: 120,
-            easing: Easing.linear,
-            useNativeDriver: false,
-          }).start();
-          if (p >= 1) {
-            Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+          // update only if >= +5% or completed
+          if (p === 1 || p - lastProgressRef.current >= 0.05) {
+            lastProgressRef.current = p;
+            Animated.timing(progressAnim, {
+              toValue: p,
+              duration: p === 1 ? 160 : 120,
+              easing: Easing.linear,
+              useNativeDriver: false,
+            }).start(() => {
+              if (p === 1) {
+                Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+              }
+            });
           }
         }}
         onError={({ nativeEvent }) => {
@@ -216,34 +334,43 @@ export default function WebViewScreen() {
           setIsLoading(false);
         }}
         onShouldStartLoadWithRequest={(req) => {
-          // Allow same-target navigations; open special schemes externally
-          const disallowSchemes = ['intent', 'market', 'mailto', 'tel'];
-          const scheme = req.url.split(':')[0];
-          if (disallowSchemes.includes(scheme)) {
-            Linking.openURL(req.url);
+          const u = req.url;
+          // Cheap scheme test without split/regex cost
+          if (u.startsWith('intent:') || u.startsWith('mailto:') || u.startsWith('tel:') || u.startsWith('market:')) {
+            Linking.openURL(u);
             return false;
           }
           return true;
         }}
         startInLoadingState
         incognito={false}
-        allowsBackForwardNavigationGestures
-        setSupportMultipleWindows={false}
         javaScriptEnabled
         domStorageEnabled
-        thirdPartyCookiesEnabled
-        sharedCookiesEnabled
         cacheEnabled
+        // If you do NOT need cross-app cookies, turn these off:
+        thirdPartyCookiesEnabled={false}
+        sharedCookiesEnabled={false}
         allowsInlineMediaPlayback
         androidLayerType={Platform.OS === 'android' ? 'hardware' : undefined}
         mixedContentMode="always"
+        // Android tuning
+        cacheMode="LOAD_DEFAULT"
+        setBuiltInZoomControls={false}
+        setDisplayZoomControls={false}
+        overScrollMode="content"
+        allowsFullscreenVideo
+        // iOS niceties (safe defaults)
+        allowsBackForwardNavigationGestures
+        contentInsetAdjustmentBehavior="never"
+        setSupportMultipleWindows={false}
         userAgent={
           'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
         }
-        injectedJavaScript={`
+        injectedJavaScriptBeforeContentLoaded={`
           (function() {
-            document.documentElement.style.backgroundColor='${isDarkMode ? '#000' : '#fff'}';
-            document.body.style.backgroundColor='${isDarkMode ? '#000' : '#fff'}';
+            var bg='${isDarkMode ? '#000' : '#fff'}';
+            document.documentElement.style.backgroundColor=bg;
+            document.body.style.backgroundColor=bg;
           })();
           true;
         `}
@@ -410,30 +537,18 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 20,
   },
-  modernMenu: {
-    position: 'absolute',
-    top: 120, // Fixed position below header
-    left: 12,
-    right: 12,
-    backgroundColor: 'transparent', // Ensure it's transparent to show through WebView
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 10,
-  },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginVertical: 2,
   },
   menuText: {
-    marginLeft: 12,
-    fontSize: 14,
-    fontWeight: '500',
+    marginLeft: 16,
+    fontSize: 16,
+    fontWeight: '600',
   },
   menuDivider: {
     height: StyleSheet.hairlineWidth,
@@ -483,6 +598,48 @@ const styles = StyleSheet.create({
   bannerBtnText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
+  },
+  menuBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 20,
+    paddingBottom: 34, // Safe area for home indicator
+  },
+  bottomSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  bottomSheetContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
   },
 });
 

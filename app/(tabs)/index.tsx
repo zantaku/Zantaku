@@ -1010,7 +1010,7 @@ export default function TabsIndex() {
     {
       id: 'watching',
       title: 'Continue Watching',
-      subtitle: 'Continue your journey with currently watching anime',
+      subtitle: 'Continue watching your currently watching anime',
       icon: 'play-circle',
       iconColors: ['#FF6B6B', '#ee5253'],
       items: mediaList.watching,
@@ -1019,7 +1019,7 @@ export default function TabsIndex() {
     {
       id: 'reading',
       title: 'Continue Reading',
-      subtitle: 'Pick up where you left off with currently reading manga',
+      subtitle: 'Continue reading your currently reading manga',
       icon: 'book-reader',
       iconColors: ['#4ECDC4', '#45B7AF'],
       items: mediaList.reading,

@@ -10,10 +10,9 @@
         </trust-anchors>
     </base-config>
     
-    <!-- Optional: Still maintain some security for sensitive domains -->
+    <!-- Domain-specific configurations for API providers -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">takiapi.xyz</domain>
-
         <domain includeSubdomains="true">magaapinovel.xyz</domain>
         <domain includeSubdomains="true">kamicom-dazaseals-projects.vercel.app</domain>
         <domain includeSubdomains="true">api.jikan.moe</domain>
@@ -28,5 +27,21 @@
         <domain includeSubdomains="true">jelleeapi.app</domain>
         <domain includeSubdomains="true">kamidb.online</domain>
         <domain includeSubdomains="true">www.kamidb.online</domain>
+        <domain includeSubdomains="true">anianiwatchwatching.vercel.app</domain>
+        <domain includeSubdomains="true">kuroji.1ani.me</domain>
+        
+        <!-- Trust anchors for these domains -->
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="user"/>
+        </trust-anchors>
     </domain-config>
+    
+    <!-- Additional configuration for debugging and development -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="user"/>
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config> 

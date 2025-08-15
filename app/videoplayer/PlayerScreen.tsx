@@ -445,6 +445,7 @@ const PlayerScreen: React.FC = () => {
     // Fallback heuristics
     if (videoData.episodeId?.includes('/episode-')) return 'zoro';
     if (videoData.source?.includes('megacloud') || videoData.source?.includes('dotstream')) return 'zoro';
+    if (videoData.source?.includes('vid-cdn.xyz') || videoData.source?.includes('seiryuu.vid-cdn.xyz')) return 'animezone';
     return 'animepahe';
   }, [params.provider, videoData?.episodeId, videoData?.source]);
 
@@ -452,14 +453,16 @@ const PlayerScreen: React.FC = () => {
   const videoSource = useMemo(() => {
     if (!videoData?.source) return '';
     
-                  // Both providers use direct streaming - Megacloud decryption handles Zoro sources
-    const finalUrl = videoData.source;
+    let finalUrl = videoData.source;
     
     console.log(`🎬 Video source URL: ${finalUrl.substring(0, 100)}...`);
     console.log(`🔗 Provider: ${detectedProvider.toUpperCase()}`);
     
     if (detectedProvider === 'zoro') {
-                    console.log(`🔒 [ZORO] Using M3U8 from Megacloud decryption (already proxied)`);
+      console.log(`🔒 [ZORO] Using M3U8 from Megacloud decryption (already proxied)`);
+    } else if (detectedProvider === 'animezone') {
+      console.log(`🔓 [ANIMEZONE] Using direct stream from vid-cdn.xyz`);
+      // AnimeZone URLs are direct and don't need proxy
     } else {
       console.log(`🔓 [ANIMEPAHE] Using direct stream`);
     }
@@ -476,7 +479,7 @@ const PlayerScreen: React.FC = () => {
   const videoHeaders = useMemo(() => {
     if (!videoData?.headers) return {};
     
-    // Use headers as provided by the source (Aniwatch requires Referer)
+    // Use headers as provided by the source
     const headers = { ...videoData.headers } as Record<string, string>;
     
     // For some players, having Origin alongside Referer helps; derive if missing
@@ -487,6 +490,22 @@ const PlayerScreen: React.FC = () => {
       } catch {}
     }
     
+    // AnimeZone specific headers - these streams need the correct referer to avoid CORS issues
+    if (detectedProvider === 'animezone') {
+      // AnimeZone streams require referer from anizone.to to avoid CORS
+      const animezoneHeaders: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
+        'Referer': 'https://anizone.to/',
+        'Origin': 'https://anizone.to'
+      };
+      
+      // Merge with any existing headers, but prioritize AnimeZone defaults
+      Object.assign(animezoneHeaders, headers);
+      
+      console.log(`📋 [ANIMEZONE] Using CORS-compliant headers:`, animezoneHeaders);
+      return animezoneHeaders;
+    }
+    
     console.log(`📋 [${detectedProvider.toUpperCase()}] Using headers:`, headers);
     return headers;
   }, [videoData?.headers, detectedProvider]);
@@ -495,13 +514,23 @@ const PlayerScreen: React.FC = () => {
       const videoPlayer = useVideoPlayer(
     videoData && videoSource ? (() => {
       const isKurojiProxied = typeof videoSource === 'string' && videoSource.includes('kuroji.1ani.me/api/proxy?url=');
+      const isAnimeZone = detectedProvider === 'animezone';
       let finalUri = videoSource;
+      
+      // For AnimeZone, add retry configuration
       const sourceObj: any = {
         uri: finalUri,
         headers: isKurojiProxied ? undefined : videoHeaders,
       };
       
-      // Force HLS detection on Android/ExoPlayer when using proxied URLs
+      // Add retry configuration for AnimeZone streams
+      if (isAnimeZone) {
+        sourceObj.retryCount = 3; // Retry up to 3 times
+        sourceObj.retryDelay = 2000; // Wait 2 seconds between retries
+        console.log('[ANIMEZONE] 🔄 Added retry configuration for stream loading');
+      }
+      
+      // Force HLS detection on Android/ExoPlayer when using proxied URLs or AnimeZone
       // This is the exact fix from the image - tell the player explicitly it's HLS
       // 
       // Why this matters:
@@ -512,9 +541,9 @@ const PlayerScreen: React.FC = () => {
       //   to treat it as HLS, leading to "file can't be played" errors
       //
       // Fix: Tell the player explicitly it's HLS
-          const isLocalM3u8 = typeof finalUri === 'string' && finalUri.startsWith('file://') && finalUri.toLowerCase().endsWith('.m3u8');
-          const isExplicitM3u8 = typeof finalUri === 'string' && finalUri.toLowerCase().endsWith('.m3u8');
-          if (isKurojiProxied || isLocalM3u8 || isExplicitM3u8) {
+      const isLocalM3u8 = typeof finalUri === 'string' && finalUri.startsWith('file://') && finalUri.toLowerCase().endsWith('.m3u8');
+      const isExplicitM3u8 = typeof finalUri === 'string' && finalUri.toLowerCase().endsWith('.m3u8');
+      if (isKurojiProxied || isAnimeZone || isLocalM3u8 || isExplicitM3u8) {
         // Option 1: For expo-av (what we're using)
         sourceObj.overrideFileExtensionAndroid = '.m3u8';
         sourceObj.contentType = 'application/x-mpegURL';
@@ -527,22 +556,8 @@ const PlayerScreen: React.FC = () => {
         // sourceObj.uri = finalUri;
       }
       
-      console.log('[EXPO-VIDEO] 🔧 Player source object:', {
-        uri: sourceObj.uri,
-        hasHeaders: !!sourceObj.headers && Object.keys(sourceObj.headers).length > 0,
-        overrideFileExtensionAndroid: sourceObj.overrideFileExtensionAndroid,
-        contentType: sourceObj.contentType,
-        type: sourceObj.type, // For react-native-video alternative
-      });
-      
-      // Add error handling for the player
-      console.log('[EXPO-VIDEO] 🚀 Creating player with source:', {
-        originalUrl: videoSource,
-        finalUrl: sourceObj.uri,
-        isKurojiProxied,
-        hasHeaders: !!sourceObj.headers,
-        hlsForced: !!sourceObj.overrideFileExtensionAndroid || !!sourceObj.type
-      });
+      // Reduced logging for player creation
+      console.log('[EXPO-VIDEO] 🚀 Creating player for', detectedProvider.toUpperCase());
       
       return sourceObj;
     })() : null,
@@ -556,84 +571,45 @@ const PlayerScreen: React.FC = () => {
         // 100ms is very chatty; 250ms keeps subtitles in sync while cutting updates by ~2.5x
         player.timeUpdateEventInterval = 250;
         
-        console.log(`[EXPO-VIDEO] 🎬 Player created and configured for ${detectedProvider.toUpperCase()}`);
-        console.log(`[EXPO-VIDEO] 📡 Using ${videoHeaders && Object.keys(videoHeaders).length > 0 ? 'custom' : 'no'} headers`);
-        if (detectedProvider === 'zoro') {
-          console.log(`[EXPO-VIDEO] 🔒 Zoro stream: M3U8 from Megacloud decryption (pre-processed)`);
-        }
+        console.log(`[EXPO-VIDEO] ✅ Player configured for ${detectedProvider.toUpperCase()}`);
         
-        // Test the URL directly to see if it's accessible
+        // Test the URL directly to see if it's accessible (reduced logging)
         if (videoSource && videoSource.includes('kuroji.1ani.me/api/proxy?url=')) {
           fetch(videoSource)
             .then(res => {
-              console.log('[EXPO-VIDEO] 🔍 URL test result:', {
-                status: res.status,
-                contentType: res.headers.get('content-type'),
-                ok: res.ok
-              });
+              if (!res.ok) {
+                console.warn('[EXPO-VIDEO] ⚠️ URL test failed:', res.status);
+              }
             })
             .catch(err => {
               console.error('[EXPO-VIDEO] ❌ URL test failed:', err.message);
             });
         }
         
-        // Test the URL directly to see if it's accessible
-        if (videoSource && videoSource.includes('kuroji.1ani.me/api/proxy?url=')) {
-          fetch(videoSource)
-            .then(res => {
-              console.log('[EXPO-VIDEO] 🔍 URL test result:', {
-                status: res.status,
-                contentType: res.headers.get('content-type'),
-                ok: res.ok
-              });
-            })
-            .catch(err => {
-              console.error('[EXPO-VIDEO] ❌ URL test failed:', err.message);
-            });
-        }
-        
-        // Monitor video status and errors via polling
+        // Monitor video status and errors via polling (reduced logging)
         const monitorVideoStatus = () => {
           try {
             const status = player.status;
             const currentTime = player.currentTime || 0;
             const duration = player.duration || 0;
-            // Try to access error info if exposed
             const err: any = (player as any).error || undefined;
             
-            console.log(`[EXPO-VIDEO] 📊 Status check:`, {
-              status: status,
-              provider: detectedProvider,
-              currentTime: currentTime.toFixed(2),
-              duration: duration.toFixed(2),
-              playing: player.playing,
-              error: err ? { message: String(err?.message || err), code: err?.code } : undefined,
-              timestamp: new Date().toISOString()
-            });
-            
-            // Check for specific error status
+            // Only log errors and important status changes
             if (status === 'error') {
-              console.error(`🔥 [VIDEO ERROR] ===================`);
-              console.error(`[EXPO-VIDEO] ❌ Video failed to load:`, {
+              console.error(`🔥 [PLAYBACK ERROR] ===================`);
+              console.error(`[EXPO-VIDEO] ❌ Video error detected during playback:`, {
+                currentTime: currentTime,
+                duration: duration,
+                playing: player.playing,
                 provider: detectedProvider,
-                sourceUrl: videoSource.substring(0, 100) + '...',
-                status: status,
-                headers: videoHeaders,
-                episodeId: videoData?.episodeId,
-                playerError: err ? { message: String(err?.message || err), code: err?.code } : undefined,
-                timestamp: new Date().toISOString()
+                status: status
               });
-              console.error(`🔥 [VIDEO ERROR END] ===================`);
+              console.error(`🔥 [PLAYBACK ERROR END] ===================`);
             }
             
-            // Log successful load
-            if (status === 'readyToPlay' || (duration > 0 && status === 'loading')) {
+            // Log successful load only once
+            if (status === 'readyToPlay' && duration > 0) {
               console.log(`[EXPO-VIDEO] ✅ Video loaded successfully for ${detectedProvider.toUpperCase()}`);
-            }
-            
-            // Check for stalled loading
-            if (status === 'loading' && duration === 0) {
-              console.warn(`[EXPO-VIDEO] ⚠️ Video stuck in loading state for ${detectedProvider.toUpperCase()}`);
             }
             
           } catch (err) {
@@ -641,19 +617,19 @@ const PlayerScreen: React.FC = () => {
           }
         };
         
-        // Start monitoring after a short delay
+        // Start monitoring after a short delay (reduced frequency)
         setTimeout(() => {
           monitorVideoStatus();
-          // Check status every 2 seconds for the first 10 seconds
+          // Check status every 5 seconds for the first 15 seconds only
           const statusInterval = setInterval(() => {
             monitorVideoStatus();
-          }, 2000);
+          }, 5000);
           
-          // Stop monitoring after 10 seconds
+          // Stop monitoring after 15 seconds
           setTimeout(() => {
             clearInterval(statusInterval);
-          }, 10000);
-        }, 1000);
+          }, 15000);
+        }, 2000);
       }
     }
   );
@@ -679,35 +655,43 @@ const PlayerScreen: React.FC = () => {
   //   runProbe();
   // }, [videoSource]);
 
-  // Monitor video status for debugging (without re-proxying)
+  // Monitor video status for debugging (reduced logging)
   useEffect(() => {
     if (!videoPlayer) return;
 
     const monitorVideoStatus = () => {
       try {
         const status = videoPlayer.status;
-        const currentTime = videoPlayer.currentTime || 0;
-        const duration = videoPlayer.duration || 0;
         
-        // Only log status, don't manipulate URLs
-        console.log(`[EXPO-VIDEO] 📊 Status check:`, {
-          status: status,
-          provider: detectedProvider,
-          currentTime: currentTime.toFixed(2),
-          duration: duration.toFixed(2),
-          hasError: status === 'error'
-        });
-        
-        // Log any errors without URL manipulation
+        // Only log errors, not regular status updates
         if (status === 'error') {
-          console.log(`[EXPO-VIDEO] ❌ Player error detected`);
+          console.error(`🔥 [PLAYBACK ERROR] ===================`);
+          console.error(`[EXPO-VIDEO] ❌ Video error detected during playback:`, {
+            currentTime: videoPlayer.currentTime || 0,
+            duration: videoPlayer.duration || 0,
+            playing: videoPlayer.playing,
+            provider: detectedProvider,
+            status: status
+          });
+          
+          // Special handling for AnimeZone errors
+          if (detectedProvider === 'animezone') {
+            handleAnimeZoneStreamFailure({
+              message: 'Video error status detected',
+              provider: 'animezone',
+              status: status
+            });
+          }
+          
+          console.error(`🔥 [PLAYBACK ERROR END] ===================`);
         }
       } catch (error) {
-        console.log(`[EXPO-VIDEO] ⚠️ Error monitoring status:`, error);
+        console.error(`[EXPO-VIDEO] ❌ Error monitoring status:`, error);
       }
     };
 
-    const interval = setInterval(monitorVideoStatus, 2000);
+    // Reduced frequency - check every 5 seconds instead of 2
+    const interval = setInterval(monitorVideoStatus, 5000);
     return () => clearInterval(interval);
   }, [videoPlayer, detectedProvider]);
 
@@ -748,6 +732,26 @@ const PlayerScreen: React.FC = () => {
               duration: videoPlayer.duration || 0,
               playing: videoPlayer.playing
             });
+            
+            // Special handling for AnimeZone errors
+            if (detectedProvider === 'animezone') {
+              console.error('[ANIMEZONE] 🔥 Detected AnimeZone playback error - this might be a CORS or network issue');
+              console.error('[ANIMEZONE] 🔥 The stream URL might need different headers or proxy handling');
+              
+              // Try to provide helpful error information
+              if (videoSource?.includes('vid-cdn.xyz')) {
+                console.error('[ANIMEZONE] 🔥 Stream domain: vid-cdn.xyz - this domain may have CORS restrictions');
+                console.error('[ANIMEZONE] 🔥 Consider checking if the stream is still available or if headers need updating');
+              }
+              
+              // Call the specialized error handler
+              handleAnimeZoneStreamFailure({
+                message: 'Playback error detected during monitoring',
+                provider: 'animezone',
+                streamUrl: videoSource
+              });
+            }
+            
             console.error('🔥 [PLAYBACK ERROR END] ===================');
           }
           
@@ -1150,6 +1154,16 @@ const PlayerScreen: React.FC = () => {
             episodeNumber: data.episodeNumber,
             episodeId: data.episodeId
           });
+          
+          // Test AnimeZone streams before setting video data
+          if (data.source.includes('vid-cdn.xyz') || data.source.includes('seiryuu.vid-cdn.xyz')) {
+            console.log('[ANIMEZONE] 🧪 Testing stream before playback...');
+            const streamTestResult = await testAnimeZoneStream(data.source);
+            if (!streamTestResult) {
+              console.warn('[ANIMEZONE] ⚠️ Stream test failed - playback may fail');
+            }
+          }
+          
           setVideoData(data);
           hasLoadedData.current = true;
           
@@ -1287,6 +1301,153 @@ const PlayerScreen: React.FC = () => {
     setCountdownDismissed(true);
   };
 
+  // Extract subtitle URLs from AnimeZone m3u8 manifest
+  const extractAnimeZoneSubtitles = async (m3u8Url: string, language: string) => {
+    try {
+      console.log('🎯 [ANIMEZONE] Fetching m3u8 manifest to extract subtitle URLs...');
+      
+      // Fetch the m3u8 manifest with CORS-compliant headers
+      const response = await fetch(m3u8Url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
+          'Referer': 'https://anizone.to/',
+          'Origin': 'https://anizone.to'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const manifest = await response.text();
+      console.log('🎯 [ANIMEZONE] Downloaded m3u8 manifest:', manifest.length, 'characters');
+      
+      // Parse the manifest to find subtitle URLs
+      const subtitleUrls = parseM3U8Subtitles(manifest, m3u8Url);
+      console.log('🎯 [ANIMEZONE] Found subtitle URLs in manifest:', subtitleUrls);
+      
+      // Find the subtitle for the selected language
+      const subtitleUrl = subtitleUrls.find(url => 
+        url.toLowerCase().includes(language.toLowerCase()) || 
+        url.toLowerCase().includes('en') // Default to English if language not found
+      );
+      
+      if (subtitleUrl) {
+        console.log('🎯 [ANIMEZONE] Loading subtitle from manifest URL:', subtitleUrl);
+        loadSubtitleCues(subtitleUrl);
+      } else {
+        console.log('⚠️ [ANIMEZONE] No subtitle URL found for language:', language);
+        // Disable subtitles
+        setPreferences(prev => ({
+          ...prev,
+          subtitlesEnabled: false
+        }));
+      }
+    } catch (error) {
+      console.error('❌ [ANIMEZONE] Error extracting subtitles from manifest:', error);
+      // Disable subtitles on error
+      setPreferences(prev => ({
+        ...prev,
+        subtitlesEnabled: false
+      }));
+    }
+  };
+
+  // Test AnimeZone stream URL before playing to detect issues early
+  const testAnimeZoneStream = async (streamUrl: string): Promise<boolean> => {
+    try {
+      console.log('[ANIMEZONE] 🧪 Testing stream URL before playback...');
+      
+      const response = await fetch(streamUrl, {
+        method: 'HEAD', // Just check headers, don't download content
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
+          'Referer': 'https://anizone.to/',
+          'Origin': 'https://anizone.to'
+        },
+        timeout: 10000
+      });
+      
+      console.log('[ANIMEZONE] 🧪 Stream test response:', {
+        status: response.status,
+        statusText: response.statusText,
+        contentType: response.headers.get('content-type'),
+        contentLength: response.headers.get('content-length')
+      });
+      
+      return response.ok;
+    } catch (error) {
+      console.error('[ANIMEZONE] 🧪 Stream test failed:', error);
+      return false;
+    }
+  };
+
+  // Handle AnimeZone stream failures and suggest alternatives
+  const handleAnimeZoneStreamFailure = (error: any) => {
+    console.error('[ANIMEZONE] 🔥 Stream playback failed:', error);
+    
+    // Provide helpful error information
+    if (error?.message?.includes('CORS')) {
+      console.error('[ANIMEZONE] 🔥 CORS error detected - this is a common issue with vid-cdn.xyz');
+      console.error('[ANIMEZONE] 🔥 The stream may need different headers or proxy handling');
+    } else if (error?.message?.includes('network')) {
+      console.error('[ANIMEZONE] 🔥 Network error detected - the stream may be temporarily unavailable');
+    } else if (error?.message?.includes('manifest')) {
+      console.error('[ANIMEZONE] 🔥 Manifest error detected - the m3u8 file may be corrupted or expired');
+    }
+    
+    // Log current video state for debugging
+    console.error('[ANIMEZONE] 🔍 Current video state:', {
+      source: videoSource?.substring(0, 100) + '...',
+      provider: detectedProvider,
+      hasHeaders: !!videoHeaders && Object.keys(videoHeaders).length > 0,
+      headers: videoHeaders,
+      currentTime: currentTime,
+      duration: duration,
+      isPlaying: !paused
+    });
+    
+    // Suggest solutions
+    console.error('[ANIMEZONE] 💡 Suggested solutions:');
+    console.error('[ANIMEZONE] 💡 1. Try refreshing the source selection');
+    console.error('[ANIMEZONE] 💡 2. Switch to a different provider if available');
+    console.error('[ANIMEZONE] 💡 3. Check if the anime is available on other sources');
+    console.error('[ANIMEZONE] 💡 4. Verify the stream URL is still valid');
+  };
+
+  // Parse m3u8 manifest to extract subtitle URLs
+  const parseM3U8Subtitles = (manifest: string, baseUrl: string): string[] => {
+    const subtitleUrls: string[] = [];
+    const lines = manifest.split('\n');
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Look for subtitle group tags
+      if (line.startsWith('#EXT-X-MEDIA:')) {
+        const mediaLine = lines[i + 1] || '';
+        if (mediaLine.includes('TYPE=SUBTITLES') || mediaLine.includes('TYPE=CLOSED-CAPTIONS')) {
+          // Extract the URI attribute
+          const uriMatch = mediaLine.match(/URI="([^"]+)"/);
+          if (uriMatch) {
+            const subtitleUrl = uriMatch[1];
+            // Convert relative URLs to absolute
+            const absoluteUrl = subtitleUrl.startsWith('http') ? subtitleUrl : new URL(subtitleUrl, baseUrl).href;
+            subtitleUrls.push(absoluteUrl);
+          }
+        }
+      }
+      
+      // Also look for direct subtitle URLs in the manifest
+      if (line.endsWith('.vtt') || line.endsWith('.srt')) {
+        const subtitleUrl = line.startsWith('http') ? line : new URL(line, baseUrl).href;
+        subtitleUrls.push(subtitleUrl);
+      }
+    }
+    
+    return subtitleUrls;
+  };
+
   // Load subtitle cues from URL - Enhanced with indexing
   const loadSubtitleCues = async (subtitleUrl: string) => {
     try {
@@ -1356,16 +1517,25 @@ const PlayerScreen: React.FC = () => {
       
       if (selectedSubtitle && selectedSubtitle.url) {
         loadSubtitleCues(selectedSubtitle.url);
+      } else if (detectedProvider === 'animezone' && selectedSubtitle && videoSource) {
+        // For AnimeZone, extract subtitle URLs from the m3u8 manifest
+        console.log('🎯 [ANIMEZONE] Extracting subtitles from m3u8 manifest...');
+        extractAnimeZoneSubtitles(videoSource, selectedSubtitle.lang);
       } else {
         // Fallback to first available subtitle if selected language not found
         const fallbackSubtitle = videoData.subtitles[0];
         if (fallbackSubtitle && fallbackSubtitle.url) {
           setSelectedSubtitleLanguage(fallbackSubtitle.lang);
           loadSubtitleCues(fallbackSubtitle.url);
+        } else if (detectedProvider === 'animezone' && fallbackSubtitle && videoSource) {
+          // For AnimeZone fallback, also try to extract from manifest
+          console.log('🎯 [ANIMEZONE] Fallback: extracting subtitles from m3u8 manifest...');
+          setSelectedSubtitleLanguage(fallbackSubtitle.lang);
+          extractAnimeZoneSubtitles(videoSource, fallbackSubtitle.lang);
         }
       }
     }
-  }, [videoData?.subtitles, selectedSubtitleLanguage]);
+  }, [videoData?.subtitles, selectedSubtitleLanguage, detectedProvider, videoSource]);
 
   // Optimized subtitle tracking with binary search and caching
   useEffect(() => {

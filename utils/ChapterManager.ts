@@ -167,9 +167,7 @@ export class ChapterManager {
         // This endpoint is stable and returns the page list directly
         return `${TAKIAPI_URL}/manga/mangadex/read/${chapter.id}`;
         
-      case 'katana':
-        // Katana uses /katana/series/{mangaId}/{chapterId}
-        return `${baseApiUrl}/katana/series/${this.mangaId}/${chapter.id}`;
+
         
       default:
         // Default fallback

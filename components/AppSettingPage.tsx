@@ -1,12 +1,15 @@
 // TODO: FINISH THE SETTINGS PAGE
 
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Alert } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
 import { SettingsTile } from './SettingsComponents';
 import Logo from './Logo';
+import * as Linking from 'expo-linking';
+import * as Application from 'expo-application';
 
 interface AppSettingPageProps {
   onClose: () => void;
@@ -16,6 +19,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
   const router = useRouter();
   const { isDarkMode, currentTheme } = useTheme();
   const { user } = useAuth();
+  const [isOpeningLink, setIsOpeningLink] = useState(false);
 
   const handleSettingPress = (id: string) => {
     // Add logging for navigation attempts
@@ -169,17 +173,155 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
     filteredSettings: settings.length
   });
 
-  // Social media links
+  // Social media links with app schemes
   const socialLinks = [
-    { icon: 'discord', url: 'https://discord.gg/Pm7KyBYdA5', color: '#5865F2' },
-    { icon: 'telegram', url: 'https://t.me/zantakuapp', color: '#0088CC' },
-    { icon: 'github', url: 'https://github.com/zantaku/', color: '#333333' },
-    { icon: 'reddit', url: 'https://www.reddit.com/r/Zantaku/', color: '#FF4500' },
-    { icon: 'youtube', url: 'https://www.youtube.com/@Zantaku', color: '#FF0000' },
+    { 
+      icon: 'discord', 
+      url: 'https://discord.gg/Pm7KyBYdA5', 
+      color: '#5865F2',
+      appScheme: Platform.OS === 'ios' ? 'discord://' : 'com.discord',
+      packageName: Platform.OS === 'android' ? 'com.discord' : undefined
+    },
+    { 
+      icon: 'telegram', 
+      url: 'https://t.me/zantakuapp', 
+      color: '#0088CC',
+      appScheme: Platform.OS === 'ios' ? 'tg://' : 'org.telegram.messenger',
+      packageName: Platform.OS === 'android' ? 'org.telegram.messenger' : undefined
+    },
+    { 
+      icon: 'github', 
+      url: 'https://github.com/zantaku/', 
+      color: '#333333',
+      appScheme: Platform.OS === 'ios' ? 'github://' : 'com.github.android',
+      packageName: Platform.OS === 'android' ? 'com.github.android' : undefined
+    },
+    { 
+      icon: 'reddit', 
+      url: 'https://www.reddit.com/r/Zantaku/', 
+      color: '#FF4500',
+      appScheme: Platform.OS === 'ios' ? 'reddit://' : 'com.reddit.frontpage',
+      packageName: Platform.OS === 'android' ? 'com.reddit.frontpage' : undefined
+    },
+    { 
+      icon: 'youtube', 
+      url: 'https://www.youtube.com/@Zantaku', 
+      color: '#FF0000',
+      appScheme: Platform.OS === 'ios' ? 'youtube://' : 'com.google.android.youtube',
+      packageName: Platform.OS === 'android' ? 'com.google.android.youtube' : undefined
+    },
   ];
 
-  const openLink = (url: string) => {
-    router.push({ pathname: '/webview', params: { url } });
+  const openLink = async (social: typeof socialLinks[0]) => {
+    if (isOpeningLink) return; // Prevent multiple simultaneous opens
+    
+    setIsOpeningLink(true);
+    try {
+      // Try to open the app first
+      if (social.appScheme) {
+        const canOpen = await Linking.canOpenURL(social.appScheme);
+        if (canOpen) {
+          // Open the app with the specific URL
+          let appUrl = social.appScheme;
+          
+          // Handle specific app schemes
+          if (social.icon === 'discord') {
+            appUrl = `${social.appScheme}invite/${social.url.split('/').pop()}`;
+          } else if (social.icon === 'telegram') {
+            appUrl = `${social.appScheme}resolve?domain=${social.url.split('/').pop()}`;
+          } else if (social.icon === 'github') {
+            appUrl = `${social.appScheme}${social.url.split('github.com/')[1]}`;
+          } else if (social.icon === 'reddit') {
+            appUrl = `${social.appScheme}r/${social.url.split('/r/')[1]}`;
+          } else if (social.icon === 'youtube') {
+            appUrl = `${social.appScheme}channel/${social.url.split('@')[1]}`;
+          }
+          
+          try {
+            await Linking.openURL(appUrl);
+            console.log(`Successfully opened ${social.icon} in the app`);
+            return;
+          } catch (appError) {
+            console.log(`Failed to open ${social.icon} app, falling back to webview:`, appError);
+            // If app fails to open, continue to fallback
+          }
+        }
+      }
+      
+      // If app is not available, show option to user
+      if (Platform.OS === 'android' && social.packageName) {
+        Alert.alert(
+          `${social.icon.charAt(0).toUpperCase() + social.icon.slice(1)} App Not Found`,
+          `Would you like to install the ${social.icon} app or open in browser?`,
+          [
+            {
+              text: 'Install App',
+              onPress: () => {
+                // Open Play Store to install the app
+                Linking.openURL(`market://details?id=${social.packageName}`);
+              }
+            },
+            {
+              text: 'Open in Browser',
+              onPress: () => {
+                router.push({ pathname: '/webview', params: { url: social.url } });
+              }
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel'
+            }
+          ]
+        );
+      } else if (Platform.OS === 'ios') {
+        // For iOS, show option to open App Store
+        const appStoreUrls = {
+          discord: 'https://apps.apple.com/app/discord/id985746746',
+          telegram: 'https://apps.apple.com/app/telegram/id686449807',
+          github: 'https://apps.apple.com/app/github/id1477376905',
+          reddit: 'https://apps.apple.com/app/reddit/id1064216828',
+          youtube: 'https://apps.apple.com/app/youtube/id544007664'
+        };
+        
+        Alert.alert(
+          `${social.icon.charAt(0).toUpperCase() + social.icon.slice(1)} App Not Found`,
+          `Would you like to install the ${social.icon} app or open in browser?`,
+          [
+            {
+              text: 'Install App',
+              onPress: () => {
+                // Open App Store to install the app
+                const appStoreUrl = appStoreUrls[social.icon as keyof typeof appStoreUrls];
+                if (appStoreUrl) {
+                  Linking.openURL(appStoreUrl);
+                }
+              }
+            },
+            {
+              text: 'Open in Browser',
+              onPress: () => {
+                router.push({ pathname: '/webview', params: { url: social.url } });
+              }
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel'
+            }
+          ]
+        );
+      } else {
+        // For other platforms or when no package name, just open in webview
+        console.log(`App not available for ${social.icon}, opening in webview`);
+        router.push({ pathname: '/webview', params: { url: social.url } });
+      }
+      
+    } catch (error) {
+      console.error('Error opening link:', error);
+      // Fallback to webview on error
+      router.push({ pathname: '/webview', params: { url: social.url } });
+    } finally {
+      setIsOpeningLink(false);
+    }
   };
 
   return (
@@ -236,7 +378,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
         ]}>
           <TouchableOpacity 
             style={[styles.footerContent, { backgroundColor: currentTheme.colors.surface || 'rgba(0,0,0,0.02)' }]}
-            onPress={() => openLink('https://www.zantaku.com')}
+            onPress={() => router.push({ pathname: '/webview', params: { url: 'https://www.zantaku.com' } })}
             activeOpacity={0.7}
           >
             <Logo width={120} height={40} variant="auto" />
@@ -255,15 +397,46 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
                 key={index}
                 style={[
                   styles.socialButton,
-                  { backgroundColor: `${social.color}15` }
+                  { backgroundColor: `${social.color}15` },
+                  isOpeningLink && styles.socialButtonDisabled
                 ]}
-                onPress={() => openLink(social.url)}
+                onPress={() => openLink(social)}
                 activeOpacity={0.6}
+                disabled={isOpeningLink}
+                onLongPress={() => {
+                  // Show info about what this button does
+                  Alert.alert(
+                    `${social.icon.charAt(0).toUpperCase() + social.icon.slice(1)}`,
+                    `Opens ${social.icon} in the app if installed, otherwise in browser. Long press to open directly in browser.`,
+                    [
+                      {
+                        text: 'Open in Browser',
+                        onPress: () => {
+                          router.push({ pathname: '/webview', params: { url: social.url } });
+                        }
+                      },
+                      {
+                        text: 'Cancel',
+                        style: 'cancel'
+                      }
+                    ]
+                  );
+                }}
               >
-                <FontAwesome5 name={social.icon} size={22} color={social.color} />
+                <FontAwesome5 
+                  name={isOpeningLink ? 'spinner' : social.icon} 
+                  size={22} 
+                  color={isOpeningLink ? currentTheme.colors.textSecondary : social.color}
+                  style={isOpeningLink ? styles.spinningIcon : undefined}
+                />
               </TouchableOpacity>
             ))}
           </View>
+          
+          {/* Hint text */}
+          <Text style={[styles.hintText, { color: currentTheme.colors.textSecondary }]}>
+            Tap to open in app • Long press to open in browser
+          </Text>
           
           <Text style={[styles.copyrightText, { color: currentTheme.colors.textSecondary }]}>
             © 2025 Zantaku. All rights reserved.
@@ -350,6 +523,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 48,
     minHeight: 48,
+  },
+  socialButtonDisabled: {
+    opacity: 0.6,
+  },
+  spinningIcon: {
+    // Add rotation animation for spinner
+  },
+  hintText: {
+    fontSize: 11,
+    marginTop: 8,
+    opacity: 0.6,
+    textAlign: 'center',
   },
   copyrightText: {
     fontSize: 12,

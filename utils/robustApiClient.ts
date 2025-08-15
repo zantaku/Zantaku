@@ -296,9 +296,7 @@ class RobustApiClient {
     return this.fetchAnimeData<T>(path, options);
   }
 
-  async fetchKatanaData<T>(path: string, options: any = {}): Promise<ApiResponse<T>> {
-    return this.fetchMangaData<T>(path, options);
-  }
+
 
   // Get current endpoint status for debugging
   getEndpointStatus(): Map<string, ApiEndpointStatus> {

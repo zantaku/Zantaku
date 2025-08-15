@@ -16,7 +16,7 @@ interface ChapterSourcesModalProps {
   mangaTitle: { english: string; userPreferred: string; romaji?: string; native?: string; };
   mangaId: string;
   anilistId?: string;
-  currentProvider?: 'mangadex' | 'katana' | 'mangafire' | 'unknown';
+  currentProvider?: 'mangadex' | 'mangafire' | 'unknown';
   mangaSlugId?: string;
   chapterManager?: ChapterManager;
   format?: string;
@@ -27,7 +27,6 @@ const logDebug = (message: string, data?: any) => console.log(`[ChapterModal DEB
 const logError = (message: string, error?: any) => console.error(`[ChapterModal ERROR] ${message}`, error || '');
 
 // const BASE_API_URL = 'https://takiapi.xyz';
-const KATANA_API_URL = 'https://magaapinovel.xyz';
 
 export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTitle, mangaId, anilistId, currentProvider, mangaSlugId, chapterManager, format, countryOfOrigin }: ChapterSourcesModalProps) {
   const router = useRouter();
@@ -81,12 +80,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       }
     }
     
-    // Additional fallback: check provider patterns
-    // Some providers are known to host primarily vertical content
-    if (currentProvider === 'katana') {
-      // Katana often hosts manhwa/manhua content
-      return true;
-    }
+
     
     return false;
   }, [format, countryOfOrigin, mangaTitle, currentProvider]);
@@ -126,41 +120,23 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     
     try {
       if (currentProvider === 'mangafire') {
-        const apiUrl = `${KATANA_API_URL}/api/manga/${mangaSlugId}/chapter-${chapterNumber}`;
-        console.log('🔥 MANGAFIRE API REQUEST:', {
-          url: apiUrl,
+        // Use MangaProviderService for MangaFire
+        console.log('🔥 USING MANGA PROVIDER SERVICE FOR MANGAFIRE:', {
           chapterId: properChapterId,
           mangaSlugId: mangaSlugId,
-          chapterNumber: chapterNumber,
-          originalChapterId: selectedChapter.id
+          chapterNumber: chapterNumber
         });
         
-        const response = await fetch(apiUrl);
-        console.log('🔥 MANGAFIRE API RESPONSE:', {
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url,
-          ok: response.ok
-        });
-        
-        const data = await response.json();
-        console.log('🔥 MANGAFIRE API DATA:', data);
-        
-        if (data?.error) {
-          const errorMessage = `${data.error}. ${data.message || ''}`;
-          console.error('🔥 MANGAFIRE API ERROR:', errorMessage);
-          throw new Error(errorMessage);
-        }
-        
-        if (data?.pages && Array.isArray(data.pages)) {
-          imageUrls = data.pages.map((page: any) => ({
-            url: page.url,
-            headers: page.headers || { 'Referer': 'https://mangafire.to' }
-          }));
-          logDebug(`Successfully processed ${imageUrls.length} pages from MangaFire API.`);
-        } else {
-          console.error('🔥 MANGAFIRE INVALID RESPONSE FORMAT:', data);
-          throw new Error("Invalid MangaFire API response format.");
+        try {
+          imageUrls = await MangaProviderService.getChapterPages(properChapterId, 'mangafire');
+          console.log('🔥 MANGA PROVIDER SERVICE SUCCESS:', `${imageUrls.length} pages`);
+        } catch (providerError) {
+          console.error('🔥 MANGA PROVIDER SERVICE ERROR:', {
+            error: providerError,
+            chapterId: properChapterId,
+            provider: currentProvider
+          });
+          throw providerError;
         }
       } else {
         // Fallback to MangaProviderService for other providers
@@ -256,7 +232,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
         }
 
         // Get the proper API URL using ChapterManager
-        const pagesUrl = chapterManager.getChapterPagesUrl(normalizedChapter, KATANA_API_URL);
+        const pagesUrl = chapterManager.getChapterPagesUrl(normalizedChapter, 'https://magaapinovel.xyz');
         const provider = chapterManager.getProvider();
         
         logDebug(`=== USING ${provider.toUpperCase()} API VIA CHAPTER MANAGER ===`);
@@ -266,29 +242,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
         // Fetch the pages
         let imageUrls: PageWithHeaders[] = [];
         
-        if (provider === 'katana') {
-            const response = await fetch(pagesUrl);
-            logDebug('Response status:', response.status);
-            
-            const data = await response.json();
-            logDebug('=== API RESPONSE RECEIVED ===');
-
-            if (data?.error) {
-                logError('API returned error:', data.error);
-                throw new Error(`${data.error}. ${data.message || ''}`);
-            }
-
-            if (data?.success && data?.data?.imageUrls && Array.isArray(data.data.imageUrls)) {
-                imageUrls = data.data.imageUrls.map((img: any, index: number) => {
-                    const imageUrl = `${KATANA_API_URL}${img.proxyUrl}`;
-                    return { url: imageUrl, headers: {} } as PageWithHeaders;
-                });
-                logDebug(`Successfully processed ${imageUrls.length} pages from Katana API.`);
-            } else {
-                throw new Error("Invalid Katana API response format.");
-            }
-            
-        } else if (provider === 'mangafire' || provider === 'mangadex') {
+        if (provider === 'mangafire' || provider === 'mangadex') {
             const response = await fetch(pagesUrl);
             logDebug('Response status:', response.status);
             

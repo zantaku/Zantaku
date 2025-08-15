@@ -323,9 +323,9 @@ export default function WebNovelReader() {
     
     // Fallback headers
     return {
-      'Referer': 'https://mangakatana.com/',
+      'Referer': 'https://mangafire.to/',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Origin': 'https://mangakatana.com'
+      'Origin': 'https://mangafire.to'
     };
   }, [params, images[0]]);
 
@@ -1553,7 +1553,7 @@ export default function WebNovelReader() {
         }}
         mangaId={mangaIdRef.current || params.mangaId as string}
         anilistId={params.anilistId as string}
-        currentProvider={params.readerCurrentProvider as 'mangadex' | 'katana' | 'mangafire' | 'unknown' || 'unknown'}
+        currentProvider={params.readerCurrentProvider as 'mangadex' | 'mangafire' | 'unknown' || 'unknown'}
         mangaSlugId={params.readerMangaSlugId as string}
         chapterManager={undefined}
         format={params.format as string}

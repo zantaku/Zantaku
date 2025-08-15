@@ -29,7 +29,7 @@ interface MangaReaderPreferences {
 
 // Interface for manga provider preferences
 interface ProviderPreferences {
-  defaultProvider: 'katana' | 'mangafire' | 'mangadex';
+  defaultProvider: 'mangafire' | 'mangadex';
   autoSelectSource: boolean;
   preferredChapterLanguage: string;
   preferredScanlationGroup: string;
@@ -87,7 +87,7 @@ export default function MangaSettingsPage() {
 
   // State for provider settings
   const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>({
-    defaultProvider: 'katana',
+    defaultProvider: 'mangafire',
     autoSelectSource: true,
     preferredChapterLanguage: 'en',
     preferredScanlationGroup: '',
@@ -584,8 +584,7 @@ export default function MangaSettingsPage() {
           <View style={styles.providerOptions}>
             {[
               { id: 'mangafire', name: 'Mangafire', color: '#f44336' },
-              { id: 'mangadex', name: 'MangaDex', color: '#FF6740' },
-              { id: 'katana', name: 'Katana', color: '#4CAF50' }
+              { id: 'mangadex', name: 'MangaDex', color: '#FF6740' }
             ].map(provider => (
               <TouchableOpacity
                 key={`provider-${provider.id}`}
@@ -599,7 +598,7 @@ export default function MangaSettingsPage() {
                   if (!providerPreferences.autoSelectSource) {
                     saveProviderPreferences({
                       ...providerPreferences,
-                      defaultProvider: provider.id as 'katana' | 'mangafire' | 'mangadex'
+                      defaultProvider: provider.id as 'mangafire' | 'mangadex'
                     });
                   }
                 }}
@@ -638,14 +637,14 @@ export default function MangaSettingsPage() {
           </View>
         </View>
 
-        {/* Show language preferences when MangaDex or Katana is selected */}
-        {(providerPreferences.defaultProvider === 'mangadex' || providerPreferences.defaultProvider === 'katana') && (
+        {/* Show language preferences when MangaDex is selected */}
+        {providerPreferences.defaultProvider === 'mangadex' && (
           <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
             <View style={{ marginBottom: 12 }}>
               <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Preferred Chapter Language</Text>
               {providerPreferences.autoSelectSource && (
                 <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                  Used for MangaDex and Katana chapters when auto-select is enabled
+                  Used for MangaDex chapters when auto-select is enabled
                 </Text>
               )}
             </View>

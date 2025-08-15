@@ -646,12 +646,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
                 let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' };
                 
-                // Migrate from Katana to MangaFire if needed
-                if (prefs.defaultProvider === 'katana') {
-                    prefs.defaultProvider = 'mangafire';
-                    await AsyncStorage.setItem('mangaProviderPreferences', JSON.stringify(prefs));
-                    logDebug('Migrated default provider from katana to mangafire');
-                }
+
                 
                 setPreferences(prefs);
             } catch {

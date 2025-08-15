@@ -35,7 +35,6 @@ const STORAGE_KEY = {
   USER_DATA: 'user_data'
 };
 const BASE_API_URL = 'https://takiapi.xyz';
-const KATANA_API_URL = 'https://magaapinovel.xyz';
 
 // Define styles at the top level
 const styles = StyleSheet.create({
@@ -1244,7 +1243,7 @@ export default function ReaderScreen() {
   useEffect(() => {
     if (params.readerCurrentProvider && typeof params.readerCurrentProvider === 'string') {
       console.log('Setting currentProvider from navigation params:', params.readerCurrentProvider);
-      setCurrentProvider(params.readerCurrentProvider as 'mangadex' | 'katana' | 'mangafire' | 'unknown');
+      setCurrentProvider(params.readerCurrentProvider as 'mangadex' | 'mangafire' | 'unknown');
       // Store provider info persistently for this reading session
       AsyncStorage.setItem('reader_current_provider', params.readerCurrentProvider);
     }
@@ -1264,7 +1263,7 @@ export default function ReaderScreen() {
         const storedProvider = await AsyncStorage.getItem('reader_current_provider');
         if (storedProvider && storedProvider !== 'unknown') {
           console.log('Loading persisted currentProvider:', storedProvider);
-          setCurrentProvider(storedProvider as 'mangadex' | 'katana' | 'mangafire' | 'unknown');
+          setCurrentProvider(storedProvider as 'mangadex' | 'mangafire' | 'unknown');
         }
       }
       
@@ -1326,7 +1325,7 @@ export default function ReaderScreen() {
   const [nextChapterId, setNextChapterId] = useState<string | null>(null);
   const [mangaSlugId, setMangaSlugId] = useState<string | null>(null);
   const [mangaTitle, setMangaTitle] = useState<string | null>(null);
-  const [currentProvider, setCurrentProvider] = useState<'mangadex' | 'katana' | 'mangafire' | 'unknown'>('unknown');
+  const [currentProvider, setCurrentProvider] = useState<'mangadex' | 'mangafire' | 'unknown'>('unknown');
   const [chapterManager, setChapterManager] = useState<ChapterManager | undefined>(undefined);
   
   // Progressive loading state
@@ -1609,9 +1608,9 @@ export default function ReaderScreen() {
               // Preload the image using ExpoImage prefetch
               const imageUrl = imageUrls[index];
               const headers = imageHeadersMap[index] || {
-                'Referer': 'https://mangakatana.com/',
+                'Referer': 'https://mangafire.to/',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Origin': 'https://mangakatana.com'
+                'Origin': 'https://mangafire.to'
               };
               
               await ExpoImage.prefetch(imageUrl, {
@@ -2306,7 +2305,7 @@ export default function ReaderScreen() {
           console.log('Manga ID:', readerMangaSlugId);
           
           // Use MangaProviderService to get chapters (same as ChapterList)
-          const chapters = await MangaProviderService.getChapters(readerMangaSlugId, readerProvider as 'mangadex' | 'katana' | 'mangafire');
+          const chapters = await MangaProviderService.getChapters(readerMangaSlugId, readerProvider as 'mangadex' | 'mangafire');
           
           if (chapters && chapters.length > 0) {
             console.log('=== MANGA PROVIDER SERVICE SUCCESS ===');
@@ -2389,83 +2388,7 @@ export default function ReaderScreen() {
           console.error('Error fetching from primary API:', err);
         }
         
-        // If the first API call failed, try the Katana API as fallback
-        if (!apiSuccess) {
-          try {
-            console.log('Trying Katana API as fallback');
-            
-            // Use mangaId directly for Katana API if it looks like a numeric ID
-            let katanaId = params.mangaId;
-            
-            // If using an AniList ID from params, prioritize it
-            if (params.anilistId) {
-              katanaId = params.anilistId;
-              console.log('Using AniList ID for Katana API:', katanaId);
-            }
-            
-            const katanaUrl = `${KATANA_API_URL}/katana/series/${katanaId}`;
-            console.log('Fetching from Katana API:', katanaUrl);
-            
-            const katanaResponse = await fetch(katanaUrl);
-            
-            if (katanaResponse.ok) {
-              const katanaData = await katanaResponse.json();
-              
-              if (katanaData?.success && katanaData?.data?.chapters && Array.isArray(katanaData.data.chapters)) {
-                console.log('=== KATANA API SUCCESS ===');
-                console.log('Successfully fetched chapters from Katana API');
-                console.log('Setting currentProvider to: katana');
-                console.log('Setting mangaSlugId to:', katanaId);
-                setCurrentProvider('katana');
-                
-                // Format chapters from Katana API response
-                const chaptersArray = katanaData.data.chapters;
-                
-                const formattedChapters = chaptersArray.map((ch: any) => {
-                  // For Katana API, each chapter has a slightly different format
-                  const chId = ch.id || ch.chapterId || ch.chapter || '';
-                  let chapterNumber = chId;
-                  
-                  // If the chapter ID starts with 'c', remove it
-                  if (chapterNumber.startsWith('c')) {
-                    chapterNumber = chapterNumber.substring(1);
-                  }
-                  
-                  return {
-                    id: chId,
-                    number: chapterNumber,
-                    title: ch.title || ch.name || `Chapter ${chapterNumber}`,
-                    url: chId
-                  };
-                });
-                
-                console.log('Formatted Katana chapters:', formattedChapters);
-                setAllChapters(formattedChapters);
-                
-                // Find current chapter index
-                const index = formattedChapters.findIndex(
-                  (ch: Chapter) => ch.number === params.chapter
-                );
-                console.log('Current chapter index in Katana:', index, 'for chapter:', params.chapter);
-                setCurrentChapterIndex(index);
-                
-                // Set navigation availability
-                const hasNext = index > 0;
-                const hasPrev = index < formattedChapters.length - 1;
-                console.log('Katana navigation availability - Next:', hasNext, 'Previous:', hasPrev);
-                setHasNextChapter(hasNext);
-                setHasPreviousChapter(hasPrev);
-                
-                // Set the manga slug ID for future requests
-                setMangaSlugId(katanaId as string);
-                
-                return; // Exit early since we successfully processed chapters
-              }
-            }
-          } catch (katanaErr) {
-            console.error('Error fetching from Katana API:', katanaErr);
-          }
-        }
+
         
         // If we reach here with apiSuccess true, process the original API data
         if (apiSuccess) {
@@ -2811,65 +2734,7 @@ export default function ReaderScreen() {
     }
   }, [params.isFirstChapter, getChapterByType, fetchPagesAndNavigate, showNotificationWithAnimation, setNotificationMessage]);
 
-  // Add fetchKatanaChapterAndNavigate before handleChapterNavigation
-  const fetchKatanaChapterAndNavigate = useCallback(async (chapterId: string) => {
-    try {
-      if (!mangaSlugId) {
-        console.error('[Katana] Cannot navigate: missing manga slug ID');
-        return;
-      }
 
-      console.log('[Katana] Fetching chapter content:', { mangaSlugId, chapterId });
-      const chapterUrl = `${KATANA_API_URL}/katana/series/${mangaSlugId}/${chapterId}`;
-      console.log('[Katana] Fetching from URL:', chapterUrl);
-      
-      const response = await fetch(chapterUrl);
-      const data = await response.json();
-      
-      if (data?.success && data?.data?.imageUrls) {
-        console.log('[Katana] Successfully fetched chapter data:', {
-          title: data.data.title,
-          chapter: data.data.chapter,
-          totalImages: data.data.imageUrls.length
-        });
-        
-        // Process images from the response
-        const imageUrls = data.data.imageUrls.map((img: any) => {
-          // Use proxyUrl if available, otherwise fallback to direct url
-          const imageUrl = `${KATANA_API_URL}${img.proxyUrl}`;
-          return imageUrl;
-        });
-        
-        if (imageUrls.length > 0) {
-          console.log('[Katana] Navigating with', imageUrls.length, 'images');
-          
-          // Extract chapter number from the response
-          let chapterNumber = data.data.chapter;
-          if (chapterNumber.startsWith('c')) {
-            chapterNumber = chapterNumber.substring(1);
-          }
-          
-          router.push({
-            pathname: '/reader',
-            params: {
-              ...params,
-              chapter: chapterNumber,
-              title: data.data.title,
-              anilistId: params.anilistId,
-              mangaId: params.mangaId,
-              ...Object.fromEntries(imageUrls.map((url: string, i: number) => [`image${i + 1}`, url]))
-            }
-          });
-        } else {
-          console.error('[Katana] No images found in response');
-        }
-      } else {
-        console.error('[Katana] Invalid response:', data);
-      }
-    } catch (error) {
-      console.error('[Katana] Error fetching chapter:', error);
-    }
-  }, [mangaSlugId, params, router]);
 
   // Update handleChapterNavigation to use params.mangaId
   const handleChapterNavigation = useCallback(async (type: 'next' | 'previous') => {
@@ -4098,50 +3963,7 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
     return `${readingDirection}-${images.length}`;
   }, [readingDirection, images.length]);
 
-  // Add a new function to check for next/previous chapters using Katana API
-  const checkKatanaChapterNavigation = useCallback(async () => {
-    if (!params.mangaId || !params.chapter) return;
-    
-    try {
-      // IMPORTANT FIX: Always use the mangaId from params directly
-      // instead of trying to search or using hardcoded IDs
-      console.log('[Katana] Using manga ID from params:', params.mangaId);
-      setMangaSlugId(params.mangaId as string);
-      
-      // For special cases, use more reliable number-based navigation
-      // instead of making potentially incorrect API calls
-      if (params.isLatestChapter === 'true') {
-        console.log('[Katana] Using direct navigation for latest chapter');
-        setHasNextChapter(false);
-        setHasPreviousChapter(Number(params.chapter) > 1);
-        
-        console.log('[Katana] Set navigation to:', {
-          hasPrevious: Number(params.chapter) > 1,
-          hasNext: false
-        });
-        return;
-      }
-      
-      // Always use direct numerical comparison for availability
-      const currentChapterNum = parseFloat(String(params.chapter));
-      if (!isNaN(currentChapterNum)) {
-        setHasNextChapter(params.isLatestChapter !== 'true');
-        setHasPreviousChapter(currentChapterNum > 1);
-        
-        
-        console.log('[Katana] Set navigation by chapter number:', {
-          hasPrevious: currentChapterNum > 1,
-          hasNext: params.isLatestChapter !== 'true'
-        });
-      }
-    } catch (error) {
-      console.error('[Katana] Error checking chapter navigation:', error);
-      // Fallback to basic navigation in case of errors
-      setHasPreviousChapter(Number(params.chapter) > 1);
-      setHasNextChapter(params.isLatestChapter !== 'true');
-      console.log('[Katana] Using fallback navigation (after error)');
-    }
-  }, [params.mangaId, params.chapter, params.isLatestChapter]);
+
   
   // Call the function when component mounts
   useEffect(() => {
@@ -4155,10 +3977,14 @@ Threshold: ${readingDirection === 'rtl' ? '1px (RTL)' : '10px (LTR)'}`}
       // Also set the manga slug ID for potential future operations
       setMangaSlugId('chainsaw-man.21890');
     } else {
-      // For other manga, use the original API-based approach
-      checkKatanaChapterNavigation();
+      // For other manga, use direct navigation based on chapter numbers
+      const currentChapterNum = parseFloat(String(params.chapter));
+      if (!isNaN(currentChapterNum)) {
+        setHasNextChapter(params.isLatestChapter !== 'true');
+        setHasPreviousChapter(currentChapterNum > 1);
+      }
     }
-  }, [checkKatanaChapterNavigation, params.mangaId, params.chapter, params.isLatestChapter]);
+  }, [params.mangaId, params.chapter, params.isLatestChapter]);
 
   // Add this function after the existing useCallback functions
   const fetchAniListTitle = useCallback(async () => {

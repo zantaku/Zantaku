@@ -221,111 +221,39 @@ export default function Player() {
     }
   };
 
-  // Log all route parameters and data when component mounts
+  // Log essential route parameters only (reduced logging to prevent terminal lag)
   useEffect(() => {
     const logPlayerData = async () => {
-      console.log('\n=== PLAYER COMPONENT DEBUG ===');
-      console.log('📱 Player component mounted');
-      console.log('🔗 Route parameters:', JSON.stringify(params, null, 2));
+      console.log('[PLAYER] 📱 Player component mounted');
       
-      // Log individual parameters for clarity
-      Object.keys(params).forEach(key => {
-        console.log(`📋 Param "${key}":`, params[key]);
-      });
+      // Only log essential parameters to reduce terminal spam
+      if (params.episodeId) {
+        console.log('[PLAYER] 📺 Episode:', params.episodeId);
+      }
+      if (params.animeTitle) {
+        console.log('[PLAYER] 🎬 Anime:', params.animeTitle);
+      }
+      if (params.episodeNumber) {
+        console.log('[PLAYER] 📋 Episode #:', params.episodeNumber);
+      }
       
-      // If there's a dataKey parameter, fetch the stored data
+      // If there's a dataKey parameter, fetch the stored data (minimal logging)
       if (params.dataKey) {
         try {
-          console.log('🔑 DataKey found, fetching stored data:', params.dataKey);
           const storedData = await AsyncStorage.getItem(params.dataKey as string);
           if (storedData) {
             const parsedData = JSON.parse(storedData);
-            console.log('📊 STORED VIDEO DATA JSON:', JSON.stringify(parsedData, null, 2));
-            console.log('🎬 Video source URL:', parsedData.source || 'none');
-            console.log('📝 Episode info:', {
-              episodeId: parsedData.episodeId,
-              episodeNumber: parsedData.episodeNumber,
-              animeTitle: parsedData.animeTitle,
-              anilistId: parsedData.anilistId
-            });
-            if (parsedData.provider) {
-              console.log('🔗 Stored provider:', parsedData.provider);
-            }
-            if (parsedData.audioType) {
-              console.log('🎧 Stored audio type:', parsedData.audioType);
-            }
-            console.log('📋 Headers:', JSON.stringify(parsedData.headers, null, 2));
-            console.log('🎯 Subtitles count:', parsedData.subtitles?.length || 0);
-            if (parsedData.subtitles?.length > 0) {
-              console.log('🎯 Subtitle languages:', parsedData.subtitles.map((s: any) => s.lang).join(', '));
-            }
-            console.log('⏱️ Video timings:', parsedData.timings ? JSON.stringify(parsedData.timings, null, 2) : 'none');
-            if (!parsedData.timings) {
-              console.warn('[PLAYER] ⏱️ No timings found in payload - skip buttons will rely on auto-detect.');
-            } else {
-              const { intro, outro } = parsedData.timings || {};
-              console.log('[PLAYER] ⏱️ Intro window:', intro ? `${intro.start}s → ${intro.end}s` : 'none');
-              console.log('[PLAYER] ⏱️ Outro window:', outro ? `${outro.start}s → ${outro.end}s` : 'none');
-            }
+            console.log('[PLAYER] ✅ Loaded video data for:', parsedData.animeTitle || 'Unknown');
+            console.log('[PLAYER] 🎬 Source available:', !!parsedData.source);
+            console.log('[PLAYER] 🎯 Subtitles:', parsedData.subtitles?.length || 0, 'available');
+            console.log('[PLAYER] ⏱️ Timings:', parsedData.timings ? 'Available' : 'None');
           } else {
-            console.log('⚠️ No stored data found for dataKey:', params.dataKey);
+            console.log('[PLAYER] ⚠️ No stored data found for dataKey');
           }
         } catch (error) {
-          console.error('❌ Error fetching stored data:', error);
+          console.error('[PLAYER] ❌ Error fetching stored data:', error);
         }
       }
-      
-      // Log any direct URL parameters that might contain video data
-      if (params.source) {
-        console.log('🎬 Direct video source from params:', typeof params.source === 'string' ? params.source : params.source);
-      }
-      if (params.provider) {
-        console.log('🔗 Provider from params:', params.provider);
-      }
-      if (params.audioType) {
-        console.log('🎧 Audio type from params:', params.audioType);
-      }
-      
-      if (params.headers) {
-        console.log('📋 Headers from params (raw):', params.headers);
-        try {
-          if (typeof params.headers === 'string' && params.headers.trim()) {
-            const parsedHeaders = JSON.parse(params.headers);
-            console.log('📋 Headers from params (parsed):', JSON.stringify(parsedHeaders, null, 2));
-          }
-        } catch (error) {
-          console.log('⚠️ Failed to parse headers from params:', error);
-        }
-      }
-      
-      if (params.subtitles) {
-        console.log('🎯 Subtitles from params (raw):', typeof params.subtitles);
-        try {
-          if (typeof params.subtitles === 'string' && params.subtitles.trim()) {
-            const parsedSubtitles = JSON.parse(params.subtitles);
-            console.log('🎯 Subtitles from params (parsed):', `${parsedSubtitles.length} subtitles`);
-            if (parsedSubtitles.length > 0) {
-              console.log('🎯 Subtitle languages from params:', parsedSubtitles.map((s: any) => s.lang).join(', '));
-            }
-          }
-        } catch (error) {
-          console.log('⚠️ Failed to parse subtitles from params:', error);
-        }
-      }
-      
-      if (params.timings) {
-        console.log('⏱️ Timings from params (raw):', typeof params.timings);
-        try {
-          if (typeof params.timings === 'string' && params.timings.trim()) {
-            const parsedTimings = JSON.parse(params.timings);
-            console.log('⏱️ Timings from params (parsed):', JSON.stringify(parsedTimings, null, 2));
-          }
-        } catch (error) {
-          console.log('⚠️ Failed to parse timings from params:', error);
-        }
-      }
-      
-      console.log('=== END PLAYER COMPONENT DEBUG ===\n');
     };
 
     logPlayerData();

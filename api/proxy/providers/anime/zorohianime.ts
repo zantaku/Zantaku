@@ -21,6 +21,7 @@ export interface Source {
   type?: string;
   headers?: Record<string, string>;
   isM3U8?: boolean;
+  name?: string;
 }
 
 export interface Subtitle {

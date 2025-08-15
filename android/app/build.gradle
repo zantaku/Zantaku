@@ -105,8 +105,13 @@ android {
         buildConfigField "String", "TAKIAPI_PRIMARY", '"https://takiapi.xyz"'
         buildConfigField "String", "TAKIAPI_MIRROR1", '"https://api.takiapi.xyz"'
         buildConfigField "String", "TAKIAPI_MIRROR2", '"https://cdn.takiapi.xyz"'
-        buildConfigField "String", "KATANA_PRIMARY", '"https://magaapinovel.xyz"'
-        buildConfigField "String", "KATANA_FALLBACK", '"https://takiapi.xyz/manga"'
+
+        
+        // Add network security configurations for problematic domains
+        buildConfigField "String", "HIANIME_API_BASE", '"https://anianiwatchwatching.vercel.app"'
+        buildConfigField "String", "KUROJI_API_BASE", '"https://kuroji.1ani.me"'
+        buildConfigField "boolean", "ENABLE_NETWORK_DEBUG", "true"
+        buildConfigField "int", "NETWORK_TIMEOUT", "30000"
     }
     
     splits {
