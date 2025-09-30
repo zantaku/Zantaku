@@ -803,15 +803,22 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             let fetchedEpisodes: Episode[] = [];
             
             if (provider === 'animepahe') {
-                if (!titleToUse) {
-                    throw new Error('Anime title is required for AnimePahe provider');
+                // Prefer AniList ID for Kuroji resolution, fallback to title
+                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 1: Resolving anime...`);
+                let animeId: string | null = null;
+                
+                if (anilistIdToUse) {
+                    console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Using AniList ID: ${anilistIdToUse}`);
+                    animeId = await animePaheProvider.getAnimeIdByAnilistId(anilistIdToUse);
+                } else if (titleToUse) {
+                    console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Using title: "${titleToUse}"`);
+                    animeId = await animePaheProvider.getAnimeIdByTitle(titleToUse);
+                } else {
+                    throw new Error('Anime title or AniList ID is required for AnimePahe provider');
                 }
                 
-                console.log(`[EPISODE_LIST] 🔍 [ANIMEPAHE] Step 1: Getting anime ID for: "${titleToUse}"`);
-                const animeId = await animePaheProvider.getAnimeIdByTitle(titleToUse);
-                
                 if (!animeId) {
-                    throw new Error(`Could not find AnimePahe ID for: ${titleToUse}`);
+                    throw new Error(`Could not resolve anime ID for: ${titleToUse || anilistIdToUse}`);
                 }
                 
                 console.log(`[EPISODE_LIST] ✅ [ANIMEPAHE] Found anime ID: ${animeId}`);
@@ -1491,7 +1498,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
 
     // Render functions
     const getProviderName = useCallback((provider: string) => {
-        return provider === 'animepahe' ? 'AnimePahe' : provider === 'zoro' ? 'Zoro' : 'AnimeZone';
+        return provider === 'animepahe' ? 'Default' : provider === 'zoro' ? 'Zoro' : 'AnimeZone';
     }, []);
 
     const renderItem = useCallback(({ item, index }: { item: Episode; index: number }) => {
@@ -1590,13 +1597,26 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                     <View style={styles.filterSectionSmall}>
                         <Text style={[styles.filterLabelSmall, { color: currentTheme.colors.textSecondary }]}>🌐 Provider</Text>
                         <TouchableOpacity 
-                            style={[styles.filterDropdownSmall, { borderColor: currentTheme.colors.border }]}
+                            style={[
+                                styles.filterDropdownSmall, 
+                                { borderColor: currentTheme.colors.border },
+                                currentProvider === 'animepahe' && styles.filterDropdownDisabled
+                            ]}
                             onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+                            disabled={currentProvider === 'animepahe'}
                         >
-                            <Text style={[styles.filterDropdownTextSmall, { color: currentTheme.colors.text }]}>
+                            <Text style={[
+                                styles.filterDropdownTextSmall, 
+                                { color: currentTheme.colors.text },
+                                currentProvider === 'animepahe' && styles.filterDropdownTextDisabled
+                            ]}>
                                 {getProviderName(currentProvider)}
                         </Text>
-                            <FontAwesome5 name="chevron-down" size={10} color={currentTheme.colors.textSecondary} />
+                            <FontAwesome5 
+                                name="chevron-down" 
+                                size={10} 
+                                color={currentProvider === 'animepahe' ? '#FF4444' : currentTheme.colors.textSecondary} 
+                            />
                         </TouchableOpacity>
                     </View>
 
@@ -1697,7 +1717,8 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                     <View style={[styles.inlineDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
                         {(['animepahe', 'animezone', 'zoro'] as const).map((provider) => {
                             const isZoro = provider === 'zoro';
-                            const isDisabled = isZoro;
+                            const isAnimePahe = provider === 'animepahe';
+                            const isDisabled = isZoro || isAnimePahe;
                             
                             return (
                                 <TouchableOpacity
@@ -1722,7 +1743,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                                         currentProvider === provider && styles.inlineDropdownItemTextActive,
                                         isDisabled && styles.inlineDropdownItemTextDisabled
                                     ]}>
-                                        {isZoro ? `${getProviderName(provider)} (fixing)` : getProviderName(provider)}
+                                        {isZoro ? `${getProviderName(provider)} (fixing)` : isAnimePahe ? `${getProviderName(provider)} (default)` : getProviderName(provider)}
                                     </Text>
                                     {currentProvider === provider && !isDisabled && (
                                         <FontAwesome5 name="check" size={12} color={currentTheme.colors.primary} />

@@ -125,38 +125,12 @@ export class AnimePaheProvider {
    * Get episodes from AnimePahe
    */
   async getEpisodes(animeId: string): Promise<Episode[]> {
-    // Try TakiAPI first
+    // Use Kuroji as primary since TakiAPI/animepahe.ru is often down
+    console.log(`\n📺 [ANIMEPAHE EPISODES START] ===================`);
+    console.log(`[ANIMEPAHE] 📺 Getting episodes for anime ID: ${animeId}`);
+    console.log(`[ANIMEPAHE] 🔄 Using Kuroji as primary source (TakiAPI/animepahe.ru is unreliable)`);
+    
     try {
-      console.log(`\n📺 [ANIMEPAHE EPISODES START] ===================`);
-      console.log(`[ANIMEPAHE] 📺 Getting episodes for anime ID: ${animeId}`);
-      const episodesUrl = `${this.baseUrl}/anime/animepahe/info/${animeId}`;
-      console.log(`[ANIMEPAHE] 📡 Episodes URL: ${episodesUrl}`);
-      const response = await axios.get(episodesUrl);
-      console.log(`[ANIMEPAHE] ✅ Episodes response received (status ${response.status})`);
-      if (!response.data || !Array.isArray(response.data?.episodes)) {
-        throw new Error('No episodes in TakiAPI response');
-      }
-      const episodes: Episode[] = response.data.episodes.map((ep: any) => ({
-          id: ep.id,
-          number: ep.number,
-          title: ep.title,
-          image: ep.image,
-          description: ep.description,
-          duration: ep.duration,
-          provider: 'AnimePahe',
-        isSubbed: true,
-        isDubbed: false,
-          isFiller: ep.isFiller,
-          isRecap: ep.isRecap,
-        aired: ep.aired,
-      }));
-      console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from TakiAPI`);
-      return episodes;
-    } catch (err) {
-      console.log(`[ANIMEPAHE] ⚠️ TakiAPI episodes failed for ${animeId}, falling back to Kuroji`, {
-        error: (err as any)?.message,
-      });
-      // Fallback to Kuroji
       const eps = await kjGetEpisodes(animeId);
       const episodes: Episode[] = eps.map((ep: any) => ({
         id: `animepahe-${ep.number}`,
@@ -172,8 +146,45 @@ export class AnimePaheProvider {
         isRecap: false,
         aired: ep.airDate,
       }));
-      console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from Kuroji fallback`);
+      console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from Kuroji`);
       return episodes;
+    } catch (kurojiErr) {
+      console.log(`[ANIMEPAHE] ⚠️ Kuroji failed for ${animeId}, trying TakiAPI as fallback`, {
+        error: (kurojiErr as any)?.message,
+      });
+      
+      // Fallback to TakiAPI if Kuroji fails
+      try {
+        const episodesUrl = `${this.baseUrl}/anime/animepahe/info/${animeId}`;
+        console.log(`[ANIMEPAHE] 📡 Episodes URL: ${episodesUrl}`);
+        const response = await axios.get(episodesUrl);
+        console.log(`[ANIMEPAHE] ✅ Episodes response received (status ${response.status})`);
+        if (!response.data || !Array.isArray(response.data?.episodes)) {
+          throw new Error('No episodes in TakiAPI response');
+        }
+        const episodes: Episode[] = response.data.episodes.map((ep: any) => ({
+            id: ep.id,
+            number: ep.number,
+            title: ep.title,
+            image: ep.image,
+            description: ep.description,
+            duration: ep.duration,
+            provider: 'AnimePahe',
+          isSubbed: true,
+          isDubbed: false,
+            isFiller: ep.isFiller,
+            isRecap: ep.isRecap,
+          aired: ep.aired,
+        }));
+        console.log(`[ANIMEPAHE] ✅ Processed ${episodes.length} episodes from TakiAPI fallback`);
+        return episodes;
+      } catch (takiErr) {
+        console.log(`[ANIMEPAHE] ❌ Both Kuroji and TakiAPI failed`, {
+          kurojiError: (kurojiErr as any)?.message,
+          takiError: (takiErr as any)?.message,
+        });
+        throw new Error('Failed to get episodes from all sources');
+      }
     }
   }
 
@@ -181,33 +192,11 @@ export class AnimePaheProvider {
    * Get watch data for an episode by anime ID and episode number
    */
   async getWatchData(animeId: string, episodeNumber: number, isDub: boolean = false): Promise<WatchResponse> {
-    // Try TakiAPI first, then fallback to Kuroji
+    // Use Kuroji as primary since TakiAPI/animepahe.ru is unreliable
+    console.log(`[ANIMEPAHE] 🎬 Getting watch data for anime ${animeId} ep ${episodeNumber}`);
+    console.log(`[ANIMEPAHE] 🔄 Using Kuroji as primary source`);
+    
     try {
-      const watchUrl = `${this.baseUrl}/anime/animepahe/watch/${animeId}/episode-${episodeNumber}`;
-      console.log(`[ANIMEPAHE] 📡 Watch URL: ${watchUrl}`);
-      const response = await axios.get(watchUrl);
-      if (!response.data) throw new Error('No watch data');
-      const sources: Source[] = (response.data.sources || []).map((source: any) => ({
-            url: source.url,
-            quality: source.quality || 'default',
-            type: isDub ? 'dub' : 'sub',
-            headers: {
-              ...response.data.headers,
-              Referer: 'https://animepahe.com/',
-              Origin: 'https://animepahe.com',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
-        },
-        isM3U8: (source.url || '').includes('.m3u8') || source.isM3U8,
-      }));
-      const subtitles: Subtitle[] = (response.data.subtitles || [])
-        .filter((sub: any) => sub.url && sub.lang)
-        .map((sub: any) => ({ url: sub.url, lang: sub.lang }));
-      if (!sources.length) throw new Error('No sources in TakiAPI watch');
-      return { sources, subtitles, headers: response.data.headers || {} };
-    } catch (err) {
-      console.log(`[ANIMEPAHE] ⚠️ TakiAPI watch failed for ${animeId} ep ${episodeNumber}, falling back to Kuroji`, {
-        error: (err as any)?.message,
-      });
       const streams = await kjGetStreams(animeId, episodeNumber, 'animepahe', isDub);
       const sources: Source[] = streams.map((s) => ({
         url: s.url,
@@ -217,7 +206,44 @@ export class AnimePaheProvider {
         isM3U8: s.url.includes('.m3u8'),
       }));
       const subtitles: Subtitle[] = (streams[0]?.captions || []).map((c) => ({ url: c.url, lang: c.lang }));
+      console.log(`[ANIMEPAHE] ✅ Kuroji provided ${sources.length} sources`);
       return { sources, subtitles, headers: {} };
+    } catch (kurojiErr) {
+      console.log(`[ANIMEPAHE] ⚠️ Kuroji watch failed for ${animeId} ep ${episodeNumber}, trying TakiAPI`, {
+        error: (kurojiErr as any)?.message,
+      });
+      
+      // Fallback to TakiAPI
+      try {
+        const watchUrl = `${this.baseUrl}/anime/animepahe/watch/${animeId}/episode-${episodeNumber}`;
+        console.log(`[ANIMEPAHE] 📡 Watch URL: ${watchUrl}`);
+        const response = await axios.get(watchUrl);
+        if (!response.data) throw new Error('No watch data');
+        const sources: Source[] = (response.data.sources || []).map((source: any) => ({
+              url: source.url,
+              quality: source.quality || 'default',
+              type: isDub ? 'dub' : 'sub',
+              headers: {
+                ...response.data.headers,
+                Referer: 'https://animepahe.com/',
+                Origin: 'https://animepahe.com',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
+          },
+          isM3U8: (source.url || '').includes('.m3u8') || source.isM3U8,
+        }));
+        const subtitles: Subtitle[] = (response.data.subtitles || [])
+          .filter((sub: any) => sub.url && sub.lang)
+          .map((sub: any) => ({ url: sub.url, lang: sub.lang }));
+        if (!sources.length) throw new Error('No sources in TakiAPI watch');
+        console.log(`[ANIMEPAHE] ✅ TakiAPI provided ${sources.length} sources as fallback`);
+        return { sources, subtitles, headers: response.data.headers || {} };
+      } catch (takiErr) {
+        console.log(`[ANIMEPAHE] ❌ Both Kuroji and TakiAPI watch failed`, {
+          kurojiError: (kurojiErr as any)?.message,
+          takiError: (takiErr as any)?.message,
+        });
+        throw new Error('Failed to get watch data from all sources');
+      }
     }
   }
 
@@ -480,24 +506,70 @@ export class AnimePaheProvider {
 
   /**
    * Get AnimePahe anime ID by searching for the anime title
+   * Note: This actually returns the AniList ID which Kuroji uses internally
    */
   async getAnimeIdByTitle(animeTitle: string): Promise<string | null> {
-    // Prefer TakiAPI search, then fallback to Kuroji resolver
+    // Use Kuroji resolver as primary since TakiAPI is unreliable
+    console.log(`[ANIMEPAHE] 🔍 Getting anime ID for: "${animeTitle}"`);
+    console.log(`[ANIMEPAHE] 🔄 Using Kuroji resolver as primary source`);
+    
+    try {
+      // Try to resolve by title using Kuroji
+      const id = await kjResolve({ title: animeTitle });
+      if (id) {
+        console.log(`[ANIMEPAHE] ✅ Kuroji resolved AniList ID: ${id}`);
+        return id;
+      }
+    } catch (err) {
+      console.log('[ANIMEPAHE] ⚠️ Kuroji resolver failed, will try TakiAPI search', {
+        error: (err as any)?.message,
+      });
+    }
+    
+    // Fallback to TakiAPI search
     try {
       const searchResults = await this.searchAnime(animeTitle);
       if (searchResults && searchResults.length > 0) {
         const exact = searchResults.find((a: any) => (a.title || '').toLowerCase().trim() === animeTitle.toLowerCase().trim());
-        return (exact?.id || searchResults[0].id)?.toString?.() || null;
+        const foundId = (exact?.id || searchResults[0].id)?.toString?.() || null;
+        if (foundId) {
+          console.log(`[ANIMEPAHE] ✅ TakiAPI search found ID: ${foundId}`);
+        }
+        return foundId;
       }
-    } catch {
-      console.log('[ANIMEPAHE] ⚠️ searchAnime failed, will try Kuroji resolver');
+    } catch (err) {
+      console.log('[ANIMEPAHE] ❌ Both Kuroji and TakiAPI failed to find anime ID', {
+        error: (err as any)?.message,
+      });
     }
+    
+    return null;
+  }
+  
+  /**
+   * Get AnimePahe anime ID by AniList ID
+   * When we have an AniList ID, we can use it directly with Kuroji
+   */
+  async getAnimeIdByAnilistId(anilistId: string | number): Promise<string | null> {
+    console.log(`[ANIMEPAHE] 🔍 Resolving by AniList ID: ${anilistId}`);
+    console.log(`[ANIMEPAHE] 🔄 Using Kuroji resolver with AniList ID`);
+    
     try {
-      const id = await kjResolve({ title: animeTitle });
-      return id || null;
-    } catch {
-      return null;
+      // Kuroji accepts AniList IDs directly
+      const id = await kjResolve({ anilistId });
+      if (id) {
+        console.log(`[ANIMEPAHE] ✅ Kuroji confirmed AniList ID: ${id}`);
+        return id;
+      }
+    } catch (err) {
+      console.log('[ANIMEPAHE] ❌ Kuroji resolver failed for AniList ID', {
+        anilistId,
+        error: (err as any)?.message,
+      });
     }
+    
+    // Return the AniList ID itself as fallback since Kuroji uses AniList IDs
+    return String(anilistId);
   }
 
   /**

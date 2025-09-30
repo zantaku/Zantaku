@@ -112,6 +112,12 @@ android {
         buildConfigField "String", "KUROJI_API_BASE", '"https://kuroji.1ani.me"'
         buildConfigField "boolean", "ENABLE_NETWORK_DEBUG", "true"
         buildConfigField "int", "NETWORK_TIMEOUT", "30000"
+        
+        // Zencloud API configuration for VLC player
+        buildConfigField "String", "ZENCLOUD_BASE", '"https://zencloud.cc"'
+        buildConfigField "String", "ZENCLOUD_CDN", '"https://zantaku.zencloud.cc"'
+        buildConfigField "String", "ZENCLOUD_API_CDN", '"https://cdn.zencloud.cc"'
+        buildConfigField "boolean", "ENABLE_VLC_PLAYER", "true"
     }
     
     splits {
@@ -235,6 +241,9 @@ dependencies {
     // Enhanced networking libraries for better API reliability
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
+    
+    // VLC Media Player support for advanced streaming
+    implementation 'org.videolan.android:libvlc-all:3.4.9'
 }
 
 // Add script to download FFmpeg Kit AAR from alternative source

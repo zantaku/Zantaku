@@ -174,6 +174,43 @@ function ThemedLayout() {
             headerShown: false,
             presentation: 'fullScreenModal',
             animation: 'fade',
+            orientation: 'landscape',
+            navigationBarHidden: true,
+            statusBarHidden: true,
+            gestureEnabled: false,
+            contentStyle: {
+              backgroundColor: '#000',
+            },
+          }}
+        />
+        <Stack.Screen
+          name="player/index"
+          options={{
+            headerShown: false,
+            presentation: 'fullScreenModal',
+            animation: 'fade',
+            orientation: 'landscape',
+            navigationBarHidden: true,
+            statusBarHidden: true,
+            gestureEnabled: false,
+            contentStyle: {
+              backgroundColor: '#000',
+            },
+          }}
+        />
+        <Stack.Screen
+          name="player/player"
+          options={{
+            headerShown: false,
+            presentation: 'fullScreenModal',
+            animation: 'fade',
+            orientation: 'landscape',
+            navigationBarHidden: true,
+            statusBarHidden: true,
+            gestureEnabled: false,
+            contentStyle: {
+              backgroundColor: '#000',
+            },
           }}
         />
         <Stack.Screen

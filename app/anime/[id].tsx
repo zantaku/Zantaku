@@ -238,7 +238,7 @@ interface JikanEpisodeVideo {
 
 
 export default function AnimeDetailsScreen() {
-  const { id, fromActivities, tab } = useLocalSearchParams();
+  const { id, fromActivities, tab, refresh } = useLocalSearchParams();
   const { user } = useAuth();
   const { isDarkMode } = useTheme();
   const { lockPortrait } = useOrientation();
@@ -278,6 +278,7 @@ export default function AnimeDetailsScreen() {
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showErrorToast, setShowErrorToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Add snapPoints for bottom sheet
   const snapPoints = useMemo(() => ['70%'], []);
@@ -410,6 +411,27 @@ export default function AnimeDetailsScreen() {
       fetchEpisodes();
     }
   }, [details]);
+
+  // Listen for refresh parameter from player
+  useEffect(() => {
+    if (refresh === '1' && details) {
+      console.log('[ANIME_DETAILS] 🔄 Refresh requested from player, refetching episodes and details');
+      
+      // Refetch anime details to get updated progress
+      fetchAnimeDetails();
+      
+      // Refetch episodes to show updated progress
+      if (details) {
+        fetchEpisodes();
+      }
+      
+      // Clear the refresh param to prevent repeated refetches
+      router.setParams({ refresh: '0' });
+      
+      // Increment refresh key to force episode list re-render
+      setRefreshKey(prev => prev + 1);
+    }
+  }, [refresh, details]);
 
 
 
@@ -1052,6 +1074,7 @@ export default function AnimeDetailsScreen() {
   const renderWatchTab = () => (
     <View style={styles.watchTabContent}>
       <WatchTab 
+        key={refreshKey}
         episodes={episodes} 
         loading={episodesLoading} 
         animeTitle={details?.title || { english: '', userPreferred: '' }}

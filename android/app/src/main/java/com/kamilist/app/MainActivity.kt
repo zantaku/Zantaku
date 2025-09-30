@@ -1,6 +1,7 @@
 package com.kamilist.app
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 
@@ -8,6 +9,8 @@ import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 import expo.modules.ReactActivityDelegateWrapper
 
@@ -61,5 +64,28 @@ class MainActivity : ReactActivity() {
       // Use the default back button implementation on Android S
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
+  }
+
+  /**
+   * Handle Picture-in-Picture mode changes
+   */
+  override fun onPictureInPictureModeChanged(
+    isInPictureInPictureMode: Boolean,
+    newConfig: Configuration
+  ) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    
+    try {
+      // Get the PictureInPictureModule instance and notify React Native
+      val reactInstanceManager = reactNativeHost?.reactInstanceManager
+      val reactContext = reactInstanceManager?.currentReactContext
+      
+      if (reactContext != null) {
+        val pipModule = reactContext.getNativeModule(PictureInPictureModule::class.java)
+        pipModule?.sendPipModeChangedEvent(isInPictureInPictureMode)
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("MainActivity", "Failed to handle PiP mode change", e)
+    }
   }
 }

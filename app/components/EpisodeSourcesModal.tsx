@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, TouchableWithoutFeedback, FlatList } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, TouchableWithoutFeedback, FlatList, ActivityIndicator } from 'react-native';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
 import Reanimated, { Easing } from 'react-native-reanimated';
@@ -10,6 +10,17 @@ import { ScrollView } from 'react-native';
   // Removed unused heavy imports - no fallback allowed
 // Removed AnimePahe import - no fallback allowed
 import { animeZoneProvider } from '../../api/animezone';
+import { 
+  fetchRawByAnilistId, 
+  fetchFileDetailsByAccessId, 
+  getCachedRaw, 
+  setCachedRaw,
+  getCachedFileDetails,
+  setCachedFileDetails,
+  maskToken,
+  ZenRawItem,
+  ZenFileData 
+} from '../../services/zencloud';
 
 const ReanimatedTouchableOpacity = Reanimated.createAnimatedComponent(TouchableOpacity);
 
@@ -272,6 +283,12 @@ export default function EpisodeSourcesModal({
   }[]>([]);
   const [serverProcessingMessage, setServerProcessingMessage] = useState<string>('');
   
+  // Zencloud state
+  const [zencloudLoading, setZencloudLoading] = useState(false);
+  const [zencloudRaw, setZencloudRaw] = useState<ZenRawItem[] | null>(null);
+  const [zencloudFile, setZencloudFile] = useState<ZenFileData | null>(null);
+  const [zencloudError, setZencloudError] = useState<string | null>(null);
+  
   // Convert episodeNumber to string for use in the component
   const episodeNumberStr = episodeNumber?.toString() || '';
 
@@ -354,8 +371,8 @@ export default function EpisodeSourcesModal({
       // Always fetch sources on open, but never auto-play
       setLoading(true);
       let initialType = preferredType || sourceSettings.preferredType || 'sub';
-                  // For AnimePahe, force SUB type since it doesn't support DUB
-            if (currentProvider === 'animepahe') {
+                  // For AnimePahe and Jikan, force SUB type since they don't support DUB
+            if (currentProvider === 'animepahe' || currentProvider === 'jikan') {
                 initialType = 'sub';
             }
             // For AnimeZone, allow both SUB and DUB since the API supports both
@@ -366,13 +383,23 @@ export default function EpisodeSourcesModal({
 
       // Fetch sources for the initial type
       fetchSources(episodeId, initialType);
+      
+      // Always fetch Zencloud data
+      if (anilistId && episodeNumber) {
+        console.log(`🌟 [ZENCLOUD] Modal opened, fetching Zencloud data...`);
+        fetchZencloudData();
+      }
     } else {
       fadeAnim.setValue(0);
       scaleAnim.setValue(0.95);
       // Hide pill when modal closes
       setPillVisible(false);
+      // Reset Zencloud state when modal closes
+      setZencloudRaw(null);
+      setZencloudFile(null);
+      setZencloudError(null);
     }
-  }, [visible, skipTypeSelection]);
+  }, [visible, skipTypeSelection, currentProvider, anilistId, episodeNumber, fetchZencloudData]);
 
   const formatSourceWithHeaders = (source: any, apiHeaders: any, sourceType: 'sub' | 'dub', provider?: string): Source => {
     console.log(`[FORMAT_SOURCE] 🔧 Formatting source for provider: ${provider}`);
@@ -682,9 +709,9 @@ export default function EpisodeSourcesModal({
         console.log(`🚀 Fast-checking provider: ${provider}`);
         
         try {
-          // Removed AnimePahe provider logic - no fallback allowed
+          // AnimePahe provider is currently disabled, but Zencloud will provide sources
           if (provider === 'animepahe') {
-            console.log(`❌ [ANIMEPAHE] Skipping AnimePahe: No fallback allowed`);
+            console.log(`❌ [ANIMEPAHE] Skipping AnimePahe: Provider disabled, but Zencloud will provide sources`);
             continue;
           } else if (provider === 'zoro') {
             // Zoro is currently disabled - working on fixing
@@ -957,7 +984,7 @@ export default function EpisodeSourcesModal({
       if (currentProvider === 'animezone') {
         errorMessage = `AnimeZone couldn't find streaming sources for this episode. Try switching to a different provider.`;
       } else if (currentProvider === 'animepahe') {
-        errorMessage = `AnimePahe couldn't find streaming sources for this episode. Try switching to a different provider.`;
+        errorMessage = `AnimePahe provider is currently disabled. Use Zencloud below for premium streaming.`;
       } else if (currentProvider === 'zoro') {
         errorMessage = `HiAnime is currently being worked on and may not work properly. Try switching to a different provider.`;
       }
@@ -1031,27 +1058,54 @@ export default function EpisodeSourcesModal({
     // Log the subtitles that will be sent
     console.log('[SOURCE SELECT DEBUG] Sending subtitles:', directSubtitles.length);
     
-    // Store data that will be needed by the player
-    const payload = {
-      source: source.url,
-      headers: source.headers,
-      episodeId: episodeId,
-      episodeNumber: episodeNumberStr ? parseInt(episodeNumberStr) : undefined,
-      subtitles: directSubtitles || [],
-      timings: directTimings || null,
-      anilistId: anilistId || '',
-      animeTitle: animeTitle || '',
-      provider: selectedProvider || currentProvider || 'animepahe',
-      audioType: source.type,
-      timestamp: Date.now()
-    };
+      // Store data that will be needed by the player
+      const payload = {
+        source: source.url,
+        headers: source.headers,
+        episodeId: episodeId,
+        episodeNumber: episodeNumberStr ? parseInt(episodeNumberStr) : undefined,
+        subtitles: (directSubtitles || []).map(sub => ({
+          ...sub,
+          url: sub.url?.replace('cdn.zencloud.cc', 'zantaku.zencloud.cc') || sub.url
+        })),
+        timings: directTimings || null,
+        anilistId: anilistId || '',
+        animeTitle: animeTitle || '',
+        provider: selectedProvider || currentProvider || 'animepahe',
+        audioType: source.type,
+        timestamp: Date.now(),
+        // Store full Zencloud data if available (regardless of provider)
+        zencloudData: zencloudFile ? {
+          ...zencloudFile,
+          // Ensure all required fields are present
+          file_code: zencloudFile?.file_code || '',
+          m3u8_url: zencloudFile?.m3u8_url?.replace('cdn.zencloud.cc', 'zantaku.zencloud.cc') || '',
+          original_filename: zencloudFile?.original_filename || 'Unknown',
+          subtitles: zencloudFile?.subtitles?.map(sub => ({
+            ...sub,
+            url: sub.url?.replace('cdn.zencloud.cc', 'zantaku.zencloud.cc') || sub.url
+          })) || [],
+          chapters: zencloudFile?.chapters || [],
+          fonts: zencloudFile?.fonts?.map(font => ({
+            ...font,
+            url: font.url?.replace('cdn.zencloud.cc', 'zantaku.zencloud.cc') || font.url
+          })) || [],
+          token: zencloudFile?.token || '',
+          token_expires: zencloudFile?.token_expires || '',
+          client_ip: zencloudFile?.client_ip || '',
+          token_ip_bound: zencloudFile?.token_ip_bound || false
+        } : null
+      };
     AsyncStorage.setItem(dataKey, JSON.stringify(payload))
       .then(() => {
         console.log('[SOURCE SELECT DEBUG] Successfully stored video data with key:', dataKey, {
           hasTimings: Boolean(payload.timings),
           intro: payload.timings?.intro,
           outro: payload.timings?.outro,
-          subtitles: payload.subtitles?.length || 0
+          subtitles: payload.subtitles?.length || 0,
+          provider: payload.provider,
+          hasZencloudData: Boolean(payload.zencloudData),
+          zencloudFileCode: payload.zencloudData?.file_code || 'none'
         });
       })
       .catch(err => {
@@ -1138,7 +1192,10 @@ export default function EpisodeSourcesModal({
       headers: source.headers,
       episodeId: episodeId,
       episodeNumber: episodeNumberStr ? parseInt(episodeNumberStr) : undefined,
-      subtitles: currentSubtitles || [],
+      subtitles: (currentSubtitles || []).map(sub => ({
+        ...sub,
+        url: sub.url?.replace('cdn.zencloud.cc', 'zantaku.zencloud.cc') || sub.url
+      })),
       timings: videoTimings || null,
       anilistId: anilistId || '',
       animeTitle: animeTitle || '',
@@ -1192,6 +1249,144 @@ export default function EpisodeSourcesModal({
 
   // Removed Zoro server selection - no fallback allowed
 
+  // Zencloud section component - always visible
+  const ZencloudSection = () => {
+    
+    const handleZencloudPlay = () => {
+      if (!zencloudFile) return;
+      
+      console.log(`🌟 [ZENCLOUD] User selected Zencloud source:`, {
+        file_code: zencloudFile.file_code,
+        m3u8_url: zencloudFile.m3u8_url ? zencloudFile.m3u8_url.split('?')[0] + '?token=...' : 'none',
+        subtitles_count: zencloudFile.subtitles?.length || 0,
+        chapters_count: zencloudFile.chapters?.length || 0,
+        fonts_count: zencloudFile.fonts?.length || 0,
+        has_thumbnails: !!zencloudFile.thumbnails_vtt_url,
+        token_expires: zencloudFile.token_expires
+      });
+      
+      console.log(`🌟 [ZENCLOUD] Full Zencloud data being passed to VLC player:`, {
+        original_filename: zencloudFile.original_filename,
+        file_id: zencloudFile.file_id,
+        client_ip: zencloudFile.client_ip,
+        token_ip_bound: zencloudFile.token_ip_bound,
+        premium_status: zencloudFile.premium_status
+      });
+      
+      // Create a source object compatible with the existing player
+      const zencloudSource: Source = {
+        url: zencloudFile.m3u8_url,
+        quality: 'Zencloud HLS',
+        type: type, // Use current selected type (sub/dub)
+        headers: {}, // Zencloud URLs are pre-signed, no additional headers needed
+        isM3U8: true
+      };
+      
+      // Convert Zencloud subtitles to the expected format
+      const zencloudSubtitles = zencloudFile.subtitles?.map(sub => ({
+        url: sub.url,
+        lang: sub.language_name || sub.language
+      })) || [];
+      
+      // Convert Zencloud chapters to timings format if available
+      let zencloudTimings: VideoTimings | undefined;
+      if (zencloudFile.chapters && zencloudFile.chapters.length > 0) {
+        // Find intro/outro chapters by title keywords
+        const introChapter = zencloudFile.chapters.find(c => 
+          c.title.toLowerCase().includes('intro') || 
+          c.title.toLowerCase().includes('opening') ||
+          c.title.toLowerCase().includes('op')
+        );
+        const outroChapter = zencloudFile.chapters.find(c => 
+          c.title.toLowerCase().includes('outro') || 
+          c.title.toLowerCase().includes('ending') ||
+          c.title.toLowerCase().includes('ed')
+        );
+        
+        if (introChapter || outroChapter) {
+          zencloudTimings = {};
+          if (introChapter) {
+            zencloudTimings.intro = {
+              start: introChapter.start_time,
+              end: introChapter.end_time
+            };
+          }
+          if (outroChapter) {
+            zencloudTimings.outro = {
+              start: outroChapter.start_time,
+              end: outroChapter.end_time
+            };
+          }
+        }
+      }
+      
+      // Verify Zencloud data completeness before passing to VLC player
+      console.log(`🌟 [ZENCLOUD] Data verification before VLC player:`, {
+        has_m3u8_url: !!zencloudFile.m3u8_url,
+        has_file_code: !!zencloudFile.file_code,
+        has_original_filename: !!zencloudFile.original_filename,
+        subtitles_ready: zencloudSubtitles.length,
+        chapters_ready: zencloudFile.chapters?.length || 0,
+        fonts_ready: zencloudFile.fonts?.length || 0,
+        token_valid: !!zencloudFile.token,
+        token_expires_valid: !!zencloudFile.token_expires
+      });
+
+      // Use the existing handleDirectSourceSelect function
+      handleDirectSourceSelect(
+        zencloudSource,
+        zencloudSubtitles,
+        zencloudTimings,
+        anilistId,
+        'zencloud'
+      );
+    };
+    
+    return (
+      <View style={styles.zencloudSection}>
+        <View style={styles.zencloudHeader}>
+          <Text style={styles.zencloudTitle}>🌟 Premium Streaming</Text>
+          <Text style={styles.zencloudSubtitle}>High-quality streaming with subtitles & chapters</Text>
+        </View>
+        
+        {zencloudLoading && (
+          <View style={styles.zencloudLoading}>
+            <ActivityIndicator size="small" color="#FFD700" />
+            <Text style={styles.zencloudLoadingText}>Loading Zencloud data...</Text>
+          </View>
+        )}
+        
+        {zencloudError && (
+          <View style={styles.zencloudError}>
+            <Text style={styles.zencloudErrorText}>⚠️ {zencloudError}</Text>
+            <TouchableOpacity 
+              style={styles.zencloudRetryButton}
+              onPress={fetchZencloudData}
+            >
+              <Text style={styles.zencloudRetryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {zencloudFile && (
+          <View style={styles.zencloudContent}>
+            <TouchableOpacity 
+              style={styles.zencloudPlayButton}
+              onPress={handleZencloudPlay}
+            >
+              <FontAwesome5 name="play" size={14} color="#000" style={{ marginRight: 8 }} />
+              <Text style={styles.zencloudPlayText}>Play from Zencloud</Text>
+              <View style={styles.zencloudQualityBadge}>
+                <Text style={styles.zencloudQualityText}>HLS</Text>
+              </View>
+            </TouchableOpacity>
+            
+          </View>
+        )}
+      </View>
+    );
+  };
+
   // Add new component for quality selection (calm layout)
   const QualitySelectionView = () => {
     // Removed Zoro server selection - no fallback allowed
@@ -1241,6 +1436,86 @@ export default function EpisodeSourcesModal({
       </View>
     );
   };
+
+  // Zencloud fetching logic
+  const fetchZencloudData = useCallback(async () => {
+    if (!anilistId || !episodeNumber) return;
+    
+    console.log(`\n🌟 [ZENCLOUD] =================== ZENCLOUD FETCH START ===================`);
+    console.log(`🌟 [ZENCLOUD] Fetching Zencloud data for AniList ID: ${anilistId}, Episode: ${episodeNumber}`);
+    
+    setZencloudLoading(true);
+    setZencloudError(null);
+    setZencloudFile(null);
+    
+    try {
+      // Try to get cached raw data first
+      let rawData = await getCachedRaw(parseInt(anilistId));
+      
+      if (!rawData) {
+        console.log(`🌟 [ZENCLOUD] No cached data, fetching from API...`);
+        rawData = await fetchRawByAnilistId(parseInt(anilistId));
+        await setCachedRaw(parseInt(anilistId), rawData);
+      } else {
+        console.log(`🌟 [ZENCLOUD] Using cached raw data (${rawData.length} episodes)`);
+      }
+      
+      setZencloudRaw(rawData);
+      
+      // Find the episode we want
+      const targetEpisode = rawData.find(item => item.episode === episodeNumber);
+      if (!targetEpisode) {
+        console.log(`🌟 [ZENCLOUD] Episode ${episodeNumber} not found in raw data`);
+        console.log(`🌟 [ZENCLOUD] Available episodes:`, rawData.map(r => r.episode));
+        throw new Error(`Episode ${episodeNumber} not available on Zencloud`);
+      }
+      
+      console.log(`🌟 [ZENCLOUD] Found episode ${episodeNumber}:`, {
+        access_id: targetEpisode.access_id.substring(0, 8) + '...',
+        audio: targetEpisode.audio,
+        player_url: targetEpisode.player_url
+      });
+      
+      // Try to get cached file details
+      let fileData = await getCachedFileDetails(targetEpisode.access_id);
+      
+      if (!fileData) {
+        console.log(`🌟 [ZENCLOUD] No cached file details, fetching from API...`);
+        fileData = await fetchFileDetailsByAccessId(targetEpisode.access_id);
+        await setCachedFileDetails(targetEpisode.access_id, fileData);
+      } else {
+        console.log(`🌟 [ZENCLOUD] Using cached file details`);
+      }
+      
+      setZencloudFile(fileData);
+      
+      console.log(`🌟 [ZENCLOUD] ✅ Successfully loaded Zencloud data:`, {
+        file_code: fileData.file_code,
+        has_m3u8: !!fileData.m3u8_url,
+        subtitles_count: fileData.subtitles?.length || 0,
+        chapters_count: fileData.chapters?.length || 0,
+        token_expires: fileData.token_expires
+      });
+      
+      // Log full Zencloud data for debugging
+      console.log(`🌟 [ZENCLOUD] 📋 FULL ZENCLOUD DATA:`, JSON.stringify(fileData, null, 2));
+      
+      console.log(`🌟 [ZENCLOUD] =================== ZENCLOUD FETCH END (SUCCESS) ===================\n`);
+      
+    } catch (error: any) {
+      console.log(`🌟 [ZENCLOUD] ❌ Error fetching Zencloud data:`, {
+        errorMessage: error?.message,
+        errorType: typeof error,
+        anilistId,
+        episodeNumber
+      });
+      console.log(`🌟 [ZENCLOUD] =================== ZENCLOUD FETCH END (ERROR) ===================\n`);
+      
+      setZencloudError(error?.message || 'Failed to load Zencloud data');
+    } finally {
+      setZencloudLoading(false);
+    }
+  }, [anilistId, episodeNumber]);
 
   // Add function to check availability of both sub and dub
   const checkAvailability = useCallback(async (episodeId: string, anilistId: string) => {
@@ -1327,82 +1602,21 @@ export default function EpisodeSourcesModal({
             <TouchableOpacity onPress={onClose} style={styles.headerCloseLeft} accessibilityRole="button" accessibilityLabel="Close">
               <FontAwesome5 name="times" size={18} color="#FFFFFF" />
             </TouchableOpacity>
-            <Text style={styles.titleText}>Sources for Episode {episodeNumberStr}</Text>
+            <Text style={styles.titleText}>Episode {episodeNumberStr}</Text>
             <View style={{ width: 32 }} />
           </View>
 
-          {/* Meta */}
+          {/* Meta - Zencloud only */}
           <View style={styles.metaRow}> 
-            <MetaChip label={currentProvider === 'animepahe' ? 'AnimePahe' : currentProvider === 'animezone' ? 'AnimeZone' : currentProvider === 'zoro' ? 'HiAnime (fixing)' : 'HiAnime'} />
-            {currentProvider === 'animepahe' ? (
-              <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: Sub</Text></View>
-            ) : currentProvider === 'animezone' ? (
-              <Segmented 
-                value={type} 
-                onChange={(v) => handleTypeSelect(v)} 
-                episodeId={episodeId}
-                anilistId={anilistId}
-                onCheck={checkAvailability}
-              />
-            ) : currentProvider === 'zoro' ? (
-              <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Working on fixing</Text></View>
-            ) : (
-              <Segmented 
-                value={type} 
-                onChange={(v) => handleTypeSelect(v)} 
-                episodeId={episodeId}
-                anilistId={anilistId}
-                onCheck={checkAvailability}
-              />
-            )}
+            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: Sub</Text></View>
+            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>HLS</Text></View>
           </View>
 
-          {/* Body */}
-          {hasResults ? (
-            <QualitySelectionView />
-          ) : (autoSelectSource || skipTypeSelection) && !showQualitySelection ? (
-            <AutoLoadingMessage episodeNumber={episodeNumberStr} />
-          ) : loading ? (
-            <View style={styles.loadingSimple}> 
-              <Text style={styles.bodyTitle}>Fetching sources…</Text>
-              {currentProvider === 'animezone' && (
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningText}>⚠️ New API - Some anime may not work properly</Text>
-                </View>
-              )}
-              <ThinProgressBar />
-            </View>
-          ) : error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorTextPlain}>{error}</Text>
-              {currentProvider === 'zoro' && (
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningText}>⚠️ HiAnime is currently being worked on and may not work properly</Text>
-                </View>
-              )}
-              <View style={styles.footerRow}>
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => handleTypeSelect(type)}>
-                  <Text style={styles.primaryBtnText}>Retry</Text>
-                </TouchableOpacity>
-                {currentProvider !== 'zoro' && (
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => fetchSources(episodeId, type)}>
-                    <Text style={styles.secondaryBtnText}>Try HiAnime</Text>
-                  </TouchableOpacity>
-                )}
-                {currentProvider === 'zoro' && (
-                  <View style={styles.warningBox}>
-                    <Text style={styles.warningText}>⚠️ HiAnime is currently being worked on</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          ) : (
-            // Fallback small loading
-            <View style={styles.loadingSimple}> 
-              <Text style={styles.bodyTitle}>Fetching sources…</Text>
-              <ThinProgressBar />
-            </View>
-          )}
+          {/* Body - Zencloud Only */}
+          <View style={{ width: '100%' }}>
+            {/* ZENCLOUD SECTION - ALWAYS RENDER */}
+            <ZencloudSection />
+          </View>
         </Animated.View>
       </BlurView>
       {(autoSelectSource || skipTypeSelection) && (
@@ -2003,5 +2217,97 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+  },
+  
+  // Zencloud Section Styles
+  zencloudSection: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 215, 0, 0.2)',
+    paddingTop: 16,
+  },
+  zencloudHeader: {
+    marginBottom: 12,
+  },
+  zencloudTitle: {
+    color: '#FFD700',
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  zencloudSubtitle: {
+    color: 'rgba(255, 215, 0, 0.8)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  zencloudLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  zencloudLoadingText: {
+    color: '#FFD700',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  zencloudError: {
+    backgroundColor: 'rgba(255, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.3)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  zencloudErrorText: {
+    color: '#FF4444',
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  zencloudRetryButton: {
+    backgroundColor: 'rgba(255, 68, 68, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  zencloudRetryText: {
+    color: '#FF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  zencloudContent: {
+    gap: 12,
+  },
+  zencloudPlayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFD700',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  zencloudPlayText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+  },
+  zencloudQualityBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  zencloudQualityText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
