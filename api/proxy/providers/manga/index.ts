@@ -1,7 +1,7 @@
 // Export all manga providers
 
 export * from './mangadx';
-export * from './mangafire';
+export * from './katana';
 export * from './MangaProviderService';
 
 // Common types used across providers
@@ -24,16 +24,16 @@ export interface Chapter {
   source: string;
 }
 
-export type MangaSource = 'mangadex' | 'mangafire';
-export type Provider = 'mangadex' | 'mangafire';
+export type MangaSource = 'mangadex' | 'katana';
+export type Provider = 'mangadex' | 'katana';
 
 // Helper function to determine which provider to use
 export function getProviderForSource(source: MangaSource | Provider | string): MangaSource {
-  if (source === 'mangadex' || source === 'mangafire') {
+  if (source === 'mangadex' || source === 'katana') {
     return source;
   }
-  // Default to MangaFire if unknown source
-  return 'mangafire';
+  // Default to Katana if unknown source
+  return 'katana';
 }
 
 // Language to flag mapping used across providers

@@ -1,3 +1,5 @@
+// if you're reading this, then this manga provider is not working. This is a placeholder for now.
+
 import axios from 'axios';
 import { Chapter } from './index';
 
@@ -70,8 +72,29 @@ export class MangaFireProvider {
   // Helper function to normalize titles for better matching
   private normalizeTitle(title: string): string {
     return title
+      .replace(/[★☆]/g, '') // Remove star symbols
+      .replace(/[♪♫]/g, '') // Remove music symbols
+      .replace(/[♥♡]/g, '') // Remove heart symbols
+      .replace(/[◆◇]/g, '') // Remove diamond symbols
+      .replace(/[▲△]/g, '') // Remove triangle symbols
+      .replace(/[●○]/g, '') // Remove circle symbols
+      .replace(/[■□]/g, '') // Remove square symbols
+      .replace(/[※]/g, '') // Remove reference symbols
+      .replace(/[！]/g, '!') // Normalize exclamation marks
+      .replace(/[？]/g, '?') // Normalize question marks
+      .replace(/[：]/g, ':') // Normalize colons
+      .replace(/[；]/g, ';') // Normalize semicolons
+      .replace(/[，]/g, ',') // Normalize commas
+      .replace(/[。]/g, '.') // Normalize periods
+      .replace(/[（]/g, '(') // Normalize parentheses
+      .replace(/[）]/g, ')') // Normalize parentheses
+      .replace(/[【]/g, '[') // Normalize brackets
+      .replace(/[】]/g, ']') // Normalize brackets
+      .replace(/[「]/g, '"') // Normalize quotes
+      .replace(/[」]/g, '"') // Normalize quotes
+      .replace(/[『]/g, "'") // Normalize quotes
+      .replace(/[』]/g, "'") // Normalize quotes
       .toLowerCase()
-      .replace(/[★☆]/g, '') // Remove special characters
       .replace(/[:\-\s]+/g, ' ') // Normalize separators
       .trim();
   }

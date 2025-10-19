@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, useWindowDimensions, ScrollView, DeviceEventEmitter } from 'react-native';
-import { Image } from 'expo-image';
-// Removed gradient ribbon for a cleaner watched indicator
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
@@ -9,30 +7,27 @@ import EpisodeSourcesModal from '../app/components/EpisodeSourcesModal';
 import CorrectAnimeSearchModal from './CorrectAnimeSearchModal';
 import { requestNotificationPermissions, toggleNotifications, isNotificationEnabled } from '../utils/notifications';
 import axios from 'axios';
-import { JIKAN_API_ENDPOINT } from '../app/constants/api';
 import { STORAGE_KEY } from '../constants/auth';
 import * as SecureStore from 'expo-secure-store';
 import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  MAX_INITIAL_EPISODES,
-  saveEpisodesToCache,
-} from '../utils/episodeOptimization';
-import { animeProviderManager } from '../api/proxy/providers/anime';
 import { zoroProvider } from '../api/proxy/providers/anime/zorohianime';
 import { animePaheProvider } from '../api/proxy/providers/anime/animepahe';
-import { animeZoneProvider } from '../api/animezone';
 import {
-  getOptimizedListProps, 
   detectDeviceCapabilities, 
   PERFORMANCE_CONFIG,
-  useOptimizedScrollHandler,
   MemoryManager 
 } from '../utils/performanceOptimization';
 import OptimizedImage from './OptimizedImage';
 import { fetchRelatedSeasons } from '../api/anilist/queries';
 import useSeasons from '../hooks/useSeasons';
 import { useSeasonSelection } from '../contexts/SeasonStore';
+import { 
+  fetchJikanEpisodes, 
+  fetchJikanAnimeData, 
+  JikanEpisode,
+  JikanAnimeData 
+} from '../utils/jikanApi';
 
 // Device capabilities for performance optimization
 const deviceCapabilities = detectDeviceCapabilities();
@@ -72,7 +67,6 @@ const useSourceSettings = () => {
 
 // #region Constants & Interfaces
 const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
-const MAL_API_ENDPOINT = 'https://api.myanimelist.net/v2';
 
 const PLACEHOLDER_BLUR_HASH = PERFORMANCE_CONFIG.BLUR_HASH_PLACEHOLDER;
 
@@ -394,6 +388,7 @@ const OptimizedGridEpisodeCard = memo<{
     prevProps.episode.isDubbed === nextProps.episode.isDubbed
   );
 });
+OptimizedGridEpisodeCard.displayName = 'OptimizedGridEpisodeCard';
 
 const OptimizedListEpisodeCard = memo<{
   episode: Episode;
@@ -577,6 +572,7 @@ const OptimizedListEpisodeCard = memo<{
     prevProps.episode.isDubbed === nextProps.episode.isDubbed
   );
 });
+OptimizedListEpisodeCard.displayName = 'OptimizedListEpisodeCard';
 
 // Main EpisodeList Component
 const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle, anilistId, malId, coverImage, mangaTitle }) => {
@@ -651,6 +647,12 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const [providerLoading, setProviderLoading] = useState(false);
     const [providerError, setProviderError] = useState<string | null>(null);
     const [animePaheAnimeId, setAnimePaheAnimeId] = useState<string | null>(null);
+    
+    // NEW: State for Jikan metadata
+    const [jikanEpisodes, setJikanEpisodes] = useState<JikanEpisode[]>([]);
+    const [jikanAnimeData, setJikanAnimeData] = useState<JikanAnimeData | null>(null);
+    const [jikanLoading, setJikanLoading] = useState(false);
+    const [jikanError, setJikanError] = useState<string | null>(null);
     
     // Refs for optimization
     const flashListRef = useRef<any>(null);
@@ -1081,35 +1083,88 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
 
     const canToggle = audioTypeAvailability.sub && audioTypeAvailability.dub;
 
+    // NEW: Merge Jikan metadata with provider episodes
+    const mergeJikanMetadata = useCallback((episodes: Episode[], jikanEps: JikanEpisode[]): Episode[] => {
+        if (!jikanEps || jikanEps.length === 0) {
+            console.log('[EPISODE_LIST] ℹ️ No Jikan metadata to merge');
+            return episodes;
+        }
+        
+        console.log(`[EPISODE_LIST] 🔄 Merging Jikan metadata with ${episodes.length} episodes`);
+        
+        return episodes.map(episode => {
+            // Find matching Jikan episode by episode number
+            const jikanEp = jikanEps.find(jep => jep.mal_id === episode.number);
+            
+            if (!jikanEp) {
+                return episode;
+            }
+            
+            // Merge Jikan metadata
+            const merged: Episode = {
+                ...episode,
+                title: jikanEp.title || episode.title,
+                aired: jikanEp.aired || episode.aired,
+                isFiller: jikanEp.filler || episode.isFiller || false,
+                isRecap: jikanEp.recap || episode.isRecap || false,
+                description: episode.description, // Keep provider description
+                duration: jikanEp.duration || episode.duration,
+            };
+            
+            return merged;
+        });
+    }, []);
+
     // Episode processing and sorting - use provider episodes if available
     const episodesToProcess = providerEpisodes.length > 0 ? providerEpisodes : episodes;
+    
+    // Merge Jikan metadata with episodes
+    const episodesWithJikanMetadata = useMemo(() => {
+        return mergeJikanMetadata(episodesToProcess, jikanEpisodes);
+    }, [episodesToProcess, jikanEpisodes, mergeJikanMetadata]);
+    
     const processedEpisodes = useMemo(() => {
-        if (!episodesToProcess || episodesToProcess.length === 0) return [];
+        if (!episodesWithJikanMetadata || episodesWithJikanMetadata.length === 0) return [];
         
         console.log(`[EPISODE_LIST] 📋 Processing episodes:`, {
             source: providerEpisodes.length > 0 ? 'provider' : 'props',
-            count: episodesToProcess.length,
+            count: episodesWithJikanMetadata.length,
             isNewestFirst,
             currentProvider,
-            preferredAudioType
+            preferredAudioType,
+            jikanMetadataAvailable: jikanEpisodes.length > 0
         });
         
-        // Debug: Log filler episodes
-        const fillerEpisodes = episodesToProcess.filter(ep => ep.isFiller);
+        // Debug: Log filler episodes (now with Jikan metadata)
+        const fillerEpisodes = episodesWithJikanMetadata.filter(ep => ep.isFiller);
+        const recapEpisodes = episodesWithJikanMetadata.filter(ep => ep.isRecap);
+        
         if (fillerEpisodes.length > 0) {
-            console.log(`[EPISODE_LIST] 🎭 Found ${fillerEpisodes.length} filler episodes:`, 
+            console.log(`[EPISODE_LIST] 🎭 Found ${fillerEpisodes.length} filler episodes (from Jikan):`, 
                 fillerEpisodes.slice(0, 5).map(ep => ({
                     number: ep.number,
                     title: ep.title,
                     isFiller: ep.isFiller
                 }))
             );
-        } else {
-            console.log(`[EPISODE_LIST] ℹ️ No filler episodes detected`);
+        }
+        
+        if (recapEpisodes.length > 0) {
+            console.log(`[EPISODE_LIST] 🔄 Found ${recapEpisodes.length} recap episodes (from Jikan):`, 
+                recapEpisodes.slice(0, 3).map(ep => ({
+                    number: ep.number,
+                    title: ep.title,
+                    isRecap: ep.isRecap
+                }))
+            );
+        }
+        
+        if (fillerEpisodes.length === 0 && recapEpisodes.length === 0) {
+            console.log(`[EPISODE_LIST] ℹ️ No filler or recap episodes detected`);
         }
         
         // Apply audio preference filtering only for Zoro provider
-        let filteredEpisodes = episodesToProcess;
+        let filteredEpisodes = episodesWithJikanMetadata;
         if (currentProvider === 'zoro') {
             console.log(`[EPISODE_LIST] 🔊 Applying Zoro audio filtering for ${preferredAudioType.toUpperCase()}...`);
             
@@ -1122,13 +1177,13 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 return prefersDub ? isDubbed === true : isSubbed === true;
             };
             
-            const matchingEpisodes = episodesToProcess.filter(matchesAudioType);
+            const matchingEpisodes = episodesWithJikanMetadata.filter(matchesAudioType);
             
             console.log(`[EPISODE_LIST] 📊 Zoro filtering results:`, {
-                originalCount: episodesToProcess.length,
+                originalCount: episodesWithJikanMetadata.length,
                 matchingCount: matchingEpisodes.length,
                 preferredType: preferredAudioType,
-                removedCount: episodesToProcess.length - matchingEpisodes.length,
+                removedCount: episodesWithJikanMetadata.length - matchingEpisodes.length,
                 willFallback: matchingEpisodes.length === 0
             });
             
@@ -1138,7 +1193,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
                 console.log(`[EPISODE_LIST] ✅ Using ${matchingEpisodes.length} episodes matching ${preferredAudioType.toUpperCase()} preference`);
             } else {
                 console.warn(`[EPISODE_LIST] ⚠️ No episodes found matching ${preferredAudioType.toUpperCase()}. Using fallback (showing all episodes).`);
-                filteredEpisodes = episodesToProcess;
+                filteredEpisodes = episodesWithJikanMetadata;
             }
             
             // Add matchesPreference flag for UI purposes
@@ -1170,7 +1225,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             
             // AnimeZone episodes can have both audio types, so no filtering needed
             // The actual audio type selection happens in EpisodeSourcesModal
-            filteredEpisodes = episodesToProcess;
+            filteredEpisodes = episodesWithJikanMetadata;
             console.log(`[EPISODE_LIST] ✅ Using all ${filteredEpisodes.length} AnimeZone episodes (both SUB and DUB supported)`);
         } else {
             console.log(`[EPISODE_LIST] ℹ️ Skipping audio filtering for ${currentProvider} provider`);
@@ -1183,7 +1238,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
         });
         
         return sorted;
-    }, [episodesToProcess, isNewestFirst, providerEpisodes.length, currentProvider, preferredAudioType]);
+    }, [episodesWithJikanMetadata, isNewestFirst, providerEpisodes.length, currentProvider, preferredAudioType, jikanEpisodes]);
 
     // Episode ranges for pagination
     const createEpisodeRanges = useCallback((episodesList: Episode[]) => {
@@ -1248,6 +1303,59 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
             sub2.remove();
         };
     }, [fetchAniListProgress]);
+
+    // NEW: Fetch Jikan metadata when malId is available
+    useEffect(() => {
+        const fetchJikanMetadata = async () => {
+            if (!malId) {
+                console.log('[EPISODE_LIST] ℹ️ No MAL ID provided, skipping Jikan metadata fetch');
+                return;
+            }
+            
+            console.log(`[EPISODE_LIST] 🎯 Starting Jikan metadata fetch for MAL ID: ${malId}`);
+            setJikanLoading(true);
+            setJikanError(null);
+            
+            try {
+                // Fetch anime data and episodes in parallel
+                const [animeData, episodesData] = await Promise.all([
+                    fetchJikanAnimeData(Number(malId)).catch(err => {
+                        console.warn('[EPISODE_LIST] Failed to fetch Jikan anime data:', err);
+                        return null;
+                    }),
+                    fetchJikanEpisodes(Number(malId)).catch(err => {
+                        console.warn('[EPISODE_LIST] Failed to fetch Jikan episodes:', err);
+                        return [];
+                    })
+                ]);
+                
+                if (animeData) {
+                    setJikanAnimeData(animeData);
+                    console.log(`[EPISODE_LIST] ✅ Jikan anime data loaded: "${animeData.title}"`);
+                }
+                
+                if (episodesData && episodesData.length > 0) {
+                    setJikanEpisodes(episodesData);
+                    
+                    const fillerCount = episodesData.filter(ep => ep.filler).length;
+                    const recapCount = episodesData.filter(ep => ep.recap).length;
+                    
+                    console.log(`[EPISODE_LIST] ✅ Jikan episodes loaded: ${episodesData.length} episodes`);
+                    console.log(`[EPISODE_LIST] 📊 Jikan metadata: ${fillerCount} filler, ${recapCount} recap episodes`);
+                } else {
+                    console.log('[EPISODE_LIST] ⚠️ No Jikan episodes found');
+                }
+                
+            } catch (error: any) {
+                console.error('[EPISODE_LIST] ❌ Jikan metadata fetch error:', error);
+                setJikanError(error?.message || 'Failed to fetch Jikan metadata');
+            } finally {
+                setJikanLoading(false);
+            }
+        };
+        
+        fetchJikanMetadata();
+    }, [malId]);
 
     // Load episode progress - use correct episodes
     useEffect(() => {
@@ -1855,15 +1963,37 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ episodes, loading, animeTitle
     const renderEpisodeHeader = () => {
         const episodesToUse = providerEpisodes.length > 0 ? providerEpisodes : episodes;
         
+        // Calculate metadata stats
+        const fillerCount = processedEpisodes.filter(ep => ep.isFiller).length;
+        const recapCount = processedEpisodes.filter(ep => ep.isRecap).length;
+        
         return (
             <View style={styles.episodeHeader}>
                 <View style={styles.episodeHeaderLeft}>
-                    <Text style={[styles.episodeHeaderTitle, { color: currentTheme.colors.text }]}>
-                        Episodes
+                    <View style={styles.episodeHeaderTitleRow}>
+                        <Text style={[styles.episodeHeaderTitle, { color: currentTheme.colors.text }]}>
+                            Episodes
                         </Text>
-                    <Text style={[styles.episodeHeaderCount, { color: currentTheme.colors.textSecondary }]}>
-                        {episodesToUse.length} episodes
+                        {jikanEpisodes.length > 0 && (
+                            <View style={[styles.jikanBadge, { backgroundColor: currentTheme.colors.primary }]}>
+                                <Text style={styles.jikanBadgeText}>MAL ✓</Text>
+                            </View>
+                        )}
+                        {jikanLoading && (
+                            <ActivityIndicator size="small" color={currentTheme.colors.primary} style={{ marginLeft: 8 }} />
+                        )}
+                    </View>
+                    <View style={styles.episodeMetaRow}>
+                        <Text style={[styles.episodeHeaderCount, { color: currentTheme.colors.textSecondary }]}>
+                            {episodesToUse.length} episodes
                         </Text>
+                        {jikanEpisodes.length > 0 && (fillerCount > 0 || recapCount > 0) && (
+                            <Text style={[styles.episodeMetaStats, { color: currentTheme.colors.textSecondary }]}>
+                                {fillerCount > 0 && ` • ${fillerCount} filler`}
+                                {recapCount > 0 && ` • ${recapCount} recap`}
+                            </Text>
+                        )}
+                    </View>
                 </View>
                 <View style={styles.episodeHeaderRight}>
                     <TouchableOpacity 
@@ -2361,13 +2491,43 @@ const styles = StyleSheet.create({
     episodeHeaderLeft: {
         gap: 4,
     },
+    episodeHeaderTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
     episodeHeaderTitle: {
         fontSize: 20,
         fontWeight: '700',
     },
+    episodeMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
     episodeHeaderCount: {
         fontSize: 13,
         fontWeight: '500',
+    },
+    episodeMetaStats: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    jikanBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+    },
+    jikanBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '700',
+        letterSpacing: 0.5,
     },
     episodeHeaderRight: {
         flexDirection: 'row',

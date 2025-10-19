@@ -57,11 +57,7 @@ export class MangaDexProvider {
     // Special case handling for titles that need specific formatting
     let formattedQuery = query;
     
-    // Handle "Jirai Nan Desu ka? Chihara-san" and similar titles
-    if (query.includes('Jirai Nan Desu ka?')) {
-      formattedQuery = query.replace('Jirai Nan Desu ka?', 'Jirai Nandesuka');
-      console.log('[MangaDex] Applied special formatting for Jirai title');
-    }
+  
     
     // General cleanup: remove question marks and excess spaces for better results
     formattedQuery = formattedQuery
@@ -84,7 +80,7 @@ export class MangaDexProvider {
   }
 
   static getChapterUrl(chapterId: string, language: string = 'en'): string {
-    const apiURL = `${CONSUMET_API_URL}/manga/mangadex/read/${chapterId}`;
+    const apiURL = `${CONSUMET_API_URL}/manga/mangadex/read/${chapterId}?lang=${language}`;
     console.log('[MangaDex] Chapter URL:', apiURL);
     return apiURL;
   }
@@ -96,7 +92,7 @@ export class MangaDexProvider {
       
       const response = await axios.get(url, {
         headers: this.getHeaders(),
-        timeout: 10000 // 10 second timeout
+        timeout: 15000 // 15 second timeout
       });
       
       if (response.status === 200 && response.data) {
@@ -118,6 +114,48 @@ export class MangaDexProvider {
           errorTrace: error.stack
         }
       };
+    }
+  }
+
+  static async fetchChapterPages(chapterId: string, language: string = 'en', retries: number = 3): Promise<any> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const url = this.getChapterUrl(chapterId, language);
+        console.log(`[MangaDex] Fetching chapter pages (attempt ${attempt}/${retries}) from:`, url);
+        
+        const response = await axios.get(url, {
+          headers: this.getHeaders(),
+          timeout: 20000 // 20 second timeout for chapter pages
+        });
+        
+        if (response.status === 200 && response.data) {
+          console.log('[MangaDex] Successfully fetched chapter pages');
+          return {
+            success: true,
+            data: response.data
+          };
+        }
+        
+        throw new Error(`Invalid response from MangaDex API: ${response.status}`);
+      } catch (error: any) {
+        console.error(`[MangaDex] Error fetching chapter pages (attempt ${attempt}/${retries}):`, error.message);
+        
+        if (attempt === retries) {
+          return {
+            success: false,
+            data: {
+              error: 'Failed to fetch chapter pages from MangaDex',
+              errorMessage: error.message,
+              errorTrace: error.stack
+            }
+          };
+        }
+        
+        // Wait before retrying (exponential backoff)
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`[MangaDex] Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
   }
 

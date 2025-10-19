@@ -1,6 +1,6 @@
 import { Chapter, Provider } from './index';
 import { MangaDexProvider } from './mangadx';
-import MangaFireProvider from './mangafire';
+import KatanaProvider from './katana';
 import axios from 'axios';
 
 export interface SearchResult {
@@ -34,6 +34,82 @@ export class MangaProviderService {
     console.error(`[MangaProviderService ERROR] ${message}`, error || '');
 
   /**
+   * Extract the first meaningful keyword from a manga title for searching
+   */
+  private static extractFirstKeyword(title: string): string {
+    // Remove common prefixes and suffixes that don't help with search
+    let cleaned = title
+      .replace(/^[【「『]/, '') // Remove opening brackets/quotes
+      .replace(/[】」』]$/, '') // Remove closing brackets/quotes
+      .replace(/[★☆♪♫♥♡◆◇▲△●○■□※！？：；，。]/g, '') // Remove decorative symbols
+      .replace(/[（]/g, '(') // Normalize parentheses
+      .replace(/[）]/g, ')') // Normalize parentheses
+      .replace(/[【]/g, '[') // Normalize brackets
+      .replace(/[】]/g, ']') // Normalize brackets
+      .replace(/[「]/g, '"') // Normalize quotes
+      .replace(/[」]/g, '"') // Normalize quotes
+      .replace(/[『]/g, "'") // Normalize quotes
+      .replace(/[』]/g, "'") // Normalize quotes
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim();
+
+    // Split by common separators and get the first meaningful part
+    const separators = [':', ' - ', ' – ', ' — ', ' | ', ' |', '| ', ' (', '（', ' [', '【'];
+    
+    for (const separator of separators) {
+      if (cleaned.includes(separator)) {
+        cleaned = cleaned.split(separator)[0].trim();
+        break;
+      }
+    }
+
+    // Extract the first 1-3 words as the keyword
+    const words = cleaned.split(/\s+/).filter(word => 
+      word.length > 1 && // Skip single characters
+      !/^[0-9]+$/.test(word) && // Skip pure numbers
+      !['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'].includes(word.toLowerCase())
+    );
+
+    // Return the first meaningful word or first two words if the first is very short
+    if (words.length === 0) return cleaned;
+    if (words[0].length <= 2 && words.length > 1) {
+      return `${words[0]} ${words[1]}`.trim();
+    }
+    return words[0];
+  }
+
+  /**
+   * Normalize manga title by removing problematic symbols and characters
+   */
+  private static normalizeTitle(title: string): string {
+    return title
+      .replace(/[★☆]/g, '') // Remove star symbols
+      .replace(/[♪♫]/g, '') // Remove music symbols
+      .replace(/[♥♡]/g, '') // Remove heart symbols
+      .replace(/[◆◇]/g, '') // Remove diamond symbols
+      .replace(/[▲△]/g, '') // Remove triangle symbols
+      .replace(/[●○]/g, '') // Remove circle symbols
+      .replace(/[■□]/g, '') // Remove square symbols
+      .replace(/[※]/g, '') // Remove reference symbols
+      .replace(/[！]/g, '!') // Normalize exclamation marks
+      .replace(/[？]/g, '?') // Normalize question marks
+      .replace(/[：]/g, ':') // Normalize colons
+      .replace(/[；]/g, ';') // Normalize semicolons
+      .replace(/[，]/g, ',') // Normalize commas
+      .replace(/[。]/g, '.') // Normalize periods
+      .replace(/[（]/g, '(') // Normalize parentheses
+      .replace(/[）]/g, ')') // Normalize parentheses
+      .replace(/[【]/g, '[') // Normalize brackets
+      .replace(/[】]/g, ']') // Normalize brackets
+      .replace(/[「]/g, '"') // Normalize quotes
+      .replace(/[」]/g, '"') // Normalize quotes
+      .replace(/[『]/g, "'") // Normalize quotes
+      .replace(/[』]/g, "'") // Normalize quotes
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim(); // Remove leading/trailing whitespace
+  }
+
+  /**
    * Search for manga across providers with auto-fallback support
    */
   static async searchManga(
@@ -42,9 +118,17 @@ export class MangaProviderService {
   ): Promise<{ results: SearchResult[]; provider: Provider }> {
     const { defaultProvider, autoSelectSource } = preferences;
     
+    // Extract first keyword for better search results
+    const firstKeyword = this.extractFirstKeyword(title);
+    const normalizedTitle = this.normalizeTitle(title);
+    
+    this.logDebug(`Original title: "${title}"`);
+    this.logDebug(`First keyword: "${firstKeyword}"`);
+    this.logDebug(`Normalized title: "${normalizedTitle}"`);
+    
     // Determine which providers to try
     const providersToTry: Provider[] = autoSelectSource 
-      ? ['mangafire', 'mangadex'] // Try best sources first when auto-select is ON
+      ? ['katana', 'mangadex'] // Try best sources first when auto-select is ON
       : [defaultProvider]; // Only try the selected provider when auto-select is OFF
 
     this.logDebug(`Auto-select is ${autoSelectSource ? 'ON' : 'OFF'}`);
@@ -54,45 +138,67 @@ export class MangaProviderService {
 
     for (const provider of providersToTry) {
       try {
-        this.logDebug(`Trying provider: ${provider} for "${title}"`);
+        this.logDebug(`Trying provider: ${provider} for "${firstKeyword}"`);
         
         let results: SearchResult[] = [];
 
-        switch (provider) {
-          case 'mangafire':
-            const mangafireResults = await MangaFireProvider.search(title);
-            results = mangafireResults.map(r => ({
-              id: r.id,
-              title: r.title,
-              source: 'mangafire' as Provider,
-              coverImage: r.coverImage,
-              status: r.status,
-              genres: r.genres,
-              summary: r.description,
-              lastUpdated: r.lastUpdated
-            }));
-            break;
+        // Try first keyword, then normalized title, then original title
+        const titlesToTry = [firstKeyword];
+        if (normalizedTitle !== firstKeyword) {
+          titlesToTry.push(normalizedTitle);
+        }
+        if (title !== normalizedTitle && title !== firstKeyword) {
+          titlesToTry.push(title);
+        }
 
-          case 'mangadex':
-            const mangadxUrl = MangaDexProvider.getSearchUrl(title);
-            const mangadxResponse = await axios.get(mangadxUrl, {
-              headers: MangaDexProvider.getHeaders()
-            });
-            const mangadxData = mangadxResponse.data;
+        for (const currentTitle of titlesToTry) {
+          try {
+            switch (provider) {
+              case 'katana':
+                const katanaResults = await KatanaProvider.search(currentTitle);
+                results = katanaResults.map(r => ({
+                  id: r.id,
+                  title: r.title,
+                  source: 'katana' as Provider,
+                  coverImage: r.coverImage,
+                  status: r.status,
+                  genres: r.genres,
+                  summary: r.description,
+                  lastUpdated: r.lastUpdated
+                }));
+                break;
+
+              case 'mangadex':
+                const mangadxUrl = MangaDexProvider.getSearchUrl(currentTitle);
+                const mangadxResponse = await axios.get(mangadxUrl, {
+                  headers: MangaDexProvider.getHeaders(),
+                  timeout: 15000 // 15 second timeout
+                });
+                const mangadxData = mangadxResponse.data;
             
-            if (mangadxData?.results) {
-              results = mangadxData.results.map((r: any) => ({
-                id: r.id,
-                title: r.title,
-                source: 'mangadex' as Provider,
-                coverImage: r.image,
-                status: r.status,
-                genres: r.genres,
-                summary: r.description,
-                lastUpdated: r.lastUpdated
-              }));
+                if (mangadxData?.results) {
+                  results = mangadxData.results.map((r: any) => ({
+                    id: r.id,
+                    title: r.title,
+                    source: 'mangadex' as Provider,
+                    coverImage: r.image,
+                    status: r.status,
+                    genres: r.genres,
+                    summary: r.description,
+                    lastUpdated: r.lastUpdated
+                  }));
+                }
+                break;
             }
-            break;
+
+            // If we got results, break out of the title loop
+            if (results.length > 0) {
+              break;
+            }
+          } catch (titleError) {
+            this.logDebug(`Title "${currentTitle}" failed for ${provider}:`, titleError);
+            // Continue to next title variation
+          }
         }
 
         if (results.length > 0) {
@@ -131,14 +237,15 @@ export class MangaProviderService {
       let chapters: Chapter[] = [];
 
       switch (provider) {
-        case 'mangafire':
-          const mangafireChapters = await MangaFireProvider.getChapters(mangaId);
-          chapters = mangafireChapters.map(ch => ({
+        case 'katana':
+          const katanaChapters = await KatanaProvider.getChapters(mangaId);
+          chapters = katanaChapters.map(ch => ({
             ...ch,
             thumbnail: coverImage,
-            source: 'mangafire'
+            source: 'katana'
           }));
           break;
+
 
         case 'mangadex':
           const mangadxResponse = await MangaDexProvider.fetchInfo(mangaId);
@@ -150,6 +257,8 @@ export class MangaProviderService {
                 thumbnail: coverImage,
                 source: 'mangadex'
               }));
+          } else {
+            throw new Error(mangadxResponse.data?.errorMessage || 'Failed to fetch manga info from MangaDex');
           }
           break;
       }
@@ -176,25 +285,27 @@ export class MangaProviderService {
       let pages: PageWithHeaders[] = [];
 
       switch (provider) {
-        case 'mangafire':
-          const mangafireResponse = await MangaFireProvider.getChapterPages(chapterId);
-          pages = mangafireResponse.pages.map(p => ({
+        case 'katana':
+          const katanaResponse = await KatanaProvider.getChapterPages(chapterId);
+          pages = katanaResponse.pages.map(p => ({
             url: p.url,
             headers: p.headers
           }));
           break;
 
+
         case 'mangadex':
-          const mangadxUrl = MangaDexProvider.getChapterUrl(chapterId);
-          const response = await axios.get(mangadxUrl, {
-            headers: MangaDexProvider.getHeaders()
-          });
-          const data = response.data;
-          const urls = MangaDexProvider.parseChapterPagesResponse(data);
-          pages = urls.map(url => ({
-            url,
-            headers: MangaDexProvider.getImageHeaders()
-          }));
+          const mangadxResponse = await MangaDexProvider.fetchChapterPages(chapterId);
+          
+          if (mangadxResponse.success) {
+            const urls = MangaDexProvider.parseChapterPagesResponse(mangadxResponse.data);
+            pages = urls.map(url => ({
+              url,
+              headers: MangaDexProvider.getImageHeaders()
+            }));
+          } else {
+            throw new Error(mangadxResponse.data?.errorMessage || 'Failed to fetch chapter pages');
+          }
           break;
       }
 
@@ -240,10 +351,10 @@ export class MangaProviderService {
     if (!autoSelectSource) {
       // Specific error messages for when auto-select is OFF
       switch (provider) {
+        case 'katana':
+          return "Katana is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
         case 'mangadex':
           return "MangaDex is currently unavailable due to DMCA restrictions. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
-        case 'mangafire':
-          return "MangaFire is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
         default:
           return "The selected provider is currently unavailable. Please try enabling 'Auto-Select Best Source' or choose a different provider.";
       }

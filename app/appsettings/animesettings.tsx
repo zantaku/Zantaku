@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, BackHandler, DeviceEventEmitter } from 'react-native';
-import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 import { usePlayerContext } from '../../contexts/PlayerContext';
@@ -39,7 +39,7 @@ export default function AnimeSettingsPage() {
   const router = useRouter();
   const { isDarkMode, currentTheme } = useTheme();
   const { preferences, setPreferences } = usePlayerContext();
-  const [activeTab, setActiveTab] = useState('player'); // 'player', 'episodes', 'sources'
+  const [activeTab, setActiveTab] = useState('player'); // 'player', 'episodes'
   
   // Local state for episode list settings
   const [episodeListSettings, setEpisodeListSettings] = useState({
@@ -49,17 +49,7 @@ export default function AnimeSettingsPage() {
     showAiredDates: true,
   });
 
-  // Local state for source settings
-  const [sourceSettings, setSourceSettings] = useState({
-    preferredType: 'sub' as 'sub' | 'dub',
-    autoTryAlternateVersion: true,
-    preferHLSStreams: true,
-    logSourceDetails: true,
-    // Provider settings
-    defaultProvider: 'animepahe' as 'animepahe' | 'zoro',
-    autoSelectSource: true,
-    providerPriority: ['animepahe', 'zoro'] as ('animepahe' | 'zoro')[],
-  });
+  // Sources removed – Zencloud is the only provider now
 
   // Add sample subtitle text
   const [previewText, setPreviewText] = useState('Sample subtitle text for preview');
@@ -74,11 +64,7 @@ export default function AnimeSettingsPage() {
           setEpisodeListSettings(JSON.parse(episodeListData));
         }
 
-        // Load source settings
-        const sourceData = await AsyncStorage.getItem('sourceSettings');
-        if (sourceData) {
-          setSourceSettings(JSON.parse(sourceData));
-        }
+        // Sources removed (Zencloud only)
 
         // Load player integration settings
         const playerData = await AsyncStorage.getItem('playerSettings');
@@ -108,16 +94,7 @@ export default function AnimeSettingsPage() {
     }
   };
 
-  // Save source settings
-  const saveSourceSettings = async (newSettings: typeof sourceSettings) => {
-    try {
-      await AsyncStorage.setItem('sourceSettings', JSON.stringify(newSettings));
-      setSourceSettings(newSettings);
-      DeviceEventEmitter.emit('sourceSettingsChanged');
-    } catch (error) {
-      console.error('Failed to save source settings:', error);
-    }
-  };
+  // Sources removed – no separate source settings to persist
 
   // Removed preset helper: we keep independent controls to support future providers
 
@@ -466,228 +443,7 @@ export default function AnimeSettingsPage() {
     </>
   );
 
-  const renderSourcesTab = () => (
-    <>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <FontAwesome5 name="server" size={20} color="#2196F3" />
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Source Settings</Text>
-        </View>
-
-        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
-          <View style={{ marginBottom: 12 }}>
-            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Preferred Version</Text>
-            <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-              Choose your preferred audio version
-            </Text>
-          </View>
-          <View style={styles.versionOptions}>
-            {['sub', 'dub'].map(type => (
-              <TouchableOpacity
-                key={`version-${type}`}
-                style={[
-                  styles.versionOption,
-                  sourceSettings.preferredType === type && styles.versionOptionSelected
-                ]}
-                onPress={() => {
-                  saveSourceSettings({
-                    ...sourceSettings,
-                    preferredType: type as 'sub' | 'dub'
-                  });
-                }}
-              >
-                <Text style={[
-                  styles.versionOptionText,
-                  { color: sourceSettings.preferredType === type ? '#fff' : currentTheme.colors.text }
-                ]}>
-                  {type.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Try Alternate Version if Preferred Unavailable</Text>
-              <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                Automatically try DUB if SUB is unavailable (or vice versa)
-              </Text>
-            </View>
-            <Switch
-              value={sourceSettings.autoTryAlternateVersion}
-              onValueChange={(value) => {
-                saveSourceSettings({
-                  ...sourceSettings,
-                  autoTryAlternateVersion: value
-                });
-              }}
-              trackColor={{ false: '#767577', true: '#2196F3' }}
-              thumbColor={sourceSettings.autoTryAlternateVersion ? '#fff' : '#f4f3f4'}
-            />
-          </View>
-        </View>
-
-      </View>
-
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <FontAwesome5 name="server" size={20} color="#4CAF50" />
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Anime Providers</Text>
-        </View>
-
-        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.settingLabel, { color: currentTheme.colors.text, marginBottom: 0 }]}>Auto-Select Best Source</Text>
-              <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                Automatically try AnimePahe first, then fallback to Zoro if needed
-              </Text>
-            </View>
-            <Switch
-              value={sourceSettings.autoSelectSource}
-              onValueChange={(value) => {
-                saveSourceSettings({
-                  ...sourceSettings,
-                  autoSelectSource: value
-                });
-              }}
-              trackColor={{ false: '#767577', true: '#4CAF50' }}
-              thumbColor={sourceSettings.autoSelectSource ? '#fff' : '#f4f3f4'}
-            />
-          </View>
-        </View>
-
-        <View style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}>
-          <View style={{ marginBottom: 12 }}>
-            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Default Provider</Text>
-            {sourceSettings.autoSelectSource && (
-              <Text style={{ color: currentTheme.colors.text, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                Used when auto-select is disabled
-              </Text>
-            )}
-          </View>
-          <View style={styles.providerOptions}>
-            {[
-              { id: 'animepahe', name: 'AnimePahe', color: '#4CAF50' },
-              { id: 'zoro', name: 'Zoro (HiAnime)', color: '#2196F3' }
-            ].map(provider => (
-              <TouchableOpacity
-                key={`provider-${provider.id}`}
-                style={[
-                  styles.providerOption,
-                  sourceSettings.defaultProvider === provider.id && styles.providerOptionSelected,
-                  { borderColor: provider.color },
-                  sourceSettings.autoSelectSource && styles.providerOptionDisabled
-                ]}
-                onPress={() => {
-                    if (!sourceSettings.autoSelectSource) {
-                    saveSourceSettings({
-                      ...sourceSettings,
-                      defaultProvider: provider.id as 'animepahe' | 'zoro'
-                    });
-                  }
-                }}
-              >
-                <Text style={[
-                  styles.providerOptionText,
-                  { 
-                    color: sourceSettings.defaultProvider === provider.id 
-                      ? '#fff' 
-                      : (sourceSettings.autoSelectSource)
-                      ? '#666'
-                      : currentTheme.colors.text 
-                  }
-                ]}>
-                  {provider.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-      </View>
-
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <FontAwesome5 name="cogs" size={20} color="#9C27B0" />
-          <Text style={[styles.sectionTitle, { color: currentTheme.colors.text }]}>Advanced</Text>
-        </View>
-
-        <TouchableOpacity 
-          style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}
-          onPress={() => {
-            // Clear cache action
-            AsyncStorage.removeItem('videoProgressData');
-            AsyncStorage.removeItem('recentlyWatched');
-            alert('Video cache cleared successfully');
-          }}
-        >
-          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Clear Video Progress Cache</Text>
-          <FontAwesome5 name="trash-alt" size={20} color="#f44336" />
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}
-          onPress={() => {
-            // Reset all settings to default
-            savePlayerPreferences({
-              volume: 1,
-              playbackRate: 1,
-              subtitlesEnabled: true,
-              preferredQuality: '1080p',
-              autoplayNext: true,
-              rememberPosition: true,
-              selectedSubtitleLanguage: 'English',
-              debugOverlayEnabled: false,
-              subtitleStyle: {
-                fontSize: 18,
-                backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                textColor: '#FFFFFF',
-                backgroundOpacity: 0.7,
-                boldText: false
-              },
-              markerSettings: {
-                showMarkers: true,
-                autoSkipIntro: false,
-                autoSkipOutro: false,
-                autoPlayNextEpisode: true
-              }
-            });
-            
-            saveEpisodeListSettings({
-              defaultColumnCount: 2,
-              newestFirst: true,
-              showFillerBadges: true,
-              showAiredDates: true,
-            });
-            
-            saveSourceSettings({
-              preferredType: 'sub',
-              autoTryAlternateVersion: true,
-              preferHLSStreams: true,
-              logSourceDetails: true,
-              defaultProvider: 'animepahe',
-              autoSelectSource: true,
-              providerPriority: ['animepahe', 'zoro'],
-            });
-
-            savePlayerSettings({
-              pipEnabled: true,
-              forceLandscape: true,
-              saveToAniList: true,
-            });
-            
-            alert('All settings reset to default');
-          }}
-        >
-          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Reset All Settings</Text>
-          <FontAwesome5 name="undo" size={20} color="#f44336" />
-        </TouchableOpacity>
-      </View>
-    </>
-  );
+  // Sources tab removed
 
   // Add header with back button
   const Header = () => (
@@ -751,34 +507,13 @@ export default function AnimeSettingsPage() {
           </Text>
         </TouchableOpacity>
         
-        <TouchableOpacity
-          style={[
-            styles.tabButton,
-            activeTab === 'sources' && styles.activeTabButton
-          ]}
-          onPress={() => setActiveTab('sources')}
-        >
-          <FontAwesome5 
-            name="server" 
-            size={18} 
-            color={activeTab === 'sources' ? "#2196F3" : currentTheme.colors.text} 
-          />
-          <Text 
-            style={[
-              styles.tabButtonText, 
-              { color: activeTab === 'sources' ? "#2196F3" : currentTheme.colors.text }
-            ]}
-          >
-            Sources
-          </Text>
-        </TouchableOpacity>
+        {/* Sources tab removed (Zencloud only) */}
       </View>
 
       {/* Settings Content */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {activeTab === 'player' && renderPlayerTab()}
         {activeTab === 'episodes' && renderEpisodesTab()}
-        {activeTab === 'sources' && renderSourcesTab()}
         {/* Bottom padding */}
         <View style={{ height: 40 }} />
       </ScrollView>

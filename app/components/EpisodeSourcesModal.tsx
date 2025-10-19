@@ -1344,15 +1344,12 @@ export default function EpisodeSourcesModal({
     
     return (
       <View style={styles.zencloudSection}>
-        <View style={styles.zencloudHeader}>
-          <Text style={styles.zencloudTitle}>🌟 Premium Streaming</Text>
-          <Text style={styles.zencloudSubtitle}>High-quality streaming with subtitles & chapters</Text>
-        </View>
+      
         
         {zencloudLoading && (
           <View style={styles.zencloudLoading}>
             <ActivityIndicator size="small" color="#FFD700" />
-            <Text style={styles.zencloudLoadingText}>Loading Zencloud data...</Text>
+            <Text style={styles.zencloudLoadingText}>Loading Zen data...</Text>
           </View>
         )}
         
@@ -1375,7 +1372,7 @@ export default function EpisodeSourcesModal({
               onPress={handleZencloudPlay}
             >
               <FontAwesome5 name="play" size={14} color="#000" style={{ marginRight: 8 }} />
-              <Text style={styles.zencloudPlayText}>Play from Zencloud</Text>
+              <Text style={styles.zencloudPlayText}>Play</Text>
               <View style={styles.zencloudQualityBadge}>
                 <Text style={styles.zencloudQualityText}>HLS</Text>
               </View>
@@ -1608,8 +1605,8 @@ export default function EpisodeSourcesModal({
 
           {/* Meta - Zencloud only */}
           <View style={styles.metaRow}> 
-            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: Sub</Text></View>
-            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>HLS</Text></View>
+            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: ALL</Text></View>
+            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>ALL</Text></View>
           </View>
 
           {/* Body - Zencloud Only */}

@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { PlayerProvider } from '../contexts/PlayerContext';
 import { PortalProvider } from '@gorhom/portal';
 import { SeasonProvider } from '../contexts/SeasonStore';
+import { ChapterPagesProvider } from '../contexts/ChapterPagesContext';
 import { Slot } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DiscordRPCProvider } from '../contexts/DiscordRPCContext';
@@ -659,14 +660,16 @@ export default function RootLayout() {
                   <IncognitoProvider>
                     <OrientationProvider>
                       <DiscordRPCProvider>
-                        <PortalProvider>
-                          {showSplash ? (
-                            <SplashScreen onAnimationComplete={() => setShowSplash(false)} />
-                          ) : null}
-                          <SeasonProvider>
-                            <ThemedLayout />
-                          </SeasonProvider>
-                        </PortalProvider>
+                        <ChapterPagesProvider>
+                          <PortalProvider>
+                            {showSplash ? (
+                              <SplashScreen onAnimationComplete={() => setShowSplash(false)} />
+                            ) : null}
+                            <SeasonProvider>
+                              <ThemedLayout />
+                            </SeasonProvider>
+                          </PortalProvider>
+                        </ChapterPagesProvider>
                       </DiscordRPCProvider>
                     </OrientationProvider>
                   </IncognitoProvider>

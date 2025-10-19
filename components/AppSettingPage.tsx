@@ -10,16 +10,98 @@ import { SettingsTile } from './SettingsComponents';
 import Logo from './Logo';
 import * as Linking from 'expo-linking';
 import * as Application from 'expo-application';
+import { Image as ExpoImage } from 'expo-image';
 
 interface AppSettingPageProps {
   onClose: () => void;
 }
+
+// User Profile Component
+const UserProfile = ({ user, currentTheme, onNavigateToAccountSettings }: { user: any; currentTheme: any; onNavigateToAccountSettings: () => void }) => {
+  if (!user || user.isAnonymous) {
+    return (
+      <TouchableOpacity 
+        style={[styles.userProfileContainer, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}
+        onPress={() => {
+          // Navigate to login
+          console.log('Navigate to login');
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={styles.userProfileContent}>
+          <View style={[styles.userAvatar, { backgroundColor: currentTheme.colors.primary }]}>
+            <FontAwesome5 name="user-plus" size={24} color="#fff" />
+          </View>
+          <View style={styles.userInfo}>
+            <Text style={[styles.userName, { color: currentTheme.colors.text }]}>Guest User</Text>
+            <Text style={[styles.userStatus, { color: currentTheme.colors.textSecondary }]}>Tap to sign in with AniList</Text>
+          </View>
+          <FontAwesome5 name="chevron-right" size={16} color={currentTheme.colors.textSecondary} />
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={[styles.userProfileContainer, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
+      {/* Banner Image */}
+      {user.bannerImage && (
+        <View style={styles.userBannerContainer}>
+          <ExpoImage
+            source={{ uri: user.bannerImage }}
+            style={styles.userBanner}
+            contentFit="cover"
+            placeholder="L6PZfSi_.AyE_3t7t7R**0o#DgR4"
+          />
+          <View style={styles.userBannerOverlay} />
+        </View>
+      )}
+      
+      <View style={styles.userProfileContent}>
+        {/* Avatar */}
+        <View style={styles.userAvatarContainer}>
+          <ExpoImage
+            source={{ uri: user.avatar?.large || user.avatar?.medium }}
+            style={styles.userAvatar}
+            contentFit="cover"
+            placeholder="L6PZfSi_.AyE_3t7t7R**0o#DgR4"
+          />
+          {user.bannerImage && <View style={styles.userAvatarBorder} />}
+        </View>
+        
+        {/* User Info */}
+        <View style={styles.userInfo}>
+          <Text style={[styles.userName, { color: currentTheme.colors.text }]} numberOfLines={1}>
+            {user.name || user.username || 'AniList User'}
+          </Text>
+          <Text style={[styles.userStatus, { color: currentTheme.colors.textSecondary }]}>
+            {user.isVerified ? '✓ Verified' : 'Not Verified'}
+          </Text>
+        </View>
+        
+        {/* Settings Icon */}
+        <TouchableOpacity 
+          style={styles.userSettingsButton}
+          onPress={onNavigateToAccountSettings}
+          activeOpacity={0.7}
+        >
+          <FontAwesome5 name="cog" size={16} color={currentTheme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
 
 export default function AppSettingPage({ onClose }: AppSettingPageProps) {
   const router = useRouter();
   const { isDarkMode, currentTheme } = useTheme();
   const { user } = useAuth();
   const [isOpeningLink, setIsOpeningLink] = useState(false);
+
+  const handleNavigateToAccountSettings = () => {
+    onClose();
+    router.push('/appsettings/accountsetting');
+  };
 
   const handleSettingPress = (id: string) => {
     // Add logging for navigation attempts
@@ -34,9 +116,6 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
     } else if (id === 'commons') {
       onClose();
       router.push('/appsettings/commonsetting');
-    } else if (id === 'accounts') {
-      onClose();
-      router.push('/appsettings/accountsetting');
     } else if (id === 'achievements') {
       onClose();
       router.push('/appsettings/achievementsettings');
@@ -62,14 +141,6 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
   };
 
   const allSettings = [
-    {
-      id: 'accounts',
-      icon: 'users',
-      title: 'Accounts',
-      description: 'Manage your Anilist Account',
-      iconBgColor: '#5C6BC0',
-      requiresAuth: true,
-    },
     {
       id: 'theme',
       icon: 'palette',
@@ -349,6 +420,15 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* User Profile Section */}
+        <View style={styles.userProfileSection}>
+          <UserProfile 
+            user={user} 
+            currentTheme={currentTheme} 
+            onNavigateToAccountSettings={handleNavigateToAccountSettings}
+          />
+        </View>
+
         <View style={[
           styles.settingsContainer,
           (!user || user.isAnonymous) && styles.settingsContainerGuest
@@ -383,7 +463,7 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
           >
             <Logo width={120} height={40} variant="auto" />
             <Text style={[styles.versionText, { color: currentTheme.colors.textSecondary }]}>
-              Public Beta V1.5.5
+              V1.6.0
             </Text>
             <Text style={[styles.tapHintText, { color: currentTheme.colors.textSecondary }]}>
             Visit website
@@ -471,6 +551,81 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  userProfileSection: {
+    marginTop: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  userProfileContainer: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  userBannerContainer: {
+    height: 80,
+    position: 'relative',
+  },
+  userBanner: {
+    width: '100%',
+    height: '100%',
+  },
+  userBannerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  userProfileContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    position: 'relative',
+  },
+  userAvatarContainer: {
+    position: 'relative',
+  },
+  userAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f0f0f0',
+  },
+  userAvatarBorder: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 32,
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  userInfo: {
+    flex: 1,
+    marginLeft: 16,
+    justifyContent: 'center',
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  userStatus: {
+    fontSize: 14,
+    opacity: 0.8,
+  },
+  userSettingsButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   scrollViewContent: {
     flexGrow: 1,

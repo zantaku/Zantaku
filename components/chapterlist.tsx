@@ -279,7 +279,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     const [error, setError] = useState<string | null>(null);
     const [readProgress, setReadProgress] = useState(0);
     const [isNewestFirst, setIsNewestFirst] = useState(true);
-    const [provider, setProvider] = useState<Provider>('mangadex');
+    const [provider, setProvider] = useState<Provider>('katana');
     const [showChapterModal, setShowChapterModal] = useState(false);
     const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
     const [preferences, setPreferences] = useState<ProviderPreferences | null>(null);
@@ -292,6 +292,16 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     const [showProviderDropdown, setShowProviderDropdown] = useState(false);
     const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
     const [chapterManager, setChapterManager] = useState<ChapterManager | undefined>(undefined);
+
+    const handleMangaSelect = useCallback((mangaId: string) => {
+        setInternalMangaId(mangaId);
+        setError(null);
+        setShowCorrectMangaModal(false);
+        // Trigger a new search with the selected manga ID
+        if (preferences) {
+            searchAndFetchChapters(preferences);
+        }
+    }, [preferences]);
 
     const fetchAniListProgress = useCallback(async () => {
         if (!anilistId || isIncognito) return;
@@ -376,7 +386,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 r.title.toLowerCase() === searchTitle.toLowerCase()
             );
             if (exactMatch) {
-                logDebug(`Found exact match: "${exactMatch.title}" for search "${searchTitle}"`);
                 return exactMatch;
             }
             
@@ -388,8 +397,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 r.title.toLowerCase().includes('golshi-chan')
             );
             if (golshiMatch) {
-                logDebug(`Found golshi match: "${golshiMatch.title}" for search "${searchTitle}"`);
-                logDebug(`Golshi match ID: "${golshiMatch.id}"`);
                 return golshiMatch;
             }
             
@@ -398,7 +405,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 r.id === 'uma-musume-pretty-derby-pisupisusupisupi-golshi-chann.3p4v8'
             );
             if (correctIdMatch) {
-                logDebug(`Found correct ID match: "${correctIdMatch.title}" with ID: "${correctIdMatch.id}"`);
                 return correctIdMatch;
             }
             
@@ -421,7 +427,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 });
                 
                 if (japaneseMatch) {
-                    logDebug(`Found Japanese keyword match: "${japaneseMatch.title}" for search "${searchTitle}"`);
                     return japaneseMatch;
                 }
             }
@@ -483,13 +488,10 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 }
             }
             
-            logDebug(`Best match found: "${bestMatch.title}" with score ${bestScore} for search "${searchTitle}"`);
-            
             // Additional validation: if the first result has a much higher score than others, prefer it
             if (results.length > 1) {
                 const firstResultScore = calculateScoreForResult(results[0], searchTitle, searchWords, hasJapaneseKeywords);
                 if (firstResultScore > bestScore + 10) {
-                    logDebug(`First result has significantly higher score (${firstResultScore}), using it instead`);
                     return results[0];
                 }
             }
@@ -539,42 +541,22 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         // Try each title variation until we find results
         for (const titleToSearch of uniqueTitleVariations) {
             try {
-                logDebug(`Searching for "${titleToSearch}" with preferences:`, prefs);
-                
                 // Step 1: Search for the manga
                 const { results, provider: successfulProvider } = await MangaProviderService.searchManga(titleToSearch, prefs);
                 
                 if (results.length === 0) {
-                    logDebug(`No results found for "${titleToSearch}", trying next variation...`);
                     continue;
-                }
-
-                // Debug: Log all search results to understand what we're working with
-                logDebug(`Search results for "${titleToSearch}":`);
-                results.slice(0, 5).forEach((result: any, index: number) => {
-                    logDebug(`  ${index + 1}. "${result.title}" (ID: ${result.id})`);
-                });
-                if (results.length > 5) {
-                    logDebug(`  ... and ${results.length - 5} more results`);
                 }
 
                 // Step 2: Find the best match using improved algorithm
                 let bestMatch = findBestMatch(results, titleToSearch);
                 if (!bestMatch) {
-                    logDebug(`No suitable match found for "${titleToSearch}", trying next variation...`);
                     continue;
                 }
-                
-                logDebug(`Selected manga: "${bestMatch.title}" (ID: ${bestMatch.id}) from search results`);
                 
                 // Additional validation: Check if this seems like the right manga
                 const expectedTitle = mangaTitle.userPreferred || mangaTitle.english || '';
                 if (expectedTitle && bestMatch.title !== expectedTitle) {
-                    logDebug(`⚠️ Title mismatch detected!`);
-                    logDebug(`  Expected: "${expectedTitle}"`);
-                    logDebug(`  Found: "${bestMatch.title}"`);
-                    logDebug(`  Search query was: "${titleToSearch}"`);
-                    
                     // Check if we should try to find a better match
                     const betterMatch = results.find(r => 
                         r.title.toLowerCase().includes('landmine') || 
@@ -583,35 +565,17 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                     );
                     
                     if (betterMatch && betterMatch.id !== bestMatch.id) {
-                        logDebug(`🔍 Found potentially better match: "${betterMatch.title}" (ID: ${betterMatch.id})`);
-                        logDebug(`   Switching to better match`);
                         bestMatch = betterMatch;
                     }
                 }
                 
                 setInternalMangaId(bestMatch.id);
                 setProvider(successfulProvider);
-                
-                logDebug(`Found manga: ${bestMatch.title} (ID: ${bestMatch.id}) from ${successfulProvider} using title: "${titleToSearch}"`);
-                
-                // Log if this might be the wrong manga
-                if (mangaTitle.userPreferred && bestMatch.title !== mangaTitle.userPreferred) {
-                    logDebug(`⚠️ Potential wrong manga detected! Expected: "${mangaTitle.userPreferred}", Found: "${bestMatch.title}"`);
-                }
-                
-                // Log the exact ID being used
-                logDebug(`🔍 Using manga ID: "${bestMatch.id}" for title: "${bestMatch.title}"`);
-                
-                // Check if this is the correct golshi-chan manga
-                if (bestMatch.title.includes('Golshi-chan') || bestMatch.title.includes('golshi')) {
-                    logDebug(`✅ Found correct golshi-chan manga: "${bestMatch.title}" with ID: "${bestMatch.id}"`);
-                }
 
                 // Step 3: Get chapters for the manga
                 const chapters = await MangaProviderService.getChapters(bestMatch.id, successfulProvider, coverImage);
                 
                 if (chapters.length === 0) {
-                    logDebug(`Manga found but no chapters available for "${titleToSearch}", trying next variation...`);
                     continue;
                 }
 
@@ -620,9 +584,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 // Create ChapterManager for navigation
                 const manager = new ChapterManager(chapters, successfulProvider, bestMatch.id);
                 setChapterManager(manager);
-                logDebug(`Created ChapterManager with ${chapters.length} chapters from ${successfulProvider}`);
                 
-                logDebug(`Successfully loaded ${chapters.length} chapters from ${successfulProvider} using title: "${titleToSearch}"`);
                 setIsLoading(false);
                 return; // Success! Exit the function
 
@@ -644,13 +606,13 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
         const loadPrefs = async () => {
             try {
                 const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
-                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' };
+                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'katana', autoSelectSource: false, preferredChapterLanguage: 'en' };
                 
 
                 
                 setPreferences(prefs);
             } catch {
-                setPreferences({ defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                setPreferences({ defaultProvider: 'katana', autoSelectSource: false, preferredChapterLanguage: 'en' });
             }
         };
         const loadSortOrder = async () => {
@@ -674,8 +636,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     }, [preferences, searchAndFetchChapters]);
 
     useEffect(() => {
-        logDebug(`Processing chapter ranges - chapters.length: ${chapters.length}, isNewestFirst: ${isNewestFirst}, activeTab: ${activeTab}`);
-        
         // First sort chapters by number to create consistent ranges
         const sortedForRanges = [...chapters].sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
         
@@ -695,15 +655,11 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
             ranges.reverse();
         }
         
-        logDebug(`Created ${ranges.length} chapter ranges`);
-        logDebug(`First range has ${ranges[0]?.length || 0} chapters`);
-        
         setChapterRanges(ranges);
         if (activeTab >= ranges.length) setActiveTab(0);
     }, [chapters, isNewestFirst, activeTab]);
 
     const handleChapterPress = useCallback((chapter: Chapter) => {
-        logDebug("Chapter pressed, passing to modal:", chapter);
         setSelectedChapter(chapter);
         setShowChapterModal(true);
     }, []);
@@ -719,13 +675,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     const handleMangaChange = useCallback(() => {
         setShowCorrectMangaModal(true);
     }, []);
-
-    const handleMangaSelect = useCallback((mangaId: string) => {
-        setInternalMangaId(mangaId);
-        if (preferences) {
-            searchAndFetchChapters(preferences);
-        }
-    }, [preferences, searchAndFetchChapters]);
 
     // Function to lazily load thumbnail pages for a specific chapter
     const loadChapterThumbnails = useCallback(async (chapter: Chapter) => {
@@ -746,7 +695,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 )
             );
             
-            logDebug(`Successfully loaded thumbnail for chapter ${chapter.number}`);
+            // Thumbnail loaded successfully
         } catch (error) {
             logError(`Failed to load thumbnail for chapter ${chapter.number}:`, error);
         } finally {
@@ -759,7 +708,6 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     }, [provider, loadingThumbnails]);
 
     const renderItem = useCallback(({ item }: { item: Chapter }) => {
-        logDebug(`Rendering chapter item:`, { id: item.id, number: item.number, title: item.title });
         return (
             <View style={styles.cardWrapper}>
                 {columnCount === 1 ? (
@@ -796,7 +744,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
 
     const getProviderColor = (provider: Provider) => {
         switch (provider) {
-            case 'mangafire': return '#f44336';
+            case 'katana': return '#9C27B0';
             case 'mangadex': return '#FF6740';
     
             default: return '#02A9FF';
@@ -805,7 +753,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
 
     const getProviderName = (provider: Provider) => {
         switch (provider) {
-            case 'mangafire': return 'Mangafire';
+            case 'katana': return 'Katana';
             case 'mangadex': return 'MangaDex';
     
             default: return 'Unknown';
@@ -832,7 +780,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                         style={styles.changeProviderButton}
                         onPress={() => {
                             // Cycle through providers
-                            const providers: Provider[] = ['mangafire', 'mangadex'];
+                            const providers: Provider[] = ['katana', 'mangadex'];
                             const currentIndex = providers.indexOf(provider);
                             const nextProvider = providers[(currentIndex + 1) % providers.length];
                             handleProviderChange(nextProvider);
@@ -845,7 +793,7 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
                 {showProviderDropdown && (
                     <View style={[styles.providerDropdown, { backgroundColor: currentTheme.colors.surface, borderColor: currentTheme.colors.border }]}>
                         {[
-                            { id: 'mangafire', name: 'Mangafire', color: '#f44336' },
+                            { id: 'katana', name: 'Katana', color: '#9C27B0' },
                             { id: 'mangadex', name: 'MangaDex', color: '#FF6740' },
                         ].map((providerOption) => (
                             <TouchableOpacity
@@ -918,18 +866,32 @@ export default function ChapterList({ mangaTitle, anilistId, coverImage, mangaId
     );
 
     if (isLoading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={currentTheme.colors.primary} /></View>;
-    if (error) return <View style={styles.errorContainer}><Text style={styles.errorText}>{error}</Text><TouchableOpacity style={styles.retryButton} onPress={() => {if(preferences) searchAndFetchChapters(preferences)}}><Text style={styles.retryButtonText}>Retry</Text></TouchableOpacity></View>;
+    if (error) return (
+        <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+            <View style={styles.errorButtons}>
+                <TouchableOpacity 
+                    style={styles.retryButton} 
+                    onPress={() => {if(preferences) searchAndFetchChapters(preferences)}}
+                >
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={styles.searchButton} 
+                    onPress={() => {
+                        console.log('Search Manga button pressed, setting showCorrectMangaModal to true');
+                        alert('Search Manga button pressed!'); // Test if button works
+                        setShowCorrectMangaModal(true);
+                    }}
+                >
+                    <Text style={styles.searchButtonText}>Search Manga</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
     if (chapters.length === 0) return <View style={styles.emptyContainer}><Text style={styles.emptyText}>No chapters available.</Text></View>;
 
-    // Debug the data being passed to FlashList
     const activeRange = chapterRanges[activeTab] || [];
-    logDebug(`About to render FlashList with:`, {
-        chaptersLength: chapters.length,
-        chapterRangesLength: chapterRanges.length,
-        activeTab,
-        activeRangeLength: activeRange.length,
-        firstChapterInRange: activeRange[0] ? { id: activeRange[0].id, number: activeRange[0].number } : null
-    });
 
     return (
         <View style={styles.container}>
@@ -1002,8 +964,11 @@ const styles = StyleSheet.create({
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     errorText: { fontSize: 16, textAlign: 'center', marginBottom: 16, color: '#FF5252' },
-    retryButton: { backgroundColor: '#02A9FF', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-    retryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+    retryButton: { backgroundColor: '#02A9FF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, flex: 1, marginRight: 8 },
+    retryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+    searchButton: { backgroundColor: '#4CAF50', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, flex: 1, marginLeft: 8 },
+    searchButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+    errorButtons: { flexDirection: 'row', marginTop: 10 },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     emptyText: { fontSize: 16, textAlign: 'center' },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 16 },

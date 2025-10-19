@@ -21,7 +21,6 @@ import { BlurView } from 'expo-blur';
 import { TAKIAPI_URL, MAGAAPI_URL, JELLEE_API_URL, API_CONFIG } from '../constants/api';
 // Health checks for in-repo providers
 import { zoroProvider, animePaheProvider } from '../../api/proxy/providers/anime';
-import { MangaFireProvider } from '../../api/proxy/providers/manga/mangafire';
 import { AniListProvider } from '../../api/proxy/providers/news/AniList';
 import { ANNProvider } from '../../api/proxy/providers/news/ANN';
 import { CrunchyrollProvider } from '../../api/proxy/providers/news/Crunchyroll';
@@ -165,30 +164,6 @@ const API_ENDPOINTS: APIEndpoint[] = [
       try {
         const results = await animePaheProvider.searchAnime('Naruto');
         if (!Array.isArray(results) || results.length === 0) throw new Error('Empty search results');
-        return { ok: true, detail: `${results.length} results`, responseTimeMs: Date.now() - started };
-      } catch (e: any) {
-        return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };
-      }
-    }
-  },
-  {
-    name: 'MangaFire Provider',
-    url: 'internal:mangafire',
-    category: 'Manga',
-    description: 'Manga search and chapters via MangaFire provider',
-    component: 'chapterlist.tsx',
-    icon: 'book-open',
-    color: '#4ECDC4',
-    customCheck: async () => {
-      const started = Date.now();
-      try {
-        const provider = new MangaFireProvider();
-        const results = await provider.search('One Piece', 1);
-        if (!Array.isArray(results) || results.length === 0) throw new Error('Empty search results');
-        // Probe chapters for the first result lightly
-        try {
-          await provider.getChapters(results[0].id, { limit: 1 });
-        } catch { /* ignore chapter fetch errors for health */ }
         return { ok: true, detail: `${results.length} results`, responseTimeMs: Date.now() - started };
       } catch (e: any) {
         return { ok: false, detail: e?.message || 'Search failed', responseTimeMs: Date.now() - started };

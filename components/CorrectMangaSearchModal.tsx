@@ -24,26 +24,29 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState<MangaSearchResult[]>([]);
     const [preferences, setPreferences] = useState<ProviderPreferences | null>(null);
+    const [showProviderDropdown, setShowProviderDropdown] = useState(false);
     const router = useRouter();
 
     useEffect(() => {
         const loadPrefs = async () => {
             try {
                 const prefsString = await AsyncStorage.getItem('mangaProviderPreferences');
-                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' };
+                let prefs = prefsString ? JSON.parse(prefsString) : { defaultProvider: 'katana', autoSelectSource: false, preferredChapterLanguage: 'en' };
                 
 
                 
                 setPreferences(prefs);
             } catch {
-                setPreferences({ defaultProvider: 'mangafire', autoSelectSource: false, preferredChapterLanguage: 'en' });
+                setPreferences({ defaultProvider: 'katana', autoSelectSource: false, preferredChapterLanguage: 'en' });
             }
         };
         loadPrefs();
     }, []);
 
     useEffect(() => {
-        console.log('Modal visibility changed:', isVisible);
+        console.log('CorrectMangaSearchModal - Modal visibility changed:', isVisible);
+        console.log('CorrectMangaSearchModal - Current title:', currentTitle);
+        console.log('CorrectMangaSearchModal - Preferences:', preferences);
         if (isVisible && preferences) {
             setSearchQuery(currentTitle);
             searchManga();
@@ -56,9 +59,54 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
         try {
             console.log('Searching for manga:', searchQuery);
             
+            // Extract first keyword for better search results
+            const extractFirstKeyword = (title: string): string => {
+                let cleaned = title
+                    .replace(/^[【「『]/, '') // Remove opening brackets/quotes
+                    .replace(/[】」』]$/, '') // Remove closing brackets/quotes
+                    .replace(/[★☆♪♫♥♡◆◇▲△●○■□※！？：；，。]/g, '') // Remove decorative symbols
+                    .replace(/[（]/g, '(') // Normalize parentheses
+                    .replace(/[）]/g, ')') // Normalize parentheses
+                    .replace(/[【]/g, '[') // Normalize brackets
+                    .replace(/[】]/g, ']') // Normalize brackets
+                    .replace(/[「]/g, '"') // Normalize quotes
+                    .replace(/[」]/g, '"') // Normalize quotes
+                    .replace(/[『]/g, "'") // Normalize quotes
+                    .replace(/[』]/g, "'") // Normalize quotes
+                    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                    .trim();
+
+                // Split by common separators and get the first meaningful part
+                const separators = [':', ' - ', ' – ', ' — ', ' | ', ' |', '| ', ' (', '（', ' [', '【'];
+                
+                for (const separator of separators) {
+                    if (cleaned.includes(separator)) {
+                        cleaned = cleaned.split(separator)[0].trim();
+                        break;
+                    }
+                }
+
+                // Extract the first 1-3 words as the keyword
+                const words = cleaned.split(/\s+/).filter(word => 
+                    word.length > 1 && // Skip single characters
+                    !/^[0-9]+$/.test(word) && // Skip pure numbers
+                    !['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'].includes(word.toLowerCase())
+                );
+
+                // Return the first meaningful word or first two words if the first is very short
+                if (words.length === 0) return cleaned;
+                if (words[0].length <= 2 && words.length > 1) {
+                    return `${words[0]} ${words[1]}`.trim();
+                }
+                return words[0];
+            };
+
+            const firstKeyword = extractFirstKeyword(searchQuery.trim());
+            
             // Try multiple search variations to get better results
             const searchVariations = [
-                searchQuery.trim(),
+                firstKeyword, // First keyword (most likely to succeed)
+                searchQuery.trim(), // Original title
                 searchQuery.trim().replace(/[★☆]/g, ''), // Remove special characters
                 searchQuery.trim().replace(/Peace Peace/, 'PisuPisu'), // Common title variation
                 searchQuery.trim().replace(/Supi Supi/, 'SupiSupi'), // Common title variation
@@ -142,6 +190,8 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
         </TouchableOpacity>
     );
 
+    console.log('CorrectMangaSearchModal - Rendering with isVisible:', isVisible);
+    
     return (
         <Modal
             isVisible={isVisible}
@@ -177,6 +227,55 @@ export default function CorrectMangaSearchModal({ isVisible, onClose, currentTit
                         <Text style={styles.searchButtonText}>Search</Text>
                     </TouchableOpacity>
                 </View>
+                
+                {/* Provider Selection */}
+                {preferences && (
+                    <View style={styles.providerContainer}>
+                        <Text style={styles.providerLabel}>Search Provider:</Text>
+                        <TouchableOpacity 
+                            style={styles.providerButton}
+                            onPress={() => setShowProviderDropdown(!showProviderDropdown)}
+                        >
+                            <Text style={styles.providerButtonText}>
+                                {preferences.defaultProvider === 'katana' ? 'Katana' : 
+                                 preferences.defaultProvider === 'mangadex' ? 'MangaDex' : 
+                                 preferences.defaultProvider}
+                            </Text>
+                            <Text style={styles.providerDropdownIcon}>▼</Text>
+                        </TouchableOpacity>
+                        
+                        {showProviderDropdown && (
+                            <View style={styles.providerDropdown}>
+                                <TouchableOpacity 
+                                    style={[styles.providerOption, preferences.defaultProvider === 'katana' && styles.providerOptionActive]}
+                                    onPress={() => {
+                                        const newPrefs = { ...preferences, defaultProvider: 'katana' as any };
+                                        setPreferences(newPrefs);
+                                        setShowProviderDropdown(false);
+                                        AsyncStorage.setItem('mangaProviderPreferences', JSON.stringify(newPrefs));
+                                    }}
+                                >
+                                    <Text style={[styles.providerOptionText, preferences.defaultProvider === 'katana' && styles.providerOptionTextActive]}>
+                                        Katana
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.providerOption, preferences.defaultProvider === 'mangadex' && styles.providerOptionActive]}
+                                    onPress={() => {
+                                        const newPrefs = { ...preferences, defaultProvider: 'mangadex' as any };
+                                        setPreferences(newPrefs);
+                                        setShowProviderDropdown(false);
+                                        AsyncStorage.setItem('mangaProviderPreferences', JSON.stringify(newPrefs));
+                                    }}
+                                >
+                                    <Text style={[styles.providerOptionText, preferences.defaultProvider === 'mangadex' && styles.providerOptionTextActive]}>
+                                        MangaDex
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
+                )}
                 {searchQuery && (
                     <View style={styles.searchInfo}>
                         <Text style={styles.searchInfoText}>
@@ -208,7 +307,7 @@ const styles = StyleSheet.create({
     modal: {
         margin: 0,
         justifyContent: 'flex-end',
-        zIndex: 1000,
+        zIndex: 9999,
     },
     container: {
         backgroundColor: '#1a1a1a',
@@ -216,7 +315,7 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 20,
         height: '80%',
         padding: 20,
-        zIndex: 1001,
+        zIndex: 10000,
     },
     dragIndicator: {
         width: 40,
@@ -294,5 +393,59 @@ const styles = StyleSheet.create({
     searchInfoText: {
         color: '#fff',
         fontSize: 14,
+    },
+    providerContainer: {
+        marginBottom: 20,
+    },
+    providerLabel: {
+        color: '#fff',
+        fontSize: 14,
+        marginBottom: 8,
+    },
+    providerButton: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: '#333',
+        borderRadius: 8,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#555',
+    },
+    providerButtonText: {
+        color: '#fff',
+        fontSize: 16,
+    },
+    providerDropdownIcon: {
+        color: '#fff',
+        fontSize: 12,
+    },
+    providerDropdown: {
+        position: 'absolute',
+        top: 50,
+        left: 0,
+        right: 0,
+        backgroundColor: '#333',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#555',
+        zIndex: 1000,
+        elevation: 5,
+    },
+    providerOption: {
+        padding: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#555',
+    },
+    providerOptionActive: {
+        backgroundColor: '#444',
+    },
+    providerOptionText: {
+        color: '#fff',
+        fontSize: 16,
+    },
+    providerOptionTextActive: {
+        fontWeight: 'bold',
+        color: '#02A9FF',
     },
 }); 

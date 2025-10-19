@@ -4,8 +4,8 @@ import { Image as ExpoImage } from 'expo-image';
 import Modal from 'react-native-modal';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../hooks/useTheme';
-import { animePaheProvider, zoroProvider } from '../api/proxy/providers/anime';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
 interface CorrectAnimeSearchModalProps {
   visible: boolean;
@@ -22,6 +22,7 @@ interface AnimeSearchResult {
   image: string;
   releaseDate?: string;
   type?: string;
+  anilistId?: string;
 }
 
 export default function CorrectAnimeSearchModal({
@@ -29,30 +30,14 @@ export default function CorrectAnimeSearchModal({
   onClose,
   onSelectAnime,
   initialQuery = '',
-  currentProvider = 'animepahe',
+  currentProvider = 'anilist',
   onProviderChange,
 }: CorrectAnimeSearchModalProps) {
   const { isDarkMode, currentTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<AnimeSearchResult[]>([]);
-  const [provider, setProvider] = useState(currentProvider);
   const router = useRouter();
-
-  useEffect(() => {
-    const loadProviderSettings = async () => {
-      try {
-        const settings = await AsyncStorage.getItem('animeProviderSettings');
-        if (settings) {
-          const parsed = JSON.parse(settings);
-          setProvider(parsed.defaultProvider || 'animepahe');
-        }
-      } catch (error) {
-        console.error('Error loading provider settings:', error);
-      }
-    };
-    loadProviderSettings();
-  }, []);
 
   useEffect(() => {
     console.log('Modal visibility changed:', visible);
@@ -72,36 +57,76 @@ export default function CorrectAnimeSearchModal({
 
     setLoading(true);
     try {
-      console.log('Searching for anime:', searchQuery, 'with provider:', provider);
+      console.log('Searching for anime using AniList API:', searchQuery);
       
-      let searchResults: any[] = [];
+      const query = `
+        query ($search: String) {
+          Page(perPage: 20) {
+            media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+              id
+              title {
+                userPreferred
+                english
+                romaji
+                native
+              }
+              coverImage {
+                large
+                medium
+              }
+              startDate {
+                year
+                month
+                day
+              }
+              format
+              status
+              episodes
+              averageScore
+              genres
+            }
+          }
+        }
+      `;
+
+      const response = await axios.post(
+        'https://graphql.anilist.co',
+        {
+          query,
+          variables: { search: searchQuery }
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
       
-      // Use the specific provider's search method
-      if (provider === 'animepahe') {
-        console.log(`[CorrectAnimeSearchModal] Using AnimePahe search route: anime/animepahe/${encodeURIComponent(searchQuery)}`);
-        searchResults = await animePaheProvider.searchAnime(searchQuery);
-      } else if (provider === 'zoro') {
-        console.log(`[CorrectAnimeSearchModal] Using Zoro search route: anime/zoro/${encodeURIComponent(searchQuery)}?type=1`);
-        searchResults = await zoroProvider.searchAnime(searchQuery);
-      }
+      console.log('AniList search results:', response.data);
       
-      console.log('Search results:', searchResults);
-      
-      if (searchResults && searchResults.length > 0) {
-        const mappedResults = searchResults.map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          image: item.image || item.poster || '',
-          releaseDate: item.releaseDate || item.year,
-          type: item.type || 'TV'
+      if (response.data?.data?.Page?.media && response.data.data.Page.media.length > 0) {
+        const mappedResults = response.data.data.Page.media.map((item: any) => ({
+          id: item.id.toString(),
+          anilistId: item.id.toString(),
+          title: item.title.userPreferred || item.title.english || item.title.romaji || item.title.native,
+          image: item.coverImage?.large || item.coverImage?.medium || '',
+          releaseDate: item.startDate?.year?.toString() || '',
+          type: item.format || 'TV',
+          status: item.status,
+          episodes: item.episodes,
+          score: item.averageScore,
+          genres: item.genres
         }));
         setResults(mappedResults);
+        console.log('Mapped results:', mappedResults);
       } else {
         console.log('No results found for query:', searchQuery);
         setResults([]);
       }
     } catch (error: any) {
-      console.error('Search error:', error);
+      console.error('AniList search error:', error);
       setResults([]);
     } finally {
       setLoading(false);
@@ -109,7 +134,9 @@ export default function CorrectAnimeSearchModal({
   };
 
   const handleAnimeSelect = (anime: AnimeSearchResult) => {
-    onSelectAnime(anime.id, anime.image, provider);
+    // Use AniList ID for better compatibility
+    const animeId = anime.anilistId || anime.id;
+    onSelectAnime(animeId, anime.image, 'anilist');
     onClose();
   };
 
@@ -127,19 +154,27 @@ export default function CorrectAnimeSearchModal({
         <Text style={[styles.title, { color: currentTheme.colors.text }]} numberOfLines={2}>
           {item.title}
         </Text>
-        {(item.releaseDate || item.type) && (
-          <View style={styles.metaContainer}>
-            {item.type && (
-              <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
-                {item.type}
-              </Text>
-            )}
-            {item.releaseDate && (
-              <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
-                {item.releaseDate}
-              </Text>
-            )}
-          </View>
+        <View style={styles.metaContainer}>
+          {item.type && (
+            <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
+              {item.type}
+            </Text>
+          )}
+          {item.releaseDate && (
+            <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
+              {item.releaseDate}
+            </Text>
+          )}
+          {item.episodes && (
+            <Text style={[styles.metaText, { color: currentTheme.colors.textSecondary }]}>
+              {item.episodes} eps
+            </Text>
+          )}
+        </View>
+        {item.score && (
+          <Text style={[styles.scoreText, { color: currentTheme.colors.primary }]}>
+            ⭐ {item.score}/100
+          </Text>
         )}
       </View>
     </TouchableOpacity>
@@ -164,7 +199,7 @@ export default function CorrectAnimeSearchModal({
         <View style={[styles.dragIndicator, { backgroundColor: currentTheme.colors.textSecondary }]} />
         <View style={styles.header}>
           <Text style={[styles.headerText, { color: currentTheme.colors.text }]}>
-            Search Correct Anime
+            Search Anime (AniList)
           </Text>
           <TouchableOpacity onPress={onClose}>
             <Text style={[styles.closeButton, { color: currentTheme.colors.text }]}>×</Text>
@@ -296,5 +331,10 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  scoreText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
   },
 }); 

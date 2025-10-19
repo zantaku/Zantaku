@@ -24,6 +24,7 @@ import { useImageLoader } from '../hooks/useImageLoader';
 import { useChapterNavigation } from '../hooks/useChapterNavigation';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { useTheme } from '../hooks/useTheme';
+import { useChapterPages } from '../contexts/ChapterPagesContext';
 
 import WebtoonImage from '../components/WebtoonImage';
 import ReaderUI from '../components/ReaderUI';
@@ -289,6 +290,7 @@ export default function WebNovelReader() {
   const { unlockOrientation, lockPortrait } = useOrientation();
   const { isIncognito } = useIncognito();
   const { currentTheme: theme, isDarkMode } = useTheme();
+  const { getChapterPages, clearChapterPages } = useChapterPages();
   const imageLoader = useImageLoader(images.length);
   const chapterNav = useChapterNavigation(params.mangaId as string, params.chapter as string);
   const progressTracker = useReadingProgress();
@@ -314,18 +316,18 @@ export default function WebNovelReader() {
     
     // Default headers based on the image URLs
     const firstImage = images[0];
-    if (firstImage && firstImage.includes('mangafire')) {
+    if (firstImage && firstImage.includes('mangakatana')) {
       return {
-        'Referer': 'https://mangafire.to/',
+        'Referer': 'https://mangakatana.com/',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       };
     }
     
     // Fallback headers
     return {
-      'Referer': 'https://mangafire.to/',
+      'Referer': 'https://mangakatana.com/',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Origin': 'https://mangafire.to'
+      'Origin': 'https://mangakatana.com'
     };
   }, [params, images[0]]);
 
@@ -492,7 +494,7 @@ export default function WebNovelReader() {
     }
   }, [params.chapter, params.title, params.anilistId, isIncognito, progressTracker, images.length, getCurrentMangaId]);
 
-  // Load images from params with better error handling
+  // Load images from store or fallback to params
   useEffect(() => {
     const loadImages = async () => {
       if (!isMounted.current) return;
@@ -505,25 +507,66 @@ export default function WebNovelReader() {
         if (!params.mangaId && !params.anilistId) {
           console.warn('⚠️ Missing mangaId/anilistId. Reader may not work properly.');
         }
-        if (!params.image1) {
-          console.warn('⚠️ Missing image1. No images to load.');
-        }
       }
       
       try {
-        const imageUrls: string[] = [];
-        let index = 1;
+        let imageUrls: string[] = [];
+        let headers: Record<string, string> = {};
 
-        // Extract all image URLs from params
-        while (params[`image${index}`]) {
-          const imageUrl = params[`image${index}`] as string;
-          imageUrls.push(imageUrl);
-          index++;
+        // Try to load from store first (preferred method - no URL transformation)
+        if (params.chapterPagesKey) {
+          const chapterKey = params.chapterPagesKey as string;
+          console.log(`🔓 [WebNovelReader] Loading pages from store: ${chapterKey}`);
+          
+          const storedPages = getChapterPages(chapterKey);
+          if (storedPages && storedPages.length > 0) {
+            console.log(`✅ [WebNovelReader] Retrieved ${storedPages.length} pages from store (UNMODIFIED URLs)`);
+            console.log(`✅ [WebNovelReader] First URL (verbatim):`, storedPages[0]?.url);
+            console.log(`✅ [WebNovelReader] Headers:`, storedPages[0]?.headers);
+            
+            // Extract URLs (keeping them exactly as stored)
+            imageUrls = storedPages.map(page => page.url);
+            
+            // Use headers from first page (they should all be the same)
+            headers = storedPages[0]?.headers || {};
+            
+            console.log(`✅ [WebNovelReader] Loaded ${imageUrls.length} images from store`);
+          } else {
+            console.warn(`⚠️ [WebNovelReader] No pages found in store for key: ${chapterKey}`);
+            console.warn(`⚠️ [WebNovelReader] Falling back to params (may have URL issues)`);
+          }
+        }
+
+        // Fallback to params if store loading failed (legacy method - may have URL issues)
+        if (imageUrls.length === 0) {
+          console.log(`⚠️ [WebNovelReader] Using fallback params method (URLs may be corrupted)`);
+          let index = 1;
+
+          // Extract all image URLs from params
+          while (params[`image${index}`]) {
+            const imageUrl = params[`image${index}`] as string;
+            imageUrls.push(imageUrl);
+            
+            // Try to extract headers
+            if (params[`header${index}`] && !headers.Referer) {
+              try {
+                headers = JSON.parse(params[`header${index}`] as string);
+              } catch (e) {
+                console.warn('Failed to parse headers from params:', e);
+              }
+            }
+            
+            index++;
+          }
+
+          if (imageUrls.length === 0 && !params.image1) {
+            console.error('❌ No images found. Available params:', Object.keys(params));
+            throw new Error('No images found - check if image params are being passed correctly');
+          }
         }
 
         if (imageUrls.length === 0) {
-          console.error('❌ No images found in params. Available params:', Object.keys(params));
-          throw new Error('No images found - check if image params are being passed correctly');
+          throw new Error('Failed to load images from both store and params');
         }
 
         console.log(`[WebNovelReader] ✅ Loaded ${imageUrls.length} images for chapter ${params.chapter}`);
@@ -562,9 +605,11 @@ export default function WebNovelReader() {
 
     loadImages();
   }, [
-    params.image1, // Only depend on the first image to detect new chapters
+    params.chapterPagesKey, // Primary dependency - store key
+    params.image1, // Fallback dependency
     params.chapter,
-    params.isLatestChapter
+    params.isLatestChapter,
+    getChapterPages
   ]);
 
   // Handle orientation
@@ -1553,7 +1598,7 @@ export default function WebNovelReader() {
         }}
         mangaId={mangaIdRef.current || params.mangaId as string}
         anilistId={params.anilistId as string}
-        currentProvider={params.readerCurrentProvider as 'mangadex' | 'mangafire' | 'unknown' || 'unknown'}
+        currentProvider={params.readerCurrentProvider as 'mangadex' | 'katana' | 'unknown' || 'unknown'}
         mangaSlugId={params.readerMangaSlugId as string}
         chapterManager={undefined}
         format={params.format as string}

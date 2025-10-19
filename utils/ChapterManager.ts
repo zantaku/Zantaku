@@ -158,16 +158,16 @@ export class ChapterManager {
    */
   getChapterPagesUrl(chapter: NormalizedChapter, baseApiUrl: string): string {
     switch (this.provider) {
-      case 'mangafire':
-        // MangaFire uses /api/manga/page?id={chapterId}
-        return `${baseApiUrl}/api/manga/page?id=${chapter.id}`;
         
       case 'mangadex':
         // Use TakiAPI (Consumet) endpoint for MangaDex
         // This endpoint is stable and returns the page list directly
         return `${TAKIAPI_URL}/manga/mangadex/read/${chapter.id}`;
         
-
+      case 'katana':
+        // Katana uses the akane-api endpoint with the full chapter ID
+        // The chapter ID should be in format: manga-slug/c88
+        return `https://akane-api-main-copy.vercel.app/katana/series/${chapter.id}`;
         
       default:
         // Default fallback

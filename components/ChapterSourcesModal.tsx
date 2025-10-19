@@ -8,6 +8,82 @@ import { useIncognito } from '../hooks/useIncognito';
 import { Chapter } from '../api/proxy/providers/manga';
 import { MangaProviderService, PageWithHeaders } from '../api/proxy/providers/manga/MangaProviderService';
 import { ChapterManager } from '../utils/ChapterManager';
+import { useChapterPages } from '../contexts/ChapterPagesContext';
+
+// Helper to convert Uint8Array to base64
+function uint8ArrayToBase64(uint8Array: Uint8Array): string {
+  let binary = '';
+  const len = uint8Array.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
+
+// Process Mangakatana images (convert to base64 data URIs)
+async function processKatanaImage(url: string, headers: Record<string, string>, retryCount = 0): Promise<string> {
+  try {
+    console.log(`🔓 [Modal] Processing Katana image (attempt ${retryCount + 1}): ${url.substring(0, 50)}...`);
+    
+    // Add a small delay between requests to avoid rate limiting
+    if (retryCount > 0) {
+      await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+    }
+    
+    const response = await fetch(url, { 
+      method: 'GET', 
+      headers: {
+        ...headers,
+        'Accept': 'image/*, application/octet-stream, */*',
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      console.warn(`🔓 [Modal] HTTP ${response.status} - ${retryCount < 2 ? 'retrying...' : 'giving up'}`);
+      if (retryCount < 2) {
+        return processKatanaImage(url, headers, retryCount + 1);
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Check if we got empty data
+    if (uint8Array.length === 0) {
+      console.warn(`🔓 [Modal] Empty response - ${retryCount < 2 ? 'retrying...' : 'using original URL'}`);
+      if (retryCount < 2) {
+        return processKatanaImage(url, headers, retryCount + 1);
+      }
+      throw new Error('Empty image data');
+    }
+    
+    // Check if it's a valid JPEG (starts with FF D8 FF)
+    const isJPEG = uint8Array[0] === 0xFF && uint8Array[1] === 0xD8 && uint8Array[2] === 0xFF;
+    
+    if (isJPEG) {
+      const base64 = uint8ArrayToBase64(uint8Array);
+      const dataUri = `data:image/jpeg;base64,${base64}`;
+      console.log(`🔓 [Modal] ✅ Processed image (${uint8Array.length} bytes) - ${(uint8Array.length / 1024).toFixed(0)}KB`);
+      return dataUri;
+    }
+    
+    // Not a JPEG - check if it's HTML error page
+    const text = new TextDecoder().decode(uint8Array.slice(0, 100));
+    if (text.includes('<html') || text.includes('<!DOCTYPE')) {
+      console.warn(`🔓 [Modal] Got HTML instead of image - ${retryCount < 2 ? 'retrying...' : 'using original URL'}`);
+      if (retryCount < 2) {
+        return processKatanaImage(url, headers, retryCount + 1);
+      }
+    }
+    
+    throw new Error('Invalid image format');
+  } catch (error) {
+    console.error(`🔓 [Modal] ❌ Failed to process image after ${retryCount + 1} attempts:`, error);
+    return url; // Fallback to original URL with headers
+  }
+}
 
 interface ChapterSourcesModalProps {
   visible: boolean;
@@ -16,7 +92,7 @@ interface ChapterSourcesModalProps {
   mangaTitle: { english: string; userPreferred: string; romaji?: string; native?: string; };
   mangaId: string;
   anilistId?: string;
-  currentProvider?: 'mangadex' | 'mangafire' | 'unknown';
+  currentProvider?: 'mangadex' | 'katana' | 'unknown';
   mangaSlugId?: string;
   chapterManager?: ChapterManager;
   format?: string;
@@ -32,6 +108,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
   const router = useRouter();
   const { currentTheme: theme, isDarkMode } = useTheme();
   const { isIncognito } = useIncognito();
+  const { setChapterPages } = useChapterPages();
 
   // Determine if content should use webnovel reader
   const shouldUseWebnovelReader = useCallback(() => {
@@ -102,6 +179,9 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<PageWithHeaders[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [isReadyToRead, setIsReadyToRead] = useState(false);
 
   // Direct API fallback when no ChapterManager is available
   const fetchChapterPagesDirectly = useCallback(async (selectedChapter: Chapter) => {
@@ -119,19 +199,20 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     let imageUrls: PageWithHeaders[] = [];
     
     try {
-      if (currentProvider === 'mangafire') {
-        // Use MangaProviderService for MangaFire
-        console.log('🔥 USING MANGA PROVIDER SERVICE FOR MANGAFIRE:', {
+      if (currentProvider === 'katana') {
+        // Use MangaProviderService for Katana
+        console.log('⚔️ USING MANGA PROVIDER SERVICE FOR KATANA:', {
           chapterId: properChapterId,
           mangaSlugId: mangaSlugId,
           chapterNumber: chapterNumber
         });
         
         try {
-          imageUrls = await MangaProviderService.getChapterPages(properChapterId, 'mangafire');
-          console.log('🔥 MANGA PROVIDER SERVICE SUCCESS:', `${imageUrls.length} pages`);
+          imageUrls = await MangaProviderService.getChapterPages(properChapterId, 'katana');
+          console.log('⚔️ MANGA PROVIDER SERVICE SUCCESS:', `${imageUrls.length} pages`);
+          console.log('⚔️ MANGA PROVIDER SERVICE IMAGES:', imageUrls);
         } catch (providerError) {
-          console.error('🔥 MANGA PROVIDER SERVICE ERROR:', {
+          console.error('⚔️ MANGA PROVIDER SERVICE ERROR:', {
             error: providerError,
             chapterId: properChapterId,
             provider: currentProvider
@@ -150,6 +231,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
         try {
           imageUrls = await MangaProviderService.getChapterPages(properChapterId, currentProvider as any);
           console.log('🔧 MANGA PROVIDER SERVICE SUCCESS:', `${imageUrls.length} pages`);
+          console.log('🔧 MANGA PROVIDER SERVICE IMAGES:', imageUrls);
         } catch (providerError) {
           console.error('🔧 MANGA PROVIDER SERVICE ERROR:', {
             error: providerError,
@@ -242,7 +324,7 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
         // Fetch the pages
         let imageUrls: PageWithHeaders[] = [];
         
-        if (provider === 'mangafire' || provider === 'mangadex') {
+        if (provider === 'mangadex' || provider === 'katana') {
             const response = await fetch(pagesUrl);
             logDebug('Response status:', response.status);
             
@@ -254,23 +336,39 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
                 throw new Error(`${data.error}. ${data.message || ''}`);
             }
 
-            if (provider === 'mangafire') {
-                if (data?.pages && Array.isArray(data.pages)) {
-                    imageUrls = data.pages.map((page: any, index: number) => {
-                        const imageUrl = page.url;
-                        const headers = page.headers || { 'Referer': 'https://mangafire.to' };
+            if (provider === 'katana') {
+                console.log('⚔️ KATANA RAW API RESPONSE (length only):', data?.success ? 'Success' : 'Failed');
+                
+                // Katana API returns nested { success, data: { imageUrls | imageurls | pages }}
+                const payload = (data && data.success && data.data) ? data.data : data;
+                const katanaArray = payload?.imageUrls || payload?.imageurls || payload?.pages;
+                
+                if (Array.isArray(katanaArray)) {
+                    console.log(`⚔️ KATANA: Found ${katanaArray.length} pages (URLs preserved verbatim)`);
+                    
+                    // CRITICAL: Preserve URLs EXACTLY as received - no transformations
+                    imageUrls = katanaArray.map((page: any) => {
+                        const imageUrl = page?.url || page;
+                        const headers = (page && page.headers) || { 'Referer': 'https://mangakatana.com' };
                         return { url: imageUrl, headers } as PageWithHeaders;
                     });
-                    logDebug(`Successfully processed ${imageUrls.length} pages from mangafire API.`);
+                    
+                    console.log(`⚔️ KATANA: Processed ${imageUrls.length} pages (URLs UNMODIFIED)`);
+                    logDebug(`Successfully processed ${imageUrls.length} pages from katana API.`);
                 } else {
-                    throw new Error('Invalid mangafire API response format.');
+                    console.error('⚔️ KATANA INVALID RESPONSE FORMAT');
+                    throw new Error('Invalid katana API response format.');
                 }
             } else {
+                console.log('📚 MANGADEX: Response received');
+                
                 // MangaDex via TakiAPI can return an array of URLs or an object with images array
                 let urls: string[] = [];
                 if (Array.isArray(data)) {
-                    urls = data.map((item: any) => typeof item === 'string' ? item : (item?.img || item?.url || ''))
-                               .filter((u: string) => !!u);
+                    urls = data.map((item: any) => {
+                        const url = typeof item === 'string' ? item : (item?.img || item?.url || '');
+                        return url;
+                    }).filter((u: string) => !!u);
                 } else if (Array.isArray(data?.images)) {
                     urls = data.images.map((img: any) => typeof img === 'string' ? img : (img?.url || '')).filter(Boolean);
                 } else if (Array.isArray(data?.result?.images)) {
@@ -283,26 +381,45 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
                 }
 
                 if (urls.length === 0) {
+                    console.error('📚 MANGADEX NO URLS FOUND');
                     throw new Error('Invalid mangadex API response format.');
                 }
 
+                console.log(`📚 MANGADEX: Found ${urls.length} pages (URLs preserved verbatim)`);
+
+                // CRITICAL: Preserve URLs EXACTLY as received - no transformations
                 const dexHeaders = { 
                     Referer: 'https://takiapi.xyz/',
                     'User-Agent': 'Mozilla/5.0'
                 };
                 imageUrls = urls.map((u: string) => ({ url: u, headers: dexHeaders }));
+                
+                console.log(`📚 MANGADEX: Processed ${imageUrls.length} pages (URLs UNMODIFIED)`);
                 logDebug(`Successfully processed ${imageUrls.length} pages from mangadex API.`);
             }
             
         } else {
             // Fallback to MangaProviderService
             logDebug('=== USING MANGA PROVIDER SERVICE FALLBACK ===');
+            console.log('🔧 MANGA PROVIDER SERVICE FALLBACK:', {
+                chapterId,
+                provider,
+                pagesUrl
+            });
             imageUrls = await MangaProviderService.getChapterPages(chapterId, provider as any);
+            console.log('🔧 MANGA PROVIDER SERVICE RESULT:', imageUrls);
+            console.log('🔧 MANGA PROVIDER SERVICE RESULT LENGTH:', imageUrls.length);
             logDebug(`MangaProviderService returned: ${imageUrls.length} pages`);
         }
 
         logDebug('=== FINAL RESULT ===');
         logDebug('Total image URLs found:', imageUrls.length);
+        console.log('🎯 FINAL IMAGE URLS SUMMARY:', {
+            totalCount: imageUrls.length,
+            provider: provider,
+            firstFewUrls: imageUrls.slice(0, 3).map(p => p.url),
+            allUrls: imageUrls.map(p => p.url)
+        });
         
         if (imageUrls.length === 0) {
             throw new Error("No pages found for this chapter.");
@@ -351,10 +468,95 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
     }
   }, [visible, chapter, fetchChapterPages, currentProvider, mangaSlugId, format, countryOfOrigin, anilistId, mangaId]);
 
-  const navigateToReader = () => {
-    if (pages.length === 0 || !chapter) return;
+  // Process images (decode Katana, prefetch others)
+  const processAndCacheImages = useCallback(async () => {
+    if (pages.length === 0) return;
     
-    // Always pass the fetched pages to the reader, regardless of chapter type
+    setIsProcessing(true);
+    setProcessingProgress(0);
+    console.log(`🔧 [Modal] Starting to process ${pages.length} images...`);
+    
+    try {
+      const processedPages: PageWithHeaders[] = [];
+      
+      // Detect if this is Katana (needs special processing)
+      const isKatana = pages.some(p => 
+        p.url.includes('mangakatana') || 
+        (p.headers && 'Referer' in p.headers && p.headers.Referer?.includes('mangakatana'))
+      );
+      
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        
+        try {
+          if (isKatana) {
+            // Process Katana images (convert to base64 data URIs)
+            console.log(`🔧 [Modal] Processing Katana image ${i + 1}/${pages.length}`);
+            const processedUrl = await processKatanaImage(page.url, page.headers || {});
+            
+            // Prefetch the data URI to ensure it's cached
+            await ExpoImage.prefetch(processedUrl, {
+              cachePolicy: 'memory-disk'
+            });
+            
+            processedPages.push({
+              url: processedUrl,
+              headers: {} // No headers needed for data URIs
+            });
+          } else {
+            // For other providers, just prefetch with headers
+            console.log(`🔧 [Modal] Prefetching image ${i + 1}/${pages.length}`);
+            await ExpoImage.prefetch(page.url, {
+              headers: page.headers,
+              cachePolicy: 'memory-disk'
+            });
+            
+            processedPages.push(page); // Keep original
+          }
+          
+          // Update progress
+          const progress = ((i + 1) / pages.length) * 100;
+          setProcessingProgress(progress);
+          console.log(`🔧 [Modal] Progress: ${Math.round(progress)}%`);
+        } catch (error) {
+          console.error(`🔧 [Modal] Failed to process image ${i + 1}:`, error);
+          // On error, use original page
+          processedPages.push(page);
+        }
+      }
+      
+      // Update pages with processed versions
+      setPages(processedPages);
+      setIsReadyToRead(true);
+      console.log(`🔧 [Modal] ✅ All ${processedPages.length} images processed and cached!`);
+    } catch (error) {
+      console.error(`🔧 [Modal] Processing failed:`, error);
+      setIsReadyToRead(true); // Allow reading even if processing failed
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [pages]);
+  
+  // Auto-process images when they're loaded
+  useEffect(() => {
+    if (!loading && !error && pages.length > 0 && !isProcessing && !isReadyToRead) {
+      console.log(`🔧 [Modal] Auto-starting image processing...`);
+      processAndCacheImages();
+    }
+  }, [loading, error, pages, isProcessing, isReadyToRead, processAndCacheImages]);
+
+  const navigateToReader = () => {
+    if (pages.length === 0 || !chapter || !isReadyToRead) return;
+    
+    // Generate a unique chapter key for storing pages
+    const chapterKey = `${mangaId}_${chapter.number}`;
+    
+    // Store pages in context (NO URL TRANSFORMATION - stored as-is)
+    console.log('🔒 [ChapterModal] Storing pages WITHOUT transformation');
+    console.log('🔒 [ChapterModal] First URL (verbatim from API):', pages[0]?.url);
+    setChapterPages(chapterKey, pages);
+    
+    // Pass only metadata through navigation params (no URLs)
     const params: Record<string, any> = {
       title: chapter.title,
       chapter: chapter.number,
@@ -367,22 +569,19 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
       // Pass format and country info for proper reader selection
       format,
       countryOfOrigin,
+      // Pass chapter key to retrieve pages from store
+      chapterPagesKey: chapterKey,
+      // Pass page count for UI
+      pageCount: pages.length
     };
-    
-    // Add the already-fetched image URLs and headers
-    pages.forEach((page, i) => {
-      params[`image${i + 1}`] = page.url;
-      if (page.headers) {
-        params[`header${i + 1}`] = JSON.stringify(page.headers);
-      }
-    });
 
-    logDebug('Navigating to reader with fetched pages:', {
+    logDebug('Navigating to reader with stored pages:', {
       chapterTitle: chapter.title,
       chapterNumber: chapter.number,
       totalPages: pages.length,
       currentProvider,
       mangaSlugId,
+      chapterKey,
       firstPageUrl: pages[0]?.url,
       hasHeaders: pages.some(p => p.headers && Object.keys(p.headers).length > 0)
     });
@@ -416,7 +615,10 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
             <TouchableOpacity onPress={onClose} style={styles.closeButton}><FontAwesome5 name="times" size={20} color={theme.colors.text} /></TouchableOpacity>
           </View>
           {loading ? (
-            <View style={styles.statusContainer}><ActivityIndicator size="large" color={theme.colors.primary} /></View>
+            <View style={styles.statusContainer}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={{ color: theme.colors.text, marginTop: 12 }}>Loading chapter...</Text>
+            </View>
           ) : error ? (
             <View style={styles.statusContainer}>
               <Text style={styles.errorText}>{error}</Text>
@@ -431,8 +633,32 @@ export default function ChapterSourcesModal({ visible, onClose, chapter, mangaTi
                 numColumns={3}
                 contentContainerStyle={styles.listContent}
               />
-              <TouchableOpacity style={styles.readButton} onPress={navigateToReader}>
-                <Text style={styles.readButtonText}>Read Chapter ({pages.length} pages)</Text>
+              
+              {/* Processing status */}
+              {isProcessing && (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={{ color: theme.colors.text, marginTop: 8 }}>
+                    Processing images... {Math.round(processingProgress)}%
+                  </Text>
+                  <View style={{ width: '100%', height: 4, backgroundColor: 'rgba(128,128,128,0.2)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
+                    <View style={{ width: `${processingProgress}%`, height: '100%', backgroundColor: theme.colors.primary }} />
+                  </View>
+                </View>
+              )}
+              
+              {/* Read button - disabled until ready */}
+              <TouchableOpacity 
+                style={[
+                  styles.readButton, 
+                  !isReadyToRead && { backgroundColor: '#666', opacity: 0.5 }
+                ]} 
+                onPress={navigateToReader}
+                disabled={!isReadyToRead}
+              >
+                <Text style={styles.readButtonText}>
+                  {isReadyToRead ? `Read Chapter (${pages.length} pages)` : 'Preparing...'}
+                </Text>
               </TouchableOpacity>
             </>
           )}

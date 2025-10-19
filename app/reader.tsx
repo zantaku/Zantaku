@@ -21,6 +21,7 @@ import Slider from '@react-native-community/slider';
 import { useOrientation } from '../hooks/useOrientation';
 import { useIncognito } from '../hooks/useIncognito';
 import { useTheme } from '../hooks/useTheme';
+import { useChapterPages } from '../contexts/ChapterPagesContext';
 import ChapterSourcesModal from '../components/ChapterSourcesModal';
 import { ChapterManager } from '../utils/ChapterManager';
 import { MangaProviderService } from '../api/proxy/providers/manga/MangaProviderService';
@@ -35,6 +36,51 @@ const STORAGE_KEY = {
   USER_DATA: 'user_data'
 };
 const BASE_API_URL = 'https://takiapi.xyz';
+
+// Image loading constants
+const MAX_CONCURRENT_LOADS = 3;
+const LOAD_JITTER_MS = 150;
+const DEFAULT_IMAGE_HEIGHT = WINDOW_WIDTH * 1.45; // Fallback aspect ratio
+
+// Queued image loader with concurrency control
+class ImageLoader {
+  private queue: Array<() => Promise<void>> = [];
+  private activeCount = 0;
+  
+  async add(task: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const wrappedTask = async () => {
+        try {
+          await task();
+          resolve();
+        } catch (error) {
+          reject(error);
+        } finally {
+          this.activeCount--;
+          this.processNext();
+        }
+      };
+      
+      this.queue.push(wrappedTask);
+      this.processNext();
+    });
+  }
+  
+  private processNext() {
+    if (this.activeCount >= MAX_CONCURRENT_LOADS || this.queue.length === 0) {
+      return;
+    }
+    
+    const task = this.queue.shift();
+    if (task) {
+      this.activeCount++;
+      // Add jitter to avoid hitting rate limits
+      setTimeout(() => task(), Math.random() * LOAD_JITTER_MS);
+    }
+  }
+}
+
+// No decoding needed here - images are pre-processed in ChapterSourcesModal!
 
 // Define styles at the top level
 const styles = StyleSheet.create({
@@ -975,8 +1021,17 @@ const ImageItem = memo(({
     </View>
   ), [onRetry]);
 
-  const handleError = useCallback((error: ImageErrorEventData | Error) => {
-    console.error(`Error loading image ${index + 1}:`, error);
+  // Images are pre-processed in ChapterSourcesModal - no decoding needed here!
+
+  const handleError = useCallback((error: any) => {
+    const errorMessage = error?.message || error?.error?.message || 'Unknown error';
+    console.error(`❌ Error loading image ${index + 1}:`, {
+      error: errorMessage,
+      url: imageUrl,
+      headers: imageHeaders,
+      retryCount
+    });
+    
     if (retryCount < MAX_RETRIES) {
       setRetryCount(prev => prev + 1);
       // Retry after a delay with exponential backoff
@@ -986,7 +1041,7 @@ const ImageItem = memo(({
     } else {
       onLoadError(error);
     }
-  }, [index, retryCount, MAX_RETRIES, onRetry, onLoadError]);
+  }, [index, retryCount, MAX_RETRIES, onRetry, onLoadError, imageUrl, imageHeaders]);
 
   return (
     <View style={styles.pageContainer}>
@@ -1017,29 +1072,31 @@ const ImageItem = memo(({
                 style={styles.image}
                 disabled={!isZoomed} // Only allow tap when zoomed (for zoom out)
               >
-                <ExpoImage
+                <Image
                   source={{ 
                     uri: imageUrl,
                     headers: imageHeaders
                   }}
-                  style={styles.image}
-                  contentFit="contain"
-                  onLoadStart={onLoadStart}
+                  style={[styles.image, { minHeight: DEFAULT_IMAGE_HEIGHT }]}
+                  resizeMode="contain"
+                  onLoadStart={() => {
+                    console.log(`🖼️ [Render] Starting to load image ${index + 1}`);
+                    onLoadStart();
+                  }}
                   onLoad={onLoadSuccess}
-                  onError={handleError}
-                  cachePolicy="memory-disk"
-                  contentPosition="center"
-                  recyclingKey={`image-${index}-${imageUrl}`}
-                  transition={200}
-                  priority={isNearby ? "high" : "low"}
+                  onError={(e) => handleError(e.nativeEvent)}
                 />
               </TouchableOpacity>
             </Animated.View>
           </PanGestureHandler>
         ) : (
           <View style={[styles.image, { backgroundColor: '#111', justifyContent: 'center', alignItems: 'center' }]}>
-            <Text style={{ color: '#666', fontSize: 14 }}>Page {index + 1}</Text>
-            <Text style={{ color: '#666', fontSize: 12, marginTop: 4 }}>Tap to load</Text>
+            {isLoading ? LoadingComponent : hasError ? ErrorComponent : (
+              <>
+                <Text style={{ color: '#666', fontSize: 14 }}>Page {index + 1}</Text>
+                <Text style={{ color: '#666', fontSize: 12, marginTop: 4 }}>Tap to load</Text>
+              </>
+            )}
           </View>
         )}
       </TouchableOpacity>
@@ -1155,6 +1212,7 @@ export default function ReaderScreen() {
   const { unlockOrientation, lockPortrait } = useOrientation();
   const { isIncognito } = useIncognito();
   const { currentTheme: theme, isDarkMode } = useTheme();
+  const { getChapterPages, clearChapterPages } = useChapterPages();
   
   // Store mangaId in a ref when component mounts to ensure it's available for navigation
   const mangaIdRef = useRef<string | null>(null);
@@ -1243,7 +1301,7 @@ export default function ReaderScreen() {
   useEffect(() => {
     if (params.readerCurrentProvider && typeof params.readerCurrentProvider === 'string') {
       console.log('Setting currentProvider from navigation params:', params.readerCurrentProvider);
-      setCurrentProvider(params.readerCurrentProvider as 'mangadex' | 'mangafire' | 'unknown');
+      setCurrentProvider(params.readerCurrentProvider as 'mangadex' | 'katana' | 'unknown');
       // Store provider info persistently for this reading session
       AsyncStorage.setItem('reader_current_provider', params.readerCurrentProvider);
     }
@@ -1263,7 +1321,7 @@ export default function ReaderScreen() {
         const storedProvider = await AsyncStorage.getItem('reader_current_provider');
         if (storedProvider && storedProvider !== 'unknown') {
           console.log('Loading persisted currentProvider:', storedProvider);
-          setCurrentProvider(storedProvider as 'mangadex' | 'mangafire' | 'unknown');
+          setCurrentProvider(storedProvider as 'mangadex' | 'katana' | 'unknown');
         }
       }
       
@@ -1325,7 +1383,7 @@ export default function ReaderScreen() {
   const [nextChapterId, setNextChapterId] = useState<string | null>(null);
   const [mangaSlugId, setMangaSlugId] = useState<string | null>(null);
   const [mangaTitle, setMangaTitle] = useState<string | null>(null);
-  const [currentProvider, setCurrentProvider] = useState<'mangadex' | 'mangafire' | 'unknown'>('unknown');
+  const [currentProvider, setCurrentProvider] = useState<'mangadex' | 'katana' | 'unknown'>('unknown');
   const [chapterManager, setChapterManager] = useState<ChapterManager | undefined>(undefined);
   
   // Progressive loading state
@@ -1401,54 +1459,37 @@ export default function ReaderScreen() {
 
 
 
-  // Load ALL images aggressively - no progressive loading
+  // Load ALL images immediately - no delays, no batching
   const loadAllImages = useCallback(async () => {
     if (images.length === 0) return;
     
-    const indicesToLoad: number[] = [];
+    console.log(`[Reader] Loading ALL ${images.length} images immediately`);
     
-    // Load ALL images, not just around current page
-    for (let i = 0; i < images.length; i++) {
-      if (!loadedImageIndices.has(i)) {
-        indicesToLoad.push(i);
-      }
-    }
-    
-    if (indicesToLoad.length > 0) {
-      console.log(`[Reader] Loading ALL ${indicesToLoad.length} remaining images aggressively`);
-      
-      // Load all images in parallel - no batching
-      const loadPromises = indicesToLoad.map(async (index) => {
-        if (loadedImageIndices.has(index) || index >= images.length) {
-          return;
-        }
+    // Load ALL images in parallel - no checks, just load everything
+    const loadPromises = images.map(async (imageUrl, index) => {
+      try {
+        const headers = dynamicImageHeaders[index] || imageHeaders;
         
-        try {
-          // Preload the image using ExpoImage prefetch
-          const imageUrl = images[index];
-          const headers = dynamicImageHeaders[index] || imageHeaders;
-          
-          await ExpoImage.prefetch(imageUrl, {
-            headers,
-            cachePolicy: 'memory-disk'
-          });
-          
-          setLoadedImageIndices(prev => new Set([...prev, index]));
-          console.log(`[Reader] Successfully preloaded image ${index + 1}`);
-        } catch (error) {
-          if (error instanceof Error) {
-            console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
-          }
+        await ExpoImage.prefetch(imageUrl, {
+          headers,
+          cachePolicy: 'memory-disk'
+        });
+        
+        setLoadedImageIndices(prev => new Set([...prev, index]));
+        console.log(`[Reader] Preloaded image ${index + 1}/${images.length}`);
+      } catch (error) {
+        if (error instanceof Error) {
+          console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
         }
-      });
-      
-      await Promise.allSettled(loadPromises);
-      
-      // Update loading progress
-      setLoadingProgress(100);
-      console.log(`[Reader] Finished loading all ${images.length} images`);
-    }
-  }, [images, dynamicImageHeaders, imageHeaders, loadedImageIndices]);
+      }
+    });
+    
+    await Promise.allSettled(loadPromises);
+    
+    setLoadingProgress(100);
+    setIsInitialLoading(false);
+    console.log(`[Reader] ✅ ALL ${images.length} images loaded!`);
+  }, [images, dynamicImageHeaders, imageHeaders]);
 
   // Trigger aggressive loading on any scroll
   const triggerImageLoading = useCallback(() => {
@@ -1504,9 +1545,6 @@ export default function ReaderScreen() {
         if (Platform.OS === 'ios') {
           Haptics.selectionAsync();
         }
-        
-                // Aggressive loading: Load ALL images immediately
-        triggerImageLoading();
       }
     }, [
       currentPage,
@@ -1514,8 +1552,7 @@ export default function ReaderScreen() {
       readingDirection,
       debugMode,
       debugGestures,
-      debugLevel,
-      triggerImageLoading
+      debugLevel
     ]);
 
   // Update the handleScroll function to use direct handler
@@ -1534,36 +1571,40 @@ export default function ReaderScreen() {
     const loadImages = async () => {
       try {
         console.log('Loading images from params:', params);
-        const imageUrls: string[] = [];
+        let imageUrls: string[] = [];
         const imageHeadersMap: { [key: number]: any } = {};
-        let index = 1;
-  
-        while (params[`image${index}`]) {
-          const imageUrl = params[`image${index}`] as string;
-          console.log(`Found image ${index}:`, imageUrl);
-          imageUrls.push(imageUrl);
-          
-          // Check if there are custom headers for this image
-          const headerParam = params[`header${index}`];
-          if (headerParam && typeof headerParam === 'string') {
-            try {
-              const headers = JSON.parse(headerParam);
-              imageHeadersMap[index - 1] = headers; // Store with 0-based index
-              console.log(`Found headers for image ${index}:`, headers);
-            } catch (e) {
-              console.warn(`Failed to parse headers for image ${index}:`, e);
-            }
+
+        // ONLY load from store - single source of truth (no URL transformation)
+        if (!params.chapterPagesKey) {
+          console.error('❌ [Reader] No chapterPagesKey provided - cannot load chapter');
+          throw new Error('Chapter data not available. Please try reloading the chapter.');
+        }
+
+        const chapterKey = params.chapterPagesKey as string;
+        console.log(`🔓 [Reader] Loading pages from store: ${chapterKey}`);
+        
+        const storedPages = getChapterPages(chapterKey);
+        if (!storedPages || storedPages.length === 0) {
+          console.error(`❌ [Reader] No pages found in store for key: ${chapterKey}`);
+          throw new Error('Chapter pages not found. Please try reloading the chapter.');
+        }
+
+        console.log(`✅ [Reader] Retrieved ${storedPages.length} pages from store (UNMODIFIED URLs)`);
+        console.log(`✅ [Reader] First URL (verbatim):`, storedPages[0]?.url);
+        console.log(`✅ [Reader] Headers:`, storedPages[0]?.headers);
+        
+        // Extract URLs and headers (keeping them exactly as stored - NO TRANSFORMATION)
+        imageUrls = storedPages.map(page => page.url);
+        
+        // Map headers for each image
+        storedPages.forEach((page, index) => {
+          if (page.headers) {
+            imageHeadersMap[index] = page.headers;
           }
-          
-          index++;
-        }
+        });
+        
+        console.log(`✅ [Reader] Loaded ${imageUrls.length} images from store (URLs UNMODIFIED)`);
   
-        if (imageUrls.length === 0) {
-          console.error('No images found in params');
-          throw new Error('No images found for this chapter. Please try another source.');
-        }
-  
-        console.log(`Loaded ${imageUrls.length} images`);
         setImages(imageUrls);
         setDynamicImageHeaders(imageHeadersMap);
         
@@ -1572,10 +1613,10 @@ export default function ReaderScreen() {
           const firstImageUrl = imageUrls[0];
           const firstImageHeaders = imageHeadersMap[0];
           
-          if (firstImageUrl.includes('mfcdn') || (firstImageHeaders && 'Referer' in firstImageHeaders && firstImageHeaders.Referer?.includes('mangafire'))) {
-            console.log('=== DETECTED MANGAFIRE PROVIDER ===');
-            console.log('Setting currentProvider to: mangafire');
-            setCurrentProvider('mangafire');
+          if (firstImageUrl.includes('mangakatana') || (firstImageHeaders && 'Referer' in firstImageHeaders && firstImageHeaders.Referer?.includes('mangakatana'))) {
+            console.log('=== DETECTED KATANA PROVIDER ===');
+            console.log('Setting currentProvider to: katana');
+            setCurrentProvider('katana');
           }
         }
   
@@ -1591,59 +1632,55 @@ export default function ReaderScreen() {
         );
         setErrorStates(initialErrorStates);
         
-        // Start progressive loading with first few images
-        console.log(`[Reader] Starting progressive loading with first ${INITIAL_LOAD_COUNT} images`);
-        const initialIndices = Array.from({ length: Math.min(INITIAL_LOAD_COUNT, imageUrls.length) }, (_, i) => i);
+        // Load ALL images with concurrency control and content-type checking
+        console.log(`[Reader] Starting queued loading of ${imageUrls.length} images (max ${MAX_CONCURRENT_LOADS} concurrent)`);
         
-        // Load initial batch - create a local function to avoid dependency issues
-        const loadInitialBatch = async (indices: number[]) => {
-          console.log(`[Reader] Loading batch of ${indices.length} images:`, indices);
-          
-          const loadPromises = indices.map(async (index) => {
-            if (index >= imageUrls.length) {
-              return;
-            }
-            
-            try {
-              // Preload the image using ExpoImage prefetch
-              const imageUrl = imageUrls[index];
-              const headers = imageHeadersMap[index] || {
-                'Referer': 'https://mangafire.to/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Origin': 'https://mangafire.to'
-              };
-              
-              await ExpoImage.prefetch(imageUrl, {
-                headers,
-                cachePolicy: 'memory-disk'
-              });
-              
-              setLoadedImageIndices(prev => new Set([...prev, index]));
-              console.log(`[Reader] Successfully preloaded image ${index + 1}`);
-            } catch (error) {
-              if (error instanceof Error) {
-                console.warn(`[Reader] Failed to preload image ${index + 1}:`, error.message);
+        const imageLoader = new ImageLoader();
+        let loadedCount = 0;
+        
+        const loadAllImagesQueued = async () => {
+          // Queue all image loads
+          const loadTasks = imageUrls.map((imageUrl, index) => {
+            return imageLoader.add(async () => {
+              try {
+                const headers = imageHeadersMap[index] || {
+                  'Referer': 'https://mangakatana.com/',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                  'Origin': 'https://mangakatana.com'
+                };
+                
+                // Preload with ExpoImage (works reliably in Expo)
+                await ExpoImage.prefetch(imageUrl, {
+                  headers,
+                  cachePolicy: 'memory-disk'
+                });
+                
+                setLoadedImageIndices(prev => new Set([...prev, index]));
+                
+                // Update progress
+                loadedCount++;
+                const currentProgress = (loadedCount / imageUrls.length) * 100;
+                setLoadingProgress(currentProgress);
+                
+                console.log(`[Reader] ✅ Preloaded image ${loadedCount}/${imageUrls.length} (${Math.round(currentProgress)}%) - URL: ${imageUrl.substring(0, 50)}...`);
+              } catch (error) {
+                if (error instanceof Error) {
+                  console.warn(`[Reader] ❌ Failed to preload image ${index + 1}:`, error.message);
+                }
               }
-            }
+            });
           });
           
-          await Promise.allSettled(loadPromises);
+          // Wait for all queued loads
+          await Promise.allSettled(loadTasks);
           
-          // Update loading progress
-          setLoadingProgress((indices.length / imageUrls.length) * 100);
+          console.log(`[Reader] ✅ Finished loading ${loadedCount}/${imageUrls.length} images`);
+          setLoadingProgress(100);
+          setIsInitialLoading(false);
         };
         
-        // Load ALL images immediately, not just initial batch
-        setTimeout(async () => {
-          await loadInitialBatch(initialIndices);
-          setIsInitialLoading(false);
-          console.log(`[Reader] Initial loading complete`);
-          
-          // Trigger loading of ALL remaining images
-          setTimeout(() => {
-            loadAllImages();
-          }, 500);
-        }, 100);
+        // Start queued loading
+        loadAllImagesQueued();
         
       } catch (err) {
         console.error('Error loading images:', err);
@@ -1653,7 +1690,7 @@ export default function ReaderScreen() {
     };
   
     loadImages();
-  }, []); // Remove loadImageBatch dependency to prevent infinite loop
+  }, [params.chapterPagesKey, getChapterPages]); // Single source of truth - only store key matters
   
   useEffect(() => {
     const loadProgress = async () => {
@@ -2305,7 +2342,7 @@ export default function ReaderScreen() {
           console.log('Manga ID:', readerMangaSlugId);
           
           // Use MangaProviderService to get chapters (same as ChapterList)
-          const chapters = await MangaProviderService.getChapters(readerMangaSlugId, readerProvider as 'mangadex' | 'mangafire');
+          const chapters = await MangaProviderService.getChapters(readerMangaSlugId, readerProvider as 'mangadex' | 'katana');
           
           if (chapters && chapters.length > 0) {
             console.log('=== MANGA PROVIDER SERVICE SUCCESS ===');

@@ -29,7 +29,7 @@ interface MangaReaderPreferences {
 
 // Interface for manga provider preferences
 interface ProviderPreferences {
-  defaultProvider: 'mangafire' | 'mangadex';
+  defaultProvider: 'mangadex' | 'katana';
   autoSelectSource: boolean;
   preferredChapterLanguage: string;
   preferredScanlationGroup: string;
@@ -87,7 +87,7 @@ export default function MangaSettingsPage() {
 
   // State for provider settings
   const [providerPreferences, setProviderPreferences] = useState<ProviderPreferences>({
-    defaultProvider: 'mangafire',
+    defaultProvider: 'katana',
     autoSelectSource: true,
     preferredChapterLanguage: 'en',
     preferredScanlationGroup: '',
@@ -95,6 +95,42 @@ export default function MangaSettingsPage() {
     cacheImages: true,
     cacheDuration: 7
   });
+
+  // State for cache size
+  const [cacheSize, setCacheSize] = useState<string>('0 MB');
+
+  // Calculate cache size (ExpoImage cache)
+  const calculateCacheSize = async () => {
+    try {
+      // ExpoImage uses its own cache system, so we'll estimate based on AsyncStorage
+      // Check for any manga-related cached data
+      const keys = await AsyncStorage.getAllKeys();
+      const mangaKeys = keys.filter(key => 
+        key.includes('manga') || 
+        key.includes('chapter') || 
+        key.includes('image') ||
+        key.includes('mangaImageCache')
+      );
+      
+      let totalSize = 0;
+      for (const key of mangaKeys) {
+        try {
+          const data = await AsyncStorage.getItem(key);
+          if (data) {
+            totalSize += new Blob([data]).size;
+          }
+        } catch (e) {
+          // Skip keys that can't be read
+        }
+      }
+      
+      const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
+      setCacheSize(`${sizeInMB} MB`);
+    } catch (error) {
+      console.error('Error calculating cache size:', error);
+      setCacheSize('0 MB');
+    }
+  };
 
   // Load settings from AsyncStorage
   useEffect(() => {
@@ -117,6 +153,9 @@ export default function MangaSettingsPage() {
         if (providerData) {
           setProviderPreferences(JSON.parse(providerData));
         }
+
+        // Calculate cache size
+        await calculateCacheSize();
       } catch (error) {
         console.error('Failed to load manga settings:', error);
       }
@@ -124,6 +163,13 @@ export default function MangaSettingsPage() {
 
     loadSettings();
   }, []);
+
+  // Recalculate cache size when providers tab is active
+  useEffect(() => {
+    if (activeTab === 'providers') {
+      calculateCacheSize();
+    }
+  }, [activeTab]);
 
   // Save manga reader preferences
   const saveMangaReaderPreferences = async (newPreferences: MangaReaderPreferences) => {
@@ -583,7 +629,7 @@ export default function MangaSettingsPage() {
           </View>
           <View style={styles.providerOptions}>
             {[
-              { id: 'mangafire', name: 'Mangafire', color: '#f44336' },
+              { id: 'katana', name: 'Katana', color: '#9C27B0' },
               { id: 'mangadex', name: 'MangaDex', color: '#FF6740' }
             ].map(provider => (
               <TouchableOpacity
@@ -598,7 +644,7 @@ export default function MangaSettingsPage() {
                   if (!providerPreferences.autoSelectSource) {
                     saveProviderPreferences({
                       ...providerPreferences,
-                      defaultProvider: provider.id as 'mangafire' | 'mangadex'
+                      defaultProvider: provider.id as 'mangadex' | 'katana'
                     });
                   }
                 }}
@@ -726,13 +772,47 @@ export default function MangaSettingsPage() {
 
         <TouchableOpacity 
           style={[styles.settingItem, { borderBottomColor: currentTheme.colors.border }]}
-          onPress={() => {
-            // Clear cache action
-            AsyncStorage.removeItem('mangaImageCache');
-            alert('Manga image cache cleared successfully');
+          onPress={async () => {
+            try {
+              // Clear ExpoImage cache
+              const { Image } = require('expo-image');
+              await Image.clearMemoryCache();
+              await Image.clearDiskCache();
+              
+              // Clear manga-related AsyncStorage data
+              const keys = await AsyncStorage.getAllKeys();
+              const mangaKeys = keys.filter(key => 
+                key.includes('manga') || 
+                key.includes('chapter') || 
+                key.includes('image') ||
+                key.includes('mangaImageCache') ||
+                key.includes('mangaReaderPreferences') ||
+                key.includes('mangaProviderPreferences')
+              );
+              
+              // Remove manga-related keys but keep settings
+              const keysToRemove = mangaKeys.filter(key => 
+                !key.includes('Preferences') // Keep user preferences
+              );
+              
+              if (keysToRemove.length > 0) {
+                await AsyncStorage.multiRemove(keysToRemove);
+              }
+              
+              await calculateCacheSize(); // Recalculate size after clearing
+              alert('Manga image cache cleared successfully');
+            } catch (error) {
+              console.error('Error clearing cache:', error);
+              alert('Failed to clear cache');
+            }
           }}
         >
-          <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Clear Image Cache</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.settingLabel, { color: currentTheme.colors.text }]}>Clear Image Cache</Text>
+            <Text style={[styles.settingDescription, { color: currentTheme.colors.textSecondary }]}>
+              Current size: {cacheSize}
+            </Text>
+          </View>
           <FontAwesome5 name="trash-alt" size={20} color="#f44336" />
         </TouchableOpacity>
       </View>
