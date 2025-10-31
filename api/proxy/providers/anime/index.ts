@@ -1,8 +1,9 @@
 import { zoroProvider, ZoroHiAnimeProvider } from './zorohianime';
 import { animePaheProvider, AnimePaheProvider } from './animepahe';
+import { xlProvider, XLProvider } from './xl';
 import { Episode, Source, Subtitle, VideoTimings, WatchResponse } from './zorohianime';
 
-export type ProviderType = 'zoro' | 'animepahe';
+export type ProviderType = 'zoro' | 'animepahe' | 'xl';
 
 export interface ProviderResult {
   provider: ProviderType;
@@ -30,6 +31,7 @@ export class AnimeProviderManager {
     this.providers = new Map();
     this.providers.set('zoro', zoroProvider);
     this.providers.set('animepahe', animePaheProvider);
+    this.providers.set('xl', xlProvider);
   }
 
   /**
@@ -48,6 +50,8 @@ export class AnimeProviderManager {
         episodes = await zoroProvider.getEpisodes(anilistId, isDub);
       } else if (provider === 'animepahe' && animeTitle) {
         episodes = await animePaheProvider.searchAndGetEpisodes(animeTitle);
+      } else if (provider === 'xl' && anilistId) {
+        episodes = await xlProvider.getEpisodes(anilistId);
       }
 
       return {
@@ -81,7 +85,9 @@ export class AnimeProviderManager {
       // Always try Zoro if we have AniList ID
       anilistId ? this.getEpisodesFromProvider('zoro', anilistId, undefined, isDub) : null,
       // Try AnimePahe if we have a title
-      searchTitle ? this.getEpisodesFromProvider('animepahe', undefined, searchTitle) : null
+      searchTitle ? this.getEpisodesFromProvider('animepahe', undefined, searchTitle) : null,
+      // Try XL if we have AniList ID
+      anilistId ? this.getEpisodesFromProvider('xl', anilistId, undefined, isDub) : null
     ].filter(Boolean) as Promise<ProviderResult>[];
 
     const results = await Promise.allSettled(promises);
@@ -111,6 +117,8 @@ export class AnimeProviderManager {
       return await this.getEpisodesFromProvider('zoro', anilistId, undefined, isDub);
     } else if (selectedProvider === 'animepahe' && searchTitle) {
       return await this.getEpisodesFromProvider('animepahe', undefined, searchTitle, isDub);
+    } else if (selectedProvider === 'xl' && anilistId) {
+      return await this.getEpisodesFromProvider('xl', anilistId, undefined, isDub);
     } else {
       console.warn(`[ProviderManager] Cannot fetch from ${selectedProvider}: missing required parameters`);
       return {
@@ -127,7 +135,7 @@ export class AnimeProviderManager {
    */
   mergeEpisodesFromProviders(providerResults: ProviderResult[], coverImage?: string): Episode[] {
     const episodeMap = new Map<number, Episode>();
-    const providerPriority: ProviderType[] = ['animepahe', 'zoro']; // AnimePahe has priority
+    const providerPriority: ProviderType[] = ['animepahe', 'zoro', 'xl']; // AnimePahe has priority
 
     // Sort results by provider priority
     const sortedResults = providerResults
@@ -206,6 +214,13 @@ export class AnimeProviderManager {
         }
         
         watchData = await animePaheProvider.getWatchData(animeId, episodeNumber, isDub);
+      } else if (provider === 'xl') {
+        // XL requires AniList ID and episode number
+        if (!anilistId || !episodeNumber) {
+          throw new Error('XL requires AniList ID and episode number');
+        }
+        
+        watchData = await xlProvider.getWatchData(String(anilistId), isDub, episodeNumber);
       } else {
         throw new Error(`Unsupported provider: ${provider}`);
       }
@@ -264,8 +279,8 @@ export class AnimeProviderManager {
     }
     
     // Auto-select is ON - try providers in order of preference
-    // For DUB requests, prioritize Zoro since AnimePahe doesn't provide DUB content
-    let providers: ProviderType[] = isDub ? ['zoro', 'animepahe'] : ['animepahe', 'zoro'];
+    // For DUB requests, prioritize Zoro and XL since AnimePahe doesn't provide DUB content
+    let providers: ProviderType[] = isDub ? ['zoro', 'xl', 'animepahe'] : ['animepahe', 'zoro', 'xl'];
     
     console.log(`[ProviderManager] Will try providers for ${isDub ? 'DUB' : 'SUB'}: ${providers.join(' → ')}`);
     
@@ -314,7 +329,8 @@ export class AnimeProviderManager {
   ): Promise<{ [key in ProviderType]: boolean }> {
     const availability: { [key in ProviderType]: boolean } = {
       zoro: false,
-      animepahe: false
+      animepahe: false,
+      xl: false
     };
 
     // Check Zoro availability
@@ -337,6 +353,16 @@ export class AnimeProviderManager {
       }
     }
 
+    // Check XL availability
+    if (anilistId && episodeNumber) {
+      try {
+        const xlResult = await xlProvider.checkEpisodeAvailability(anilistId, episodeNumber);
+        availability.xl = xlResult.sub || xlResult.dub;
+      } catch (error) {
+        console.error('[ProviderManager] XL availability check failed:', error);
+      }
+    }
+
     return availability;
   }
 }
@@ -346,4 +372,4 @@ export const animeProviderManager = new AnimeProviderManager();
 
 // Re-export types and providers for convenience
 export { Episode, Source, Subtitle, VideoTimings, WatchResponse };
-export { zoroProvider, animePaheProvider }; 
+export { zoroProvider, animePaheProvider, xlProvider }; 

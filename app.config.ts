@@ -60,6 +60,12 @@ export default {
       anilistapi: process.env.anilistapi,
       jikianapi: process.env.jikianapi,
       enokiapi: process.env.enokiapi,
+      // XL (Zuko) API Keys
+      XL_API_KEY_1: process.env.XL_API_KEY_1,
+      XL_API_KEY_2: process.env.XL_API_KEY_2,
+      XL_API_KEY_3: process.env.XL_API_KEY_3,
+      XL_API_KEY_4: process.env.XL_API_KEY_4,
+      XL_API_BASE: process.env.XL_API_BASE,
       eas: {
         projectId: "6e9bc65b-f841-4d04-80d8-2fb3ca903bd8"
       }

@@ -34,50 +34,50 @@ const getTimeBasedGreeting = async (name: string) => {
   
   // Early morning (5 AM - 8 AM)
   const earlyMorningGreetings = [
-    `Rise and shine, ${name}! ☀️`,
-    `Ohayou, ${name}! 🌅`,
-    `Early bird, ${name}? Let's start the day right!`,
-    `Morning anime vibes, ${name}!`,
+    `Rise from the grave, ${name}! 🎃`,
+    `Spooky morning vibes, ${name}! 👻`,
+    `The witching hour begins, ${name}! 🧙`,
+    `Morning monsters need anime too, ${name}! 🦇`,
   ];
 
   // Morning (8 AM - 11 AM)
   const morningGreetings = [
-    `Good morning, ${name}! ☀️`,
-    `Hello ${name}! Ready for some anime?`,
-    `What's on your watchlist today, ${name}?`,
-    `Fresh picks waiting for you, ${name}!`,
+    `Trick or treat time, ${name}! 🎃`,
+    `Hello ${name}! Ready for spooky anime? 👻`,
+    `What's haunting your watchlist today, ${name}? 🕷️`,
+    `Fresh horror picks waiting for you, ${name}! 🧛`,
   ];
 
   // Afternoon (11 AM - 5 PM)
   const afternoonGreetings = [
-    `Hey ${name}! ✨`,
-    `Afternoon anime break, ${name}?`,
-    `Perfect time for a new episode, ${name}!`,
-    `Konnichiwa, ${name}! 🍵`,
+    `Hey ${name}! Time for some Halloween anime! 🎃✨`,
+    `Afternoon horror break, ${name}? 👻`,
+    `Perfect time for a spooky episode, ${name}! 🦇`,
+    `Konnichiwa, ${name}! What's brewing? 🧙‍♀️`,
   ];
 
   // Evening (5 PM - 9 PM)
   const eveningGreetings = [
-    `Good evening, ${name}! 🌙`,
-    `Konbanwa, ${name}! Ready to relax?`,
-    `Evening anime session, ${name}?`,
-    `Your watchlist is waiting, ${name}!`,
+    `Spooky evening, ${name}! 🎃🌙`,
+    `The ghosts are ready for anime, ${name}! 👻`,
+    `Evening anime session, ${name}? 🧛`,
+    `Your haunted watchlist is calling, ${name}! 🦇`,
   ];
 
   // Night (9 PM - 12 AM)
   const nightGreetings = [
-    `Cozy night vibes, ${name}! 🌟`,
-    `Night time is anime time, ${name}!`,
-    `One more episode, ${name}?`,
-    `Late night anime hits different, ${name}!`,
+    `Midnight horror vibes, ${name}! 🎃🌟`,
+    `Night time is spooky anime time, ${name}! 👻`,
+    `One more episode before the witching hour, ${name}? 🧙`,
+    `Late night horror hits different, ${name}! 🦇`,
   ];
 
   // Midnight/Late Night (12 AM - 5 AM)
   const midnightGreetings = [
-    `Night owl ${name}? Same here! 🦉`,
-    `Can't sleep? Anime can help, ${name}!`,
-    `Late night anime hits different, ${name}!`,
-    `The perfect time for manga, ${name}!`,
+    `Night creature ${name}? Same here! 🦉🎃`,
+    `Can't sleep? Spooky anime can help, ${name}! 👻`,
+    `Late night horror hits different, ${name}! 🧛`,
+    `The perfect time for scary manga, ${name}! 🕷️`,
   ];
 
   // Select appropriate greetings array based on time

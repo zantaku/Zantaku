@@ -10,6 +10,7 @@ import { ScrollView } from 'react-native';
   // Removed unused heavy imports - no fallback allowed
 // Removed AnimePahe import - no fallback allowed
 import { animeZoneProvider } from '../../api/animezone';
+import { xlProvider } from '../../api/proxy/providers/anime/xl';
 import { 
   fetchRawByAnilistId, 
   fetchFileDetailsByAccessId, 
@@ -124,6 +125,7 @@ interface Source {
   headers: Record<string, string>;
   isM3U8?: boolean;
   name?: string;
+  provider?: string;
 }
 
 interface Subtitle {
@@ -197,19 +199,49 @@ const MetaChip = ({ label }: { label: string }) => (
   <View style={styles.metaChip}><Text style={styles.metaChipText}>{label}</Text></View>
 );
 
-type RowItem = { label: string; url: string; headers: Record<string,string>; isM3U8: boolean; note?: string };
-  const SourceRow = React.memo(({ selected, item, onPress }: { selected: boolean; item: RowItem; onPress: () => void }) => (
-    <TouchableOpacity onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={`Play ${item.label} ${item.isM3U8 ? 'HLS' : 'MP4'}${item.note?`, ${item.note}`:''}`}>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.rowLabel}>{item.label}</Text>
-      <View style={styles.rowTags}>
-        <Text style={[styles.tag, { borderColor: 'rgba(255,255,255,0.2)'}]}>{item.isM3U8 ? 'HLS' : 'MP4'}</Text>
-        {item.note ? <Text style={[styles.tag, { borderColor: COLOR.primary, color: COLOR.primary }]}>{item.note}</Text> : null}
-      </View>
-    </View>
-    <FontAwesome5 name="play" color={COLOR.primary} size={16} />
-  </TouchableOpacity>
-));
+// Provider colors
+const PROVIDER_COLORS = {
+  xl: '#9C27B0', // Purple/Magenta
+  zencloud: '#FF9800', // Orange
+  animepahe: '#4CAF50', // Green
+  zoro: '#FF6B35', // Orange-Red
+  animezone: '#2196F3', // Blue
+};
+
+type RowItem = { label: string; url: string; headers: Record<string,string>; isM3U8: boolean; note?: string; provider?: string; audioType?: 'sub' | 'dub' };
+  const SourceRow = React.memo(({ selected, item, onPress }: { selected: boolean; item: RowItem; onPress: () => void }) => {
+    const providerColor = item.provider ? PROVIDER_COLORS[item.provider as keyof typeof PROVIDER_COLORS] || COLOR.primary : COLOR.primary;
+    const providerName = item.provider === 'xl' ? 'XL' : item.provider === 'zencloud' ? 'Zencloud' : item.provider === 'animepahe' ? 'AnimePahe' : item.provider === 'zoro' ? 'Zoro' : item.provider === 'animezone' ? 'AnimeZone' : '';
+    
+    return (
+      <TouchableOpacity onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={`Play ${item.label} ${item.isM3U8 ? 'HLS' : 'MP4'}${item.note?`, ${item.note}`:''}${providerName ? ` from ${providerName}` : ''}`}>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={styles.rowLabel}>{item.label}</Text>
+            {providerName && (
+              <Text style={[styles.tag, { borderColor: providerColor, color: providerColor, backgroundColor: `${providerColor}20` }]}>
+                {providerName}
+              </Text>
+            )}
+          </View>
+          <View style={styles.rowTags}>
+            <Text style={[styles.tag, { borderColor: 'rgba(255,255,255,0.2)'}]}>{item.isM3U8 ? 'HLS' : 'MP4'}</Text>
+            {item.audioType && (
+              <Text style={[styles.tag, { 
+                borderColor: item.audioType === 'dub' ? '#FF9800' : '#4CAF50', 
+                color: item.audioType === 'dub' ? '#FF9800' : '#4CAF50',
+                backgroundColor: item.audioType === 'dub' ? '#FF980020' : '#4CAF5020'
+              }]}>
+                {item.audioType.toUpperCase()}
+              </Text>
+            )}
+            {item.note ? <Text style={[styles.tag, { borderColor: COLOR.primary, color: COLOR.primary }]}>{item.note}</Text> : null}
+          </View>
+        </View>
+        <FontAwesome5 name="play" color={providerColor} size={16} />
+      </TouchableOpacity>
+    );
+  });
 
 export default function EpisodeSourcesModal({ 
   visible, 
@@ -280,6 +312,7 @@ export default function EpisodeSourcesModal({
     isDefault: boolean;
     headers: Record<string, string>;
     isZoroServer?: boolean;
+    audioType?: 'sub' | 'dub';
   }[]>([]);
   const [serverProcessingMessage, setServerProcessingMessage] = useState<string>('');
   
@@ -399,7 +432,7 @@ export default function EpisodeSourcesModal({
       setZencloudFile(null);
       setZencloudError(null);
     }
-  }, [visible, skipTypeSelection, currentProvider, anilistId, episodeNumber, fetchZencloudData]);
+  }, [visible, skipTypeSelection, currentProvider, anilistId, episodeNumber]);
 
   const formatSourceWithHeaders = (source: any, apiHeaders: any, sourceType: 'sub' | 'dub', provider?: string): Source => {
     console.log(`[FORMAT_SOURCE] 🔧 Formatting source for provider: ${provider}`);
@@ -434,6 +467,15 @@ export default function EpisodeSourcesModal({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36'
       };
       console.log(`[FORMAT_SOURCE] ✅ [ANIMEZONE] Using minimal headers for direct streaming`);
+    } else if (provider === 'xl') {
+      // XL (Zuko): Use Zuko-specific headers
+      headers = {
+        'Referer': 'https://zuko.to/',
+        'Origin': 'https://zuko.to',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        ...(apiHeaders || {})
+      };
+      console.log(`[FORMAT_SOURCE] ✅ [XL] Using XL headers for streaming`);
     } else {
       // Zoro via Kuroji: trust payload; only apply headers when not already proxied
       headers = isKurojiProxied ? {} : (apiHeaders || {});
@@ -459,7 +501,8 @@ export default function EpisodeSourcesModal({
       quality: displayQuality,
       type: source.type || sourceType, // Preserve original source type if available, otherwise use sourceType
       headers: headers,
-      isM3U8: source.url.includes('.m3u8') || source.isM3U8
+      isM3U8: source.url.includes('.m3u8') || source.isM3U8,
+      provider: provider,
     };
     
     console.log(`[FORMAT_SOURCE] 📊 Formatted source:`, {
@@ -717,6 +760,160 @@ export default function EpisodeSourcesModal({
             // Zoro is currently disabled - working on fixing
             console.log(`❌ [ZORO] Skipping Zoro: Currently disabled - working on fixing`);
             continue;
+          } else if (provider === 'xl') {
+            // XL (Zuko) provider - this should ALWAYS be used when currentProvider === 'xl'
+            console.log(`\n🎯 [XL] =================== XL PROVIDER FLOW START ===================`);
+            console.log(`🎯 [XL] Using XL provider for streaming (currentProvider: ${currentProvider})`);
+            console.log(`🎯 [XL] Episode details:`, {
+              episodeId,
+              episodeNumber: episodeNum,
+              animeTitle,
+              anilistId,
+              type,
+              isDub: type === 'dub'
+            });
+            
+            if (!anilistId) {
+              console.log(`❌ [XL] Skipping: AniList ID required`);
+              console.log(`🎯 [XL] =================== XL PROVIDER FLOW END (NO ANILIST ID) ===================\n`);
+              continue;
+            }
+            
+            try {
+              console.log(`📡 [XL] Step 1: Fetching watch data for AniList ID: ${anilistId}, Episode: ${episodeNum}, Type: ${type}`);
+              
+              const watchData = await xlProvider.getWatchData(String(anilistId), type === 'dub', episodeNum!);
+              
+              console.log(`📊 [XL] getWatchData response:`, {
+                hasData: !!watchData,
+                dataType: typeof watchData,
+                hasSources: !!watchData?.sources,
+                sourcesCount: watchData?.sources?.length || 0,
+                hasSubtitles: !!watchData?.subtitles,
+                subtitlesCount: watchData?.subtitles?.length || 0,
+                hasHeaders: !!watchData?.headers,
+                rawData: watchData
+              });
+              
+              if (watchData && Array.isArray(watchData.sources) && watchData.sources.length > 0) {
+                console.log(`✅ [XL] Found ${watchData.sources.length} sources`);
+                console.log(`📝 [XL] Sources details:`, watchData.sources.map((s: any, i: number) => ({
+                  index: i + 1,
+                  quality: s?.quality,
+                  type: s?.type,
+                  url: s?.url ? `${s.url.substring(0, 50)}...` : 'No URL',
+                  hasUrl: !!s?.url,
+                  isM3U8: s?.url?.includes('.m3u8') || false
+                })));
+                
+                console.log(`🔧 [XL] Step 2: Formatting sources with headers...`);
+                const formattedSources = watchData.sources.map((source: any, index: number) => {
+                  const formatted = formatSourceWithHeaders(source, watchData.headers || {}, type, 'xl');
+                  console.log(`🔧 [XL] Formatted source ${index + 1}:`, {
+                    originalQuality: source.quality,
+                    formattedQuality: formatted.quality,
+                    originalType: source.type,
+                    formattedType: formatted.type,
+                    hasUrl: !!formatted.url,
+                    urlPreview: formatted.url ? `${formatted.url.substring(0, 50)}...` : 'No URL',
+                    hasHeaders: !!formatted.headers,
+                    headerKeys: formatted.headers ? Object.keys(formatted.headers) : [],
+                    isM3U8: formatted.isM3U8
+                  });
+                  return formatted;
+                });
+                
+                console.log(`✅ [XL] Successfully formatted ${formattedSources.length} sources`);
+                
+                // Handle subtitles
+                const subs = Array.isArray(watchData.subtitles) ? watchData.subtitles : [];
+                console.log(`🎞️ [XL] Subtitles:`, {
+                  hasSubtitles: !!watchData.subtitles,
+                  subtitlesCount: subs.length,
+                  subtitlesType: typeof watchData.subtitles,
+                  isArray: Array.isArray(watchData.subtitles),
+                  rawSubtitles: watchData.subtitles
+                });
+                
+                if (subs.length > 0) {
+                  console.log(`📝 [XL] Subtitle details:`, subs.map((s: any, i: number) => ({
+                    index: i + 1,
+                    lang: s?.lang,
+                    language: s?.language,
+                    url: s?.url ? `${s.url.substring(0, 50)}...` : 'No URL',
+                    hasUrl: !!s?.url,
+                    hasLang: !!(s?.lang || s?.language)
+                  })));
+                }
+                
+                setSources(formattedSources);
+                setSubtitles(subs);
+                subtitlesRef.current = subs;
+                
+                // Handle timings
+                console.log(`⏱️ [XL] Fetching AniSkip timings for episode ${episodeNum}...`);
+                const aniTimings = await fetchAniSkipTimings(malId, episodeNum!);
+                console.log(`⏱️ [XL] AniSkip timings result:`, {
+                  hasTimings: !!aniTimings,
+                  timings: aniTimings,
+                  malId,
+                  episodeNum
+                });
+                setTimings(aniTimings || null);
+                
+                // Build quality options
+                const qualityOptions = formattedSources.map((source: Source, index: number) => ({
+                  quality: source.quality || `Source ${index + 1}`,
+                  url: source.url,
+                  headers: source.headers,
+                  isDefault: index === 0,
+                  isZoroServer: false,
+                  audioType: source.type || type
+                }));
+                
+                console.log(`📋 [XL] Quality options built:`, {
+                  optionsCount: qualityOptions.length,
+                  options: qualityOptions.map((opt, i) => ({
+                    index: i + 1,
+                    quality: opt.quality,
+                    hasUrl: !!opt.url,
+                    hasHeaders: !!opt.headers,
+                    isDefault: opt.isDefault
+                  }))
+                });
+                
+                setAvailableQualities(qualityOptions);
+                setShowQualitySelection(true);
+                setLoading(false);
+                
+                console.log(`✅ [XL] SUCCESS: Successfully loaded ${formattedSources.length} sources from XL`);
+                console.log(`🎯 [XL] =================== XL PROVIDER FLOW END (SUCCESS) ===================\n`);
+                return;
+                
+              } else {
+                console.log(`❌ [XL] No valid sources found in watchData`);
+                console.log(`❌ [XL] watchData structure:`, {
+                  hasData: !!watchData,
+                  dataType: typeof watchData,
+                  hasSources: !!watchData?.sources,
+                  sourcesType: typeof watchData?.sources,
+                  sourcesIsArray: Array.isArray(watchData?.sources),
+                  sourcesLength: watchData?.sources?.length || 0,
+                  rawSources: watchData?.sources
+                });
+                console.log(`🎯 [XL] =================== XL PROVIDER FLOW END (NO SOURCES) ===================\n`);
+              }
+              
+            } catch (xlError: any) {
+              console.log(`❌ [XL] Error in getWatchData:`, {
+                errorMessage: xlError?.message,
+                errorCode: xlError?.code,
+                errorType: typeof xlError,
+                errorStack: xlError?.stack?.split('\n').slice(0, 5).join('\n'),
+                fullError: xlError
+              });
+              console.log(`🎯 [XL] =================== XL PROVIDER FLOW END (WATCH DATA ERROR) ===================\n`);
+            }
           } else if (provider === 'animezone') {
             // CRITICAL FIX: AnimeZone (HolyShit) provider - this should ALWAYS be used when currentProvider === 'animezone'
             console.log(`\n🎯 [ANIMEZONE] =================== ANIMEZONE PROVIDER FLOW START ===================`);
@@ -894,7 +1091,8 @@ export default function EpisodeSourcesModal({
                     url: source.url,
                     headers: source.headers,
                     isDefault: index === 0,
-                    isZoroServer: false
+                    isZoroServer: false,
+                    audioType: source.type || type
                   }));
                   
                   console.log(`📋 [ANIMEZONE] Quality options built:`, {
@@ -981,7 +1179,9 @@ export default function EpisodeSourcesModal({
       
       // More specific error message based on current provider
       let errorMessage = `No ${type.toUpperCase()} sources found from ${currentProvider || 'any provider'}`;
-      if (currentProvider === 'animezone') {
+      if (currentProvider === 'xl') {
+        errorMessage = `XL couldn't find streaming sources for this episode. Try switching to a different provider.`;
+      } else if (currentProvider === 'animezone') {
         errorMessage = `AnimeZone couldn't find streaming sources for this episode. Try switching to a different provider.`;
       } else if (currentProvider === 'animepahe') {
         errorMessage = `AnimePahe provider is currently disabled. Use Zencloud below for premium streaming.`;
@@ -1249,9 +1449,8 @@ export default function EpisodeSourcesModal({
 
   // Removed Zoro server selection - no fallback allowed
 
-  // Zencloud section component - always visible
+  // Zencloud section component
   const ZencloudSection = () => {
-    
     const handleZencloudPlay = () => {
       if (!zencloudFile) return;
       
@@ -1279,7 +1478,8 @@ export default function EpisodeSourcesModal({
         quality: 'Zencloud HLS',
         type: type, // Use current selected type (sub/dub)
         headers: {}, // Zencloud URLs are pre-signed, no additional headers needed
-        isM3U8: true
+        isM3U8: true,
+        provider: 'zencloud'
       };
       
       // Convert Zencloud subtitles to the expected format
@@ -1342,14 +1542,16 @@ export default function EpisodeSourcesModal({
       );
     };
     
+    if (!zencloudFile && !zencloudLoading && !zencloudError) {
+      return null; // Don't show empty Zencloud section
+    }
+
     return (
-      <View style={styles.zencloudSection}>
-      
-        
+      <View style={{ marginTop: currentProvider === 'xl' ? 0 : 16 }}>
         {zencloudLoading && (
           <View style={styles.zencloudLoading}>
-            <ActivityIndicator size="small" color="#FFD700" />
-            <Text style={styles.zencloudLoadingText}>Loading Zen data...</Text>
+            <ActivityIndicator size="small" color={PROVIDER_COLORS.zencloud} />
+            <Text style={styles.zencloudLoadingText}>Loading Zencloud data...</Text>
           </View>
         )}
         
@@ -1366,19 +1568,16 @@ export default function EpisodeSourcesModal({
         )}
         
         {zencloudFile && (
-          <View style={styles.zencloudContent}>
-            <TouchableOpacity 
-              style={styles.zencloudPlayButton}
-              onPress={handleZencloudPlay}
-            >
-              <FontAwesome5 name="play" size={14} color="#000" style={{ marginRight: 8 }} />
-              <Text style={styles.zencloudPlayText}>Play</Text>
-              <View style={styles.zencloudQualityBadge}>
-                <Text style={styles.zencloudQualityText}>HLS</Text>
-              </View>
-            </TouchableOpacity>
-            
-          </View>
+          <TouchableOpacity 
+            style={styles.zencloudPlayButton}
+            onPress={handleZencloudPlay}
+          >
+            <FontAwesome5 name="play" size={14} color="#000" style={{ marginRight: 8 }} />
+            <Text style={styles.zencloudPlayText}>Play Zencloud</Text>
+            <View style={styles.zencloudQualityBadge}>
+              <Text style={styles.zencloudQualityText}>HLS</Text>
+            </View>
+          </TouchableOpacity>
         )}
       </View>
     );
@@ -1395,41 +1594,58 @@ export default function EpisodeSourcesModal({
       headers: q.headers,
       isM3U8: q.url.includes('.m3u8'),
       note: idx === 0 ? 'Recommended' : undefined,
+      provider: currentProvider || undefined,
+      audioType: q.audioType,
     }));
 
     return (
-      <View style={{ width: '100%', marginTop: 8 }}>
-        {currentProvider === 'animezone' && (
-          <View style={styles.warningBox}>
-            <Text style={styles.warningText}>⚠️ New API - Some anime may not work properly</Text>
-          </View>
-        )}
-        <Text style={styles.bodyTitle}>{availableQualities.length} {availableQualities.length>1?'sources':'source'} available</Text>
+      <View style={{ width: '100%' }}>
+        {/* Source Count */}
+        <Text style={[styles.bodyTitle, { marginBottom: 12 }]}>
+          {availableQualities.length} {availableQualities.length > 1 ? 'sources' : 'source'} available
+        </Text>
+        
+        {/* Source List */}
         <FlatList
           data={data}
           keyExtractor={(item, index) => `${item.label}-${index}`}
           renderItem={({ item, index }) => (
             <SourceRow
-              selected={index===0}
+              selected={index === 0}
               item={item}
               onPress={() => {
-                console.log(`🔍 [ANIMEZONE] Source selected:`, {
+                console.log(`🔍 Source selected:`, {
                   quality: item.label,
                   type: type,
+                  provider: currentProvider,
                   url: item.url.substring(0, 50) + '...'
                 });
-                handleSourceSelect({ url: item.url, quality: item.label, type: type, headers: item.headers, isM3U8: item.isM3U8 });
+                handleSourceSelect({ 
+                  url: item.url, 
+                  quality: item.label, 
+                  type: type, 
+                  headers: item.headers, 
+                  isM3U8: item.isM3U8 
+                });
               }}
             />
           )}
-          style={{ maxHeight: 360 }}
+          style={{ maxHeight: 320, marginBottom: 12 }}
+          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         />
+        
+        {/* Footer Actions */}
         <View style={styles.footerRow}>
-          <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={() => handleTypeSelect(type)}>
+          <TouchableOpacity 
+            style={[styles.secondaryBtn, { flex: 1 }]} 
+            onPress={() => handleTypeSelect(type)}
+          >
             <Text style={styles.secondaryBtnText}>Refresh</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.smallHint}>HLS adapts quality automatically.</Text>
+        
+        {/* Hint */}
+        <Text style={styles.smallHint}>HLS adapts quality automatically</Text>
       </View>
     );
   };
@@ -1603,16 +1819,95 @@ export default function EpisodeSourcesModal({
             <View style={{ width: 32 }} />
           </View>
 
-          {/* Meta - Zencloud only */}
-          <View style={styles.metaRow}> 
-            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>Audio: ALL</Text></View>
-            <View style={styles.metaStatic}><Text style={styles.metaStaticText}>ALL</Text></View>
-          </View>
-
-          {/* Body - Zencloud Only */}
+          {/* Body */}
           <View style={{ width: '100%' }}>
-            {/* ZENCLOUD SECTION - ALWAYS RENDER */}
-            <ZencloudSection />
+            {/* Loading State */}
+            {loading && !showQualitySelection && (
+              <View style={styles.loadingSimple}>
+                <Text style={styles.bodyTitle}>Fetching sources…</Text>
+                <ActivityIndicator size="small" color={COLOR.primary} style={{ marginTop: 8 }} />
+              </View>
+            )}
+
+            {/* Error State */}
+            {!loading && error && !showQualitySelection && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTextPlain}>{error}</Text>
+              </View>
+            )}
+
+            {/* XL Provider Sources */}
+            {currentProvider === 'xl' && showQualitySelection && availableQualities.length > 0 && (
+              <View style={{ marginBottom: 20 }}>
+                {/* Provider Header */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <View style={{ 
+                    width: 3, 
+                    height: 16, 
+                    backgroundColor: PROVIDER_COLORS.xl, 
+                    borderRadius: 1.5 
+                  }} />
+                  <Text style={[styles.bodyTitle, { 
+                    color: PROVIDER_COLORS.xl, 
+                    fontSize: 15,
+                    marginBottom: 0 
+                  }]}>
+                    XL (Zuko)
+                  </Text>
+                </View>
+                
+                {/* Warning for XL - moved to top */}
+                <View style={[styles.warningBox, { marginBottom: 12 }]}>
+                  <Text style={styles.warningText}>⚠️ Some anime may be limited and quality varies</Text>
+                </View>
+                
+                <QualitySelectionView />
+              </View>
+            )}
+            
+            {/* Other Provider Sources */}
+            {currentProvider !== 'xl' && showQualitySelection && availableQualities.length > 0 && (
+              <View style={{ marginBottom: 20 }}>
+                {currentProvider === 'animezone' && (
+                  <View style={[styles.warningBox, { marginBottom: 12 }]}>
+                    <Text style={styles.warningText}>⚠️ New API - Some anime may not work properly</Text>
+                  </View>
+                )}
+                <QualitySelectionView />
+              </View>
+            )}
+            
+            {/* Zencloud Section */}
+            {currentProvider === 'xl' && zencloudFile && (
+              <View style={{ 
+                marginTop: 20, 
+                paddingTop: 20, 
+                borderTopWidth: 1, 
+                borderTopColor: 'rgba(255,255,255,0.08)' 
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <View style={{ 
+                    width: 3, 
+                    height: 16, 
+                    backgroundColor: PROVIDER_COLORS.zencloud, 
+                    borderRadius: 1.5 
+                  }} />
+                  <Text style={[styles.bodyTitle, { 
+                    color: PROVIDER_COLORS.zencloud, 
+                    fontSize: 15,
+                    marginBottom: 0 
+                  }]}>
+                    Alternative: Zencloud
+                  </Text>
+                </View>
+                <ZencloudSection />
+              </View>
+            )}
+
+            {/* Zencloud when not XL */}
+            {currentProvider !== 'xl' && (
+              <ZencloudSection />
+            )}
           </View>
         </Animated.View>
       </BlurView>
@@ -1663,11 +1958,21 @@ const styles = StyleSheet.create({
   segmentText: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' },
   segmentTextActive: { color: '#fff' },
   segmentTextUnavailable: { color: 'rgba(255,255,255,0.5)' },
-  bodyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', marginBottom: 8 },
+  bodyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', marginBottom: 8 },
   loadingSimple: { paddingVertical: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
+  row: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 12, 
+    paddingHorizontal: 4,
+    gap: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
   rowLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  rowTags: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  rowTags: { flexDirection: 'row', gap: 6, marginTop: 4 },
   tag: { color: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, fontSize: 11 },
   footerRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   primaryBtn: { flex: 1, backgroundColor: COLOR.primary, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
@@ -1678,18 +1983,19 @@ const styles = StyleSheet.create({
   errorBox: { paddingVertical: 12 },
   errorTextPlain: { color: COLOR.danger, fontSize: 13, marginBottom: 6 },
   warningBox: { 
-    backgroundColor: 'rgba(255, 176, 32, 0.1)', 
+    backgroundColor: 'rgba(255, 176, 32, 0.08)', 
     borderWidth: 1, 
-    borderColor: 'rgba(255, 176, 32, 0.3)', 
+    borderColor: 'rgba(255, 176, 32, 0.25)', 
     borderRadius: 8, 
-    padding: 8, 
+    padding: 10, 
     marginBottom: 12 
   },
   warningText: { 
     color: COLOR.warning, 
-    fontSize: 12, 
-    fontWeight: '600', 
-    textAlign: 'center' 
+    fontSize: 11, 
+    fontWeight: '500', 
+    textAlign: 'left',
+    lineHeight: 16
   },
   loadingContainer: {
     alignItems: 'center',
@@ -2218,10 +2524,7 @@ const styles = StyleSheet.create({
   
   // Zencloud Section Styles
   zencloudSection: {
-    marginTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 215, 0, 0.2)',
-    paddingTop: 16,
+    marginTop: 0,
   },
   zencloudHeader: {
     marginBottom: 12,

@@ -457,7 +457,11 @@ export default function AppSettingPage({ onClose }: AppSettingPageProps) {
           (!user || user.isAnonymous) && styles.copyrightSectionGuest
         ]}>
           <TouchableOpacity 
-            style={[styles.footerContent, { backgroundColor: currentTheme.colors.surface || 'rgba(0,0,0,0.02)' }]}
+            style={[styles.footerContent, { 
+              backgroundColor: isDarkMode 
+                ? 'rgba(139, 69, 19, 0.25)' // Dark mode: dark orange/brown Halloween color
+                : 'rgba(255, 140, 0, 0.15)' // Light mode: light orange Halloween color
+            }]}
             onPress={() => router.push({ pathname: '/webview', params: { url: 'https://www.zantaku.com' } })}
             activeOpacity={0.7}
           >
